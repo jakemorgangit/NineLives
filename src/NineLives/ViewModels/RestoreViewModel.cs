@@ -1,0 +1,1113 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Microsoft.Win32;
+using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Services;
+
+namespace Blackcat.NineLives.ViewModels;
+
+public partial class RestoreViewModel : ViewModelBase
+{
+    private readonly BlobStorageService _blobService;
+    private readonly SqlServerService _sqlService;
+    private readonly BackupChainBuilder _chainBuilder;
+    private readonly RestoreScriptGenerator _scriptGenerator;
+    private readonly CredentialStore _credentialStore;
+
+    private List<BackupFileInfo> _allBackups = [];
+    private List<BackupSet> _allSets = [];
+    private List<BackupSet> _dbSets = [];
+
+    #region Observable Properties
+
+    [ObservableProperty]
+    private ObservableCollection<BlobContainerConfig> _containers = [];
+
+    [ObservableProperty]
+    private BlobContainerConfig? _selectedContainer;
+
+    [ObservableProperty]
+    private bool _backupsLoaded;
+
+    [ObservableProperty]
+    private ObservableCollection<string> _discoveredServers = [];
+
+    [ObservableProperty]
+    private string? _selectedServerName;
+
+    [ObservableProperty]
+    private ObservableCollection<string> _discoveredDatabases = [];
+
+    [ObservableProperty]
+    private string? _selectedDatabaseName;
+
+    [ObservableProperty]
+    private string _targetDatabaseName = string.Empty;
+
+    // Restore points (replaces continuous slider)
+    [ObservableProperty]
+    private ObservableCollection<RestorePoint> _restorePoints = [];
+
+    [ObservableProperty]
+    private RestorePoint? _selectedRestorePoint;
+
+    [ObservableProperty]
+    private bool _hasRestorePoints;
+
+    [ObservableProperty]
+    private string _restoreWindowText = string.Empty;
+
+    [ObservableProperty]
+    private ObservableCollection<TimelineTick> _timelineTicks = [];
+
+    [ObservableProperty]
+    private int _timelineHeight = 60;
+
+    // Restore chain
+    [ObservableProperty]
+    private BackupChain? _restoreChain;
+
+    [ObservableProperty]
+    private ObservableCollection<BackupFileInfo> _chainFiles = [];
+
+    [ObservableProperty]
+    private string _chainSummary = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasValidChain;
+
+    [ObservableProperty]
+    private bool _showChainDetails;
+
+    [ObservableProperty]
+    private ObservableCollection<BackupSet> _chainSets = [];
+
+    // Options
+    [ObservableProperty]
+    private bool _withReplace = true;
+
+    [ObservableProperty]
+    private RecoveryMode _recoveryMode = RecoveryMode.Recovery;
+
+    public bool IsStandbyMode => RecoveryMode == RecoveryMode.Standby;
+
+    // OnRecoveryModeChanged is defined later to also update restore summary
+
+    [ObservableProperty]
+    private string _standbyFilePath = string.Empty;
+
+    [ObservableProperty]
+    private bool _disconnectSessions = true;
+
+    [ObservableProperty]
+    private int _statsPercent = 10;
+
+    [ObservableProperty]
+    private bool _keepReplication;
+
+    [ObservableProperty]
+    private bool _enableBroker;
+
+    [ObservableProperty]
+    private bool _newBroker;
+
+    [ObservableProperty]
+    private bool _useWithMove;
+
+    public bool ShowMoveOptions => UseWithMove;
+
+    public ServerConnection? ConnectedServer { get; set; }
+
+    partial void OnUseWithMoveChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowMoveOptions));
+        if (value)
+            _ = FetchDefaultPathsAsync();
+        UpdateRestoreSummary();
+    }
+
+    [ObservableProperty]
+    private string _moveDataFilePath = string.Empty;
+
+    [ObservableProperty]
+    private string _moveLogFilePath = string.Empty;
+
+    [ObservableProperty]
+    private bool _isFetchingPaths;
+
+    [ObservableProperty]
+    private bool _pathsFromServer;
+
+    [ObservableProperty]
+    private string _pathSourceText = string.Empty;
+
+    [ObservableProperty]
+    private string _restoreSummaryText = string.Empty;
+
+    [ObservableProperty]
+    private string _sqlCredentialName = string.Empty;
+
+    // Blob credential status on connected server (credential must exist for RESTORE FROM URL)
+    [ObservableProperty]
+    private bool? _credentialExistsOnServer; // null = not checked
+
+    [ObservableProperty]
+    private bool _credentialIsValidSas; // true when exists and identity is SHARED ACCESS SIGNATURE
+
+    [ObservableProperty]
+    private string _credentialStatusMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _isCheckingCredential;
+
+    [ObservableProperty]
+    private bool _credentialSectionVisible;
+
+    partial void OnSelectedContainerChanged(BlobContainerConfig? value)
+    {
+        if (value != null)
+            SqlCredentialName = value.ContainerUrl;
+        CredentialSectionVisible = value != null;
+        _ = RefreshCredentialStatusAsync();
+    }
+
+    /// <summary>Call when ConnectedServer or SelectedContainer changes so credential status is updated.</summary>
+    public async Task RefreshCredentialStatusAsync()
+    {
+        CredentialSectionVisible = SelectedContainer != null;
+        if (ConnectedServer == null || SelectedContainer == null)
+        {
+            CredentialExistsOnServer = null;
+            CredentialStatusMessage = string.Empty;
+            CredentialIsValidSas = false;
+            return;
+        }
+
+        IsCheckingCredential = true;
+        CredentialStatusMessage = "Checking...";
+        var server = ConnectedServer!;
+        try
+        {
+            var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
+            CredentialExistsOnServer = exists;
+            CredentialIsValidSas = exists && isSas;
+            CredentialStatusMessage = exists
+                ? (isSas ? "Credential is present and valid (SHARED ACCESS SIGNATURE)." : "Credential exists but is not a SAS credential; restore may fail.")
+                : "Credential is not present on this server. Restore will fail unless you create it.";
+        }
+        catch (Exception ex)
+        {
+            CredentialExistsOnServer = null;
+            CredentialIsValidSas = false;
+            CredentialStatusMessage = $"Could not check credential: {ex.Message}";
+        }
+        finally
+        {
+            IsCheckingCredential = false;
+            CreateCredentialOnServerCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    [ObservableProperty]
+    private ObservableCollection<FileMoveOption> _fileMoves = [];
+
+    [ObservableProperty]
+    private bool _hasFileMoves;
+
+    /// <summary>Logical files from RESTORE FILELISTONLY for accurate WITH MOVE.</summary>
+    [ObservableProperty]
+    private ObservableCollection<FileMoveOption> _fetchedFileMoves = [];
+
+    [ObservableProperty]
+    private bool _hasFetchedFileMoves;
+
+    /// <summary>RESTORE HEADERONLY summary for the selected chain.</summary>
+    [ObservableProperty]
+    private string? _backupMetadataSummary;
+
+    // Script output
+    [ObservableProperty]
+    private string _generatedScript = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasScript;
+
+    // Execution
+    [ObservableProperty]
+    private bool _isConnectedToServer;
+
+    [ObservableProperty]
+    private string _connectedServerName = string.Empty;
+
+    [ObservableProperty]
+    private bool _isExecuting;
+
+    [ObservableProperty]
+    private string _executionLog = string.Empty;
+
+    [ObservableProperty]
+    private bool _executionComplete;
+
+    [ObservableProperty]
+    private bool _executionSuccess;
+
+    [ObservableProperty]
+    private bool _isExecuteArmed;
+
+    [ObservableProperty]
+    private int _executeCountdown;
+
+    [ObservableProperty]
+    private string _executeButtonText = "Execute on Server";
+
+    private CancellationTokenSource? _armTimeoutCts;
+
+    // Backup summary
+    [ObservableProperty]
+    private int _fullCount;
+
+    [ObservableProperty]
+    private int _diffCount;
+
+    [ObservableProperty]
+    private int _logCount;
+
+    [ObservableProperty]
+    private int _setCount;
+
+    #endregion
+
+    public RestoreViewModel(
+        BlobStorageService blobService,
+        SqlServerService sqlService,
+        BackupChainBuilder chainBuilder,
+        RestoreScriptGenerator scriptGenerator,
+        CredentialStore credentialStore)
+    {
+        _blobService = blobService;
+        _sqlService = sqlService;
+        _chainBuilder = chainBuilder;
+        _scriptGenerator = scriptGenerator;
+        _credentialStore = credentialStore;
+        RefreshContainers();
+    }
+
+    public void RefreshContainers()
+    {
+        var previous = SelectedContainer?.Name;
+        var config = _credentialStore.LoadConfig();
+        Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
+        foreach (var c in Containers)
+        {
+            var sas = _credentialStore.GetSasToken(c);
+            if (sas != null) c.CacheSasToken(sas);
+        }
+        if (previous != null)
+            SelectedContainer = Containers.FirstOrDefault(c => c.Name == previous);
+        if (SelectedContainer == null && Containers.Count > 0)
+            SelectedContainer = Containers[0];
+    }
+
+    partial void OnSelectedServerNameChanged(string? value)
+    {
+        if (_allSets.Count == 0) return;
+
+        var filtered = _allSets.AsEnumerable();
+        if (!string.IsNullOrEmpty(value))
+            filtered = filtered.Where(s =>
+            {
+                var parts = value.Split('\\', 2);
+                return string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
+            });
+
+        var dbs = filtered
+            .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
+            .Select(s => s.DatabaseName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        DiscoveredDatabases = new ObservableCollection<string>(dbs);
+        if (DiscoveredDatabases.Count > 0)
+            SelectedDatabaseName = DiscoveredDatabases[0];
+    }
+
+    partial void OnSelectedDatabaseNameChanged(string? value)
+    {
+        if (value == null || _allSets.Count == 0) return;
+
+        _dbSets = _allSets
+            .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (!string.IsNullOrEmpty(SelectedServerName))
+        {
+            var parts = SelectedServerName.Split('\\', 2);
+            _dbSets = _dbSets.Where(s =>
+                string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
+        DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
+        LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
+        SetCount = _dbSets.Count;
+
+        TargetDatabaseName = value;
+        AutoPopulateMoveDefaults();
+
+        ComputeAndDisplayRestorePoints();
+    }
+
+    [RelayCommand]
+    private void SelectRestorePoint(RestorePoint? point)
+    {
+        if (point != null)
+            SelectedRestorePoint = point;
+    }
+
+    [RelayCommand]
+    private void ToggleChainDetails()
+    {
+        ShowChainDetails = !ShowChainDetails;
+    }
+
+    partial void OnSelectedRestorePointChanged(RestorePoint? value)
+    {
+        ShowChainDetails = false;
+        if (value == null)
+        {
+            RestoreChain = null;
+            HasValidChain = false;
+            ChainFiles.Clear();
+            ChainSets.Clear();
+            ChainSummary = string.Empty;
+            FetchedFileMoves = [];
+            HasFetchedFileMoves = false;
+            BackupMetadataSummary = null;
+            FetchLogicalNamesCommand.NotifyCanExecuteChanged();
+            InspectBackupMetadataCommand.NotifyCanExecuteChanged();
+            CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
+            CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        var chain = _chainBuilder.BuildChainFromRestorePoint(value);
+        RestoreChain = chain;
+        HasValidChain = true;
+        ChainFiles = new ObservableCollection<BackupFileInfo>(chain.AllFiles);
+        ChainSets = new ObservableCollection<BackupSet>(chain.AllSets);
+        ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {value.Timestamp:yyyy-MM-dd HH:mm:ss}";
+        UpdateRestoreSummary();
+        FetchLogicalNamesCommand.NotifyCanExecuteChanged();
+        InspectBackupMetadataCommand.NotifyCanExecuteChanged();
+        CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
+        CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand]
+    private async Task LoadBackupsAsync()
+    {
+        if (SelectedContainer == null)
+        {
+            SetError("Please select a container first.");
+            return;
+        }
+
+        IsBusy = true;
+        ClearStatus();
+        try
+        {
+            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer);
+            _allSets = _blobService.GroupIntoBackupSets(_allBackups);
+
+            var servers = _blobService.GetDiscoveredServers(_allBackups);
+            DiscoveredServers = new ObservableCollection<string>(servers);
+
+            var dbs = _blobService.GetDiscoveredDatabases(_allBackups);
+            DiscoveredDatabases = new ObservableCollection<string>(dbs);
+            BackupsLoaded = _allBackups.Count > 0;
+
+            if (DiscoveredServers.Count > 0)
+            {
+                SelectedServerName = DiscoveredServers[0];
+            }
+            else if (DiscoveredDatabases.Count > 0)
+            {
+                SelectedDatabaseName = DiscoveredDatabases[0];
+            }
+            else
+            {
+                _dbSets = _allSets;
+                FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
+                DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
+                LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
+                SetCount = _dbSets.Count;
+                ComputeAndDisplayRestorePoints();
+            }
+
+            SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to load backups: {ex.Message}");
+            BackupsLoaded = false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void ComputeAndDisplayRestorePoints()
+    {
+        var points = _chainBuilder.ComputeRestorePoints(_dbSets);
+
+        // Compute timeline positions (0-1)
+        if (points.Count > 1)
+        {
+            var minTicks = points.First().Timestamp.Ticks;
+            var maxTicks = points.Last().Timestamp.Ticks;
+            var range = (double)(maxTicks - minTicks);
+            foreach (var p in points)
+                p.TimelinePosition = range > 0 ? (p.Timestamp.Ticks - minTicks) / range : 0.5;
+        }
+        else if (points.Count == 1)
+        {
+            points[0].TimelinePosition = 0.5;
+        }
+
+        // Compute vertical stacking rows to avoid horizontal overlap
+        ComputeRows(points);
+
+        RestorePoints = new ObservableCollection<RestorePoint>(points);
+        HasRestorePoints = points.Count > 0;
+
+        if (points.Count > 0)
+        {
+            var first = points.First().Timestamp;
+            var last = points.Last().Timestamp;
+            RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
+
+            // Compute time-interval tick marks
+            TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
+
+            // Timeline height based on max row
+            int maxRow = points.Max(p => p.Row);
+            TimelineHeight = Math.Max(50, 30 + (maxRow + 1) * 18);
+
+            SelectedRestorePoint = points.Last();
+            ClearStatus();
+        }
+        else
+        {
+            RestoreWindowText = string.Empty;
+            TimelineTicks.Clear();
+            TimelineHeight = 50;
+            SetError("No valid restore points found. Ensure there is at least one full backup.");
+        }
+    }
+
+    private static void ComputeRows(List<RestorePoint> points)
+    {
+        const double minSeparation = 0.025;
+        var rows = new List<List<double>>();
+
+        foreach (var p in points)
+        {
+            bool placed = false;
+            for (int row = 0; row < rows.Count; row++)
+            {
+                bool overlaps = rows[row].Any(pos => Math.Abs(pos - p.TimelinePosition) < minSeparation);
+                if (!overlaps)
+                {
+                    p.Row = row;
+                    rows[row].Add(p.TimelinePosition);
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed)
+            {
+                p.Row = rows.Count;
+                rows.Add([p.TimelinePosition]);
+            }
+        }
+    }
+
+    private static List<TimelineTick> ComputeTicks(DateTime first, DateTime last)
+    {
+        var ticks = new List<TimelineTick>();
+        var range = last - first;
+        var totalTicks = (double)(last.Ticks - first.Ticks);
+        if (totalTicks <= 0) return ticks;
+
+        // Choose interval based on range
+        TimeSpan interval;
+        string format;
+        if (range.TotalDays > 60)
+        {
+            interval = TimeSpan.FromDays(14);
+            format = "MMM dd";
+        }
+        else if (range.TotalDays > 14)
+        {
+            interval = TimeSpan.FromDays(7);
+            format = "MMM dd";
+        }
+        else if (range.TotalDays > 3)
+        {
+            interval = TimeSpan.FromDays(1);
+            format = "MMM dd";
+        }
+        else if (range.TotalHours > 12)
+        {
+            interval = TimeSpan.FromHours(6);
+            format = "HH:mm";
+        }
+        else
+        {
+            interval = TimeSpan.FromHours(1);
+            format = "HH:mm";
+        }
+
+        // Round start to the next clean interval boundary
+        var cursor = RoundUp(first, interval);
+
+        while (cursor < last)
+        {
+            double pos = (cursor.Ticks - first.Ticks) / totalTicks;
+            if (pos >= 0.02 && pos <= 0.98)
+            {
+                ticks.Add(new TimelineTick { Position = pos, Label = cursor.ToString(format) });
+            }
+            cursor += interval;
+        }
+
+        return ticks;
+    }
+
+    private static DateTime RoundUp(DateTime dt, TimeSpan interval)
+    {
+        if (interval.TotalDays >= 1)
+        {
+            var next = dt.Date.AddDays(1);
+            while (next <= dt) next = next.AddDays((int)interval.TotalDays);
+            return next;
+        }
+        var ticks = (dt.Ticks + interval.Ticks - 1) / interval.Ticks * interval.Ticks;
+        return new DateTime(ticks);
+    }
+
+    private void AutoPopulateMoveDefaults()
+    {
+        if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return;
+
+        if (!string.IsNullOrEmpty(MoveDataFilePath))
+        {
+            var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? string.Empty;
+            var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
+            MoveDataFilePath = Path.Combine(dataDir, $"{TargetDatabaseName}.mdf");
+            MoveLogFilePath = Path.Combine(logDir, $"{TargetDatabaseName}_log.ldf");
+        }
+    }
+
+    [RelayCommand]
+    private async Task FetchDefaultPathsAsync()
+    {
+        if (ConnectedServer == null)
+        {
+            var fallbackDir = @"C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA";
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
+            MoveDataFilePath = Path.Combine(fallbackDir, $"{dbName}.mdf");
+            MoveLogFilePath = Path.Combine(fallbackDir, $"{dbName}_log.ldf");
+            PathsFromServer = false;
+            PathSourceText = "Not connected — using generic placeholder paths. Connect to a SQL Server to auto-detect the correct default directories.";
+            return;
+        }
+
+        IsFetchingPaths = true;
+        PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
+        try
+        {
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(ConnectedServer);
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
+
+            if (!string.IsNullOrEmpty(dataPath))
+                MoveDataFilePath = Path.Combine(dataPath, $"{dbName}.mdf");
+
+            if (!string.IsNullOrEmpty(logPath))
+                MoveLogFilePath = Path.Combine(logPath, $"{dbName}_log.ldf");
+            else if (!string.IsNullOrEmpty(dataPath))
+                MoveLogFilePath = Path.Combine(dataPath, $"{dbName}_log.ldf");
+
+            PathsFromServer = true;
+            PathSourceText = $"Paths detected from {ConnectedServer.ServerName}. You can still override them.";
+        }
+        catch (Exception ex)
+        {
+            var fallbackDir = @"C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA";
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
+            MoveDataFilePath = Path.Combine(fallbackDir, $"{dbName}.mdf");
+            MoveLogFilePath = Path.Combine(fallbackDir, $"{dbName}_log.ldf");
+            PathsFromServer = false;
+            PathSourceText = $"Could not fetch paths: {ex.Message}. Using generic placeholders.";
+        }
+        finally
+        {
+            IsFetchingPaths = false;
+        }
+    }
+
+    private void UpdateRestoreSummary()
+    {
+        if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
+        {
+            RestoreSummaryText = string.Empty;
+            return;
+        }
+
+        var parts = new List<string>();
+        parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
+        parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
+
+        if (SelectedRestorePoint != null && SelectedRestorePoint.Type == BackupType.TransactionLog)
+            parts.Add($"Restore to end of log backup at {SelectedRestorePoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
+
+        var optionsList = new List<string>();
+
+        if (WithReplace)
+            optionsList.Add("overwrite existing database (WITH REPLACE)");
+        if (DisconnectSessions)
+            optionsList.Add("disconnect active sessions");
+        if (UseWithMove)
+            optionsList.Add($"relocate data files (WITH MOVE)");
+
+        var recoveryDesc = RecoveryMode switch
+        {
+            RecoveryMode.Recovery => "brought online for use (RECOVERY)",
+            RecoveryMode.NoRecovery => "left in restoring state (NORECOVERY)",
+            RecoveryMode.Standby => "set to read-only standby mode (STANDBY)",
+            _ => "recovered"
+        };
+        optionsList.Add($"database will be {recoveryDesc}");
+
+        if (KeepReplication) optionsList.Add("preserve replication settings");
+        if (EnableBroker) optionsList.Add("enable Service Broker");
+        if (NewBroker) optionsList.Add("create new Service Broker ID");
+
+        if (optionsList.Count > 0)
+            parts.Add("Options: " + string.Join("; ", optionsList) + ".");
+
+        RestoreSummaryText = string.Join(" ", parts);
+    }
+
+    partial void OnWithReplaceChanged(bool value) => UpdateRestoreSummary();
+    partial void OnDisconnectSessionsChanged(bool value) => UpdateRestoreSummary();
+    partial void OnRecoveryModeChanged(RecoveryMode oldValue, RecoveryMode newValue)
+    {
+        OnPropertyChanged(nameof(IsStandbyMode));
+        UpdateRestoreSummary();
+    }
+    partial void OnKeepReplicationChanged(bool value) => UpdateRestoreSummary();
+    partial void OnEnableBrokerChanged(bool value) => UpdateRestoreSummary();
+    partial void OnNewBrokerChanged(bool value) => UpdateRestoreSummary();
+    partial void OnTargetDatabaseNameChanged(string value) => UpdateRestoreSummary();
+
+    partial void OnIsConnectedToServerChanged(bool value)
+    {
+        FetchLogicalNamesCommand.NotifyCanExecuteChanged();
+        InspectBackupMetadataCommand.NotifyCanExecuteChanged();
+        CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
+        CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand]
+    private void GenerateScript()
+    {
+        if (RestoreChain == null)
+        {
+            SetError("No valid restore chain. Load backups and select a restore point first.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(TargetDatabaseName))
+        {
+            SetError("Please enter a target database name.");
+            return;
+        }
+
+        var sasToken = SelectedContainer != null
+            ? _credentialStore.GetSasToken(SelectedContainer)
+            : null;
+
+        var fileMoves = new List<FileMoveOption>();
+        if (UseWithMove)
+        {
+            if (HasFetchedFileMoves && FetchedFileMoves.Count > 0)
+            {
+                foreach (var m in FetchedFileMoves)
+                {
+                    if (!string.IsNullOrWhiteSpace(m.NewPhysicalName))
+                        fileMoves.Add(new FileMoveOption { LogicalName = m.LogicalName, PhysicalName = m.PhysicalName, NewPhysicalName = m.NewPhysicalName, Type = m.Type });
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(MoveDataFilePath))
+            {
+                var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
+                fileMoves.Add(new FileMoveOption { LogicalName = sourceDbName, PhysicalName = string.Empty, NewPhysicalName = MoveDataFilePath, Type = "ROWS" });
+                fileMoves.Add(new FileMoveOption { LogicalName = sourceDbName + "_log", PhysicalName = string.Empty, NewPhysicalName = MoveLogFilePath, Type = "LOG" });
+            }
+        }
+
+        var options = new RestoreOptions
+        {
+            TargetDatabaseName = TargetDatabaseName,
+            WithReplace = WithReplace,
+            RecoveryMode = RecoveryMode,
+            StandbyFilePath = string.IsNullOrWhiteSpace(StandbyFilePath) ? null : StandbyFilePath,
+            DisconnectSessions = DisconnectSessions,
+            StatsPercent = StatsPercent,
+            StopAt = RestoreChain.StopAt,
+            KeepReplication = KeepReplication,
+            EnableBroker = EnableBroker,
+            NewBroker = NewBroker,
+            SqlCredentialName = SqlCredentialName,
+            SasToken = sasToken,
+            StorageAccountUrl = SelectedContainer?.ContainerUrl,
+            FileMoves = fileMoves
+        };
+
+        GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
+        HasScript = true;
+        SetStatus("Script generated successfully.");
+    }
+
+    /// <summary>Create or update the blob credential on the connected server (optional; not included in generated script).</summary>
+    [RelayCommand(CanExecute = nameof(CanCreateCredential))]
+    private async Task CreateCredentialOnServerAsync()
+    {
+        if (ConnectedServer == null || SelectedContainer == null) return;
+
+        var sasToken = _credentialStore.GetSasToken(SelectedContainer);
+        if (string.IsNullOrEmpty(sasToken))
+        {
+            SetError("No SAS token stored for this container. Add or refresh the token in Blob Storage config.");
+            return;
+        }
+
+        try
+        {
+            await _sqlService.EnsureCredentialExistsAsync(
+                ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
+            await RefreshCredentialStatusAsync();
+            SetStatus("Credential created or updated on server.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to create credential: {ex.Message}");
+        }
+    }
+
+    private bool CanCreateCredential() =>
+        IsConnectedToServer && SelectedContainer != null &&
+        (CredentialExistsOnServer != true || !CredentialIsValidSas);
+
+    [RelayCommand]
+    private void CopyScript()
+    {
+        if (!string.IsNullOrEmpty(GeneratedScript))
+        {
+            Clipboard.SetText(GeneratedScript);
+            SetStatus("Script copied to clipboard.");
+        }
+    }
+
+    [RelayCommand]
+    private void CopyPathHttps(BackupFileInfo? file)
+    {
+        if (file == null || SelectedContainer == null) return;
+        try
+        {
+            var url = _blobService.BuildBlobUrlWithSas(SelectedContainer, file.BlobName);
+            Clipboard.SetText(url);
+            SetStatus("HTTPS path copied to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void CopyPathContainer(BackupFileInfo? file)
+    {
+        if (file == null || SelectedContainer == null) return;
+        try
+        {
+            var containerName = SelectedContainer.ContainerName ?? "container";
+            var path = $"{containerName}/{file.BlobName}";
+            Clipboard.SetText(path);
+            SetStatus("Container path copied to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
+    private async Task FetchLogicalNamesAsync()
+    {
+        if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
+
+        IsBusy = true;
+        BackupMetadataSummary = null;
+        try
+        {
+            // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
+            var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls, credentialName: null, urlsContainSas: false);
+
+            var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? @"C:\SQL\Data";
+            var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
+            var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "Database" : TargetDatabaseName;
+
+            int rowsIndex = 0;
+            foreach (var m in list)
+            {
+                m.NewPhysicalName = (m.Type?.ToUpperInvariant() ?? "") switch
+                {
+                    "L" or "LOG" => Path.Combine(logDir, $"{dbName}_log.ldf"),
+                    _ => rowsIndex++ == 0 ? Path.Combine(dataDir, $"{dbName}.mdf") : Path.Combine(dataDir, $"{dbName}_{rowsIndex}.ndf")
+                };
+            }
+
+            FetchedFileMoves = new ObservableCollection<FileMoveOption>(list);
+            HasFetchedFileMoves = FetchedFileMoves.Count > 0;
+            SetStatus($"RESTORE FILELISTONLY: {FetchedFileMoves.Count} logical file(s). Edit paths above and use WITH MOVE for correct restore.");
+        }
+        catch (Exception ex)
+        {
+            var urlList = RestoreChain!.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+            var urlPreview = urlList.Count > 0 ? urlList[0] : "(no URL)";
+            if (urlList.Count > 1) urlPreview += $" (+{urlList.Count - 1} more)";
+            SetError($"RESTORE FILELISTONLY failed: {ex.Message}. URL used: {urlPreview}. Run the same RESTORE FILELISTONLY in SSMS to confirm credential/network.");
+            FetchedFileMoves = [];
+            HasFetchedFileMoves = false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private bool CanFetchLogicalNames() =>
+        IsConnectedToServer && RestoreChain != null && SelectedContainer != null && RestoreChain.FullSet.Files.Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanInspectMetadata))]
+    private async Task InspectBackupMetadataAsync()
+    {
+        if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
+
+        IsBusy = true;
+        try
+        {
+            // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
+            var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, credentialName: null, urlsContainSas: false);
+
+            if (header == null)
+            {
+                BackupMetadataSummary = "No header returned.";
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Database: {header.DatabaseName ?? "(null)"}");
+            sb.AppendLine($"Backup type: {header.TypeDisplay}");
+            sb.AppendLine($"Start: {(header.BackupStartDate.HasValue ? header.BackupStartDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "(null)")}");
+            sb.AppendLine($"Finish: {(header.BackupFinishDate.HasValue ? header.BackupFinishDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "(null)")}");
+            sb.AppendLine($"First LSN: {header.FirstLsn?.ToString() ?? "(null)"}");
+            sb.AppendLine($"Last LSN: {header.LastLsn?.ToString() ?? "(null)"}");
+            sb.AppendLine($"Database backup LSN: {header.DatabaseBackupLsn?.ToString() ?? "(null)"}");
+            BackupMetadataSummary = sb.ToString();
+            SetStatus("RESTORE HEADERONLY completed. See metadata summary below.");
+        }
+        catch (Exception ex)
+        {
+            var urlList = RestoreChain!.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+            var urlPreview = urlList.Count > 0 ? urlList[0] : "(no URL)";
+            if (urlList.Count > 1) urlPreview += $" (+{urlList.Count - 1} more)";
+            SetError($"RESTORE HEADERONLY failed: {ex.Message}. URL used: {urlPreview}. Run the same RESTORE HEADERONLY in SSMS to confirm credential/network.");
+            BackupMetadataSummary = null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private bool CanInspectMetadata() =>
+        IsConnectedToServer && RestoreChain != null && SelectedContainer != null && RestoreChain.FullSet.Files.Count > 0;
+
+    /// <summary>Builds the exact T-SQL for RESTORE FILELISTONLY (encoded URLs, no WITH CREDENTIAL) for pasting into SSMS.</summary>
+    [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
+    private void CopyFileListOnlyCommand()
+    {
+        if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
+        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{u.Replace("'", "''")}'"));
+        var sql = $"RESTORE FILELISTONLY FROM {urlClauses}";
+        try
+        {
+            Clipboard.SetText(sql);
+            SetStatus("RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    /// <summary>Builds the exact T-SQL for RESTORE HEADERONLY (encoded URLs, no WITH CREDENTIAL) for pasting into SSMS.</summary>
+    [RelayCommand(CanExecute = nameof(CanInspectMetadata))]
+    private void CopyHeaderOnlyCommand()
+    {
+        if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
+        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{u.Replace("'", "''")}'"));
+        var sql = $"RESTORE HEADERONLY FROM {urlClauses}";
+        try
+        {
+            Clipboard.SetText(sql);
+            SetStatus("RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to copy: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void SaveScript()
+    {
+        if (string.IsNullOrEmpty(GeneratedScript)) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "SQL Files (*.sql)|*.sql|All Files (*.*)|*.*",
+            DefaultExt = ".sql",
+            FileName = $"restore_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.sql"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            File.WriteAllText(dialog.FileName, GeneratedScript);
+            SetStatus($"Script saved to {dialog.FileName}");
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExecuteScriptAsync()
+    {
+        if (string.IsNullOrEmpty(GeneratedScript) || !IsConnectedToServer)
+            return;
+
+        if (!IsExecuteArmed)
+        {
+            IsExecuteArmed = true;
+            ExecuteButtonText = "Confirm Execute (5)";
+            ExecuteCountdown = 5;
+
+            _armTimeoutCts?.Cancel();
+            _armTimeoutCts = new CancellationTokenSource();
+
+            _ = RunArmCountdownAsync(_armTimeoutCts.Token);
+            return;
+        }
+
+        _armTimeoutCts?.Cancel();
+        IsExecuteArmed = false;
+        ExecuteButtonText = "Execute on Server";
+
+        IsExecuting = true;
+        ExecutionComplete = false;
+        ExecutionLog = string.Empty;
+
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            var server = config.Servers.FirstOrDefault(s => s.ServerName == ConnectedServerName);
+            if (server == null)
+            {
+                SetError("Connected server not found in config.");
+                return;
+            }
+
+            if (SelectedContainer != null)
+            {
+                var sasToken = _credentialStore.GetSasToken(SelectedContainer);
+                if (!string.IsNullOrEmpty(sasToken))
+                {
+                    AppendLog("Creating SQL Server credential for blob access...");
+                    await _sqlService.EnsureCredentialExistsAsync(
+                        server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
+                    AppendLog("Credential created successfully.");
+                }
+            }
+
+            AppendLog("Beginning restore execution...\n");
+
+            await _sqlService.ExecuteRestoreWithProgressAsync(
+                server,
+                GeneratedScript,
+                msg => Application.Current.Dispatcher.Invoke(() => AppendLog(msg)));
+
+            ExecutionSuccess = true;
+            AppendLog("\nRestore completed successfully!");
+            SetStatus("Restore execution completed successfully.");
+        }
+        catch (Exception ex)
+        {
+            ExecutionSuccess = false;
+            AppendLog($"\nERROR: {ex.Message}");
+            SetError($"Restore failed: {ex.Message}");
+        }
+        finally
+        {
+            IsExecuting = false;
+            ExecutionComplete = true;
+        }
+    }
+
+    private void AppendLog(string message)
+    {
+        ExecutionLog += message + "\n";
+    }
+
+    private async Task RunArmCountdownAsync(CancellationToken ct)
+    {
+        try
+        {
+            for (int i = 5; i >= 1; i--)
+            {
+                ct.ThrowIfCancellationRequested();
+                ExecuteCountdown = i;
+                ExecuteButtonText = $"Confirm Execute ({i})";
+                await Task.Delay(1000, ct);
+            }
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                IsExecuteArmed = false;
+                ExecuteButtonText = "Execute on Server";
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+}

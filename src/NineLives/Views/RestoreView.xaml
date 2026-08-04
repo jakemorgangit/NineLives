@@ -1,0 +1,824 @@
+<UserControl x:Class="Blackcat.NineLives.Views.RestoreView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
+        <converters:BackupTypeToColorConverter x:Key="TypeToColor" />
+        <converters:TimelinePositionConverter x:Key="TimelinePos" />
+        <converters:TickPositionConverter x:Key="TickPos" />
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <!-- Header -->
+            <StackPanel Margin="0,0,0,20">
+                <TextBlock Text="Restore Database"
+                           Style="{StaticResource HeaderText}" />
+                <TextBlock Text="Select a backup source, choose a restore point, configure options, and generate or execute a restore script."
+                           Style="{StaticResource SecondaryText}"
+                           Margin="0,4,0,0" />
+            </StackPanel>
+
+            <!-- Step 1: Container + Database -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="1. SELECT SOURCE"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,12" />
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <TextBlock Text="BLOB CONTAINER" Style="{StaticResource LabelText}" />
+                            <ComboBox ItemsSource="{Binding Containers}"
+                                      SelectedItem="{Binding SelectedContainer}"
+                                      DisplayMemberPath="Name"
+                                      Style="{StaticResource DarkComboBox}" />
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="Load Backups"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding LoadBackupsCommand}"
+                                VerticalAlignment="Bottom" />
+                    </Grid>
+
+                    <!-- Server + Database selectors -->
+                    <Grid Margin="0,12,0,0"
+                          Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <TextBlock Text="SERVER / INSTANCE" Style="{StaticResource LabelText}" />
+                            <ComboBox ItemsSource="{Binding DiscoveredServers}"
+                                      SelectedItem="{Binding SelectedServerName}"
+                                      Style="{StaticResource DarkComboBox}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                            <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                            <ComboBox ItemsSource="{Binding DiscoveredDatabases}"
+                                      SelectedItem="{Binding SelectedDatabaseName}"
+                                      Style="{StaticResource DarkComboBox}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Backup set summary (set counts, accounting for striping) -->
+                    <Grid Margin="0,16,0,0"
+                          Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal">
+                            <Border Background="{StaticResource AccentBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
+                                <TextBlock Text="{Binding FullCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                            </Border>
+                            <TextBlock Text="Full Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Border Background="{StaticResource WarningBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
+                                <TextBlock Text="{Binding DiffCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                            </Border>
+                            <TextBlock Text="Diff Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <Border Background="{StaticResource SuccessBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
+                                <TextBlock Text="{Binding LogCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                            </Border>
+                            <TextBlock Text="Log Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="3" Style="{StaticResource SecondaryText}"
+                                   VerticalAlignment="Center" Margin="8,0">
+                            <Run Text="{Binding SetCount, Mode=OneWay}" FontWeight="SemiBold" />
+                            <Run Text=" total sets" />
+                        </TextBlock>
+                        <TextBlock Grid.Column="4" Text="{Binding RestoreWindowText}"
+                                   Style="{StaticResource SecondaryText}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Step 2: Restore Point Selection -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding HasRestorePoints, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="2. SELECT RESTORE POINT"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="Click a point on the timeline or select from the list below."
+                               Style="{StaticResource SecondaryText}"
+                               Margin="0,0,0,12" />
+
+                    <!-- ========== VISUAL TIMELINE ========== -->
+                    <Border Background="{StaticResource InputBackgroundBrush}"
+                            CornerRadius="6" Padding="16,12" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Legend -->
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                                <Ellipse Width="10" Height="10" Fill="{StaticResource AccentBrush}" Margin="0,0,4,0" />
+                                <TextBlock Text="Full" Style="{StaticResource SecondaryText}" Margin="0,0,16,0" VerticalAlignment="Center" />
+                                <Ellipse Width="10" Height="10" Fill="{StaticResource WarningBrush}" Margin="0,0,4,0" />
+                                <TextBlock Text="Diff" Style="{StaticResource SecondaryText}" Margin="0,0,16,0" VerticalAlignment="Center" />
+                                <Ellipse Width="10" Height="10" Fill="{StaticResource SuccessBrush}" Margin="0,0,4,0" />
+                                <TextBlock Text="Log" Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
+                            </StackPanel>
+
+                            <!-- Dots area (stacked vertically) -->
+                            <Grid Grid.Row="1" Height="{Binding TimelineHeight}" Margin="7,0">
+                                <!-- Vertical guide lines at tick positions -->
+                                <ItemsControl ItemsSource="{Binding TimelineTicks}" IsHitTestVisible="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <Grid />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border HorizontalAlignment="Left" VerticalAlignment="Stretch"
+                                                    Width="1" Background="{StaticResource CardBorderBrush}" Opacity="0.25">
+                                                <Border.Margin>
+                                                    <MultiBinding Converter="{StaticResource TickPos}">
+                                                        <Binding Path="Position" />
+                                                        <Binding Path="ActualWidth" ElementName="TimelineDots" />
+                                                    </MultiBinding>
+                                                </Border.Margin>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- Clickable restore point dots -->
+                                <ItemsControl ItemsSource="{Binding RestorePoints}"
+                                              x:Name="TimelineDots">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <Grid />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                                    Cursor="Hand"
+                                                    Command="{Binding DataContext.SelectRestorePointCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}">
+                                                <Button.Template>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Ellipse x:Name="dot" Width="14" Height="14"
+                                                                 Fill="{Binding Type, Converter={StaticResource TypeToColor}}"
+                                                                 Opacity="0.9" SnapsToDevicePixels="True" />
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="dot" Property="Width" Value="18" />
+                                                                <Setter TargetName="dot" Property="Height" Value="18" />
+                                                                <Setter TargetName="dot" Property="Opacity" Value="1" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Button.Template>
+                                                <Button.Margin>
+                                                    <MultiBinding Converter="{StaticResource TimelinePos}">
+                                                        <Binding Path="TimelinePosition" />
+                                                        <Binding Path="ActualWidth" ElementName="TimelineDots" />
+                                                        <Binding Path="Row" />
+                                                    </MultiBinding>
+                                                </Button.Margin>
+                                                <Button.ToolTip>
+                                                    <StackPanel MaxWidth="350">
+                                                        <TextBlock FontWeight="SemiBold">
+                                                            <Run Text="{Binding TypeDisplay, Mode=OneWay}" />
+                                                            <Run Text=" — " />
+                                                            <Run Text="{Binding Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}', Mode=OneWay}" />
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding ChainDescription}"
+                                                                   Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Button.ToolTip>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+
+                            <!-- Track line + tick marks (time scale axis) -->
+                            <Grid Grid.Row="2" Height="32" Margin="7,0">
+                                <!-- Track line -->
+                                <Border Height="3" Background="{StaticResource CardBorderBrush}"
+                                        VerticalAlignment="Top" CornerRadius="1.5" />
+
+                                <!-- Tick marks with labels -->
+                                <ItemsControl ItemsSource="{Binding TimelineTicks}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <Grid />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top">
+                                                <StackPanel.Margin>
+                                                    <MultiBinding Converter="{StaticResource TickPos}">
+                                                        <Binding Path="Position" />
+                                                        <Binding Path="ActualWidth" ElementName="TimelineDots" />
+                                                    </MultiBinding>
+                                                </StackPanel.Margin>
+                                                <Border Width="1" Height="12"
+                                                        Background="{StaticResource SecondaryTextBrush}" Opacity="0.6" />
+                                                <TextBlock Text="{Binding Label}" FontSize="10"
+                                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                                           Margin="-16,2,0,0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+
+                            <!-- Start/End date labels -->
+                            <Grid Grid.Row="3" Margin="7,2,7,0">
+                                <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Left"
+                                           Text="{Binding RestorePoints[0].Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm}', FallbackValue=''}"
+                                           FontSize="10" />
+                                <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Right"
+                                           FontSize="10">
+                                    <TextBlock.Text>
+                                        <Binding Path="RestoreWindowText"
+                                                 FallbackValue=""
+                                                 TargetNullValue="" />
+                                    </TextBlock.Text>
+                                </TextBlock>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Restore Chain Backup Sets (for selected restore point) -->
+                    <DataGrid ItemsSource="{Binding ChainSets}"
+                              Style="{StaticResource DarkDataGrid}"
+                              MaxHeight="220"
+                              Visibility="{Binding HasValidChain, Converter={StaticResource BoolToVis}}">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Type" Width="80" SortMemberPath="Type">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{Binding Type, Converter={StaticResource TypeToColor}}"
+                                                CornerRadius="3" Padding="6,2" HorizontalAlignment="Left" Opacity="0.85">
+                                            <TextBlock Text="{Binding TypeDisplay}" Foreground="White"
+                                                       FontSize="11" FontWeight="SemiBold" />
+                                        </Border>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="Set ID" Width="160"
+                                                Binding="{Binding SetId}" />
+                            <DataGridTextColumn Header="Timestamp" Width="150"
+                                                Binding="{Binding Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" />
+                            <DataGridTextColumn Header="Files" Width="55"
+                                                Binding="{Binding FileCount}" />
+                            <DataGridTextColumn Header="Striped" Width="60"
+                                                Binding="{Binding IsStriped}" />
+                            <DataGridTextColumn Header="Size" Width="80"
+                                                Binding="{Binding SizeDisplay}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- Selected point summary + View Chain button -->
+                    <Grid Margin="0,12,0,0"
+                          Visibility="{Binding HasValidChain, Converter={StaticResource BoolToVis}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                            <Run Text="Selected: " Foreground="{StaticResource SecondaryTextBrush}" />
+                            <Run Text="{Binding SelectedRestorePoint.Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}', Mode=OneWay}"
+                                 FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                            <Run Text="  |  " Foreground="{StaticResource SecondaryTextBrush}" />
+                            <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{StaticResource SecondaryTextBrush}" />
+                        </TextBlock>
+
+                        <Button Grid.Column="1"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding ToggleChainDetailsCommand}"
+                                Padding="12,6">
+                            <Button.Content>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="View Restore Chain" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ShowChainDetails}" Value="True">
+                                                    <Setter Property="Text" Value="Hide Restore Chain" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+                    </Grid>
+
+                    <!-- Restore Chain Detail (togglable) -->
+                    <Border Background="{StaticResource InputBackgroundBrush}"
+                            CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                            Visibility="{Binding ShowChainDetails, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="RESTORE CHAIN" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+
+                            <ItemsControl ItemsSource="{Binding ChainFiles}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,2">
+                                            <Grid.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Copy path (HTTPS)"
+                                                              Command="{Binding DataContext.CopyPathHttpsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                              CommandParameter="{Binding}" />
+                                                    <MenuItem Header="Copy path (container)"
+                                                              Command="{Binding DataContext.CopyPathContainerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                              CommandParameter="{Binding}" />
+                                                </ContextMenu>
+                                            </Grid.ContextMenu>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="70" />
+                                                <ColumnDefinition Width="140" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Background="{Binding Type, Converter={StaticResource TypeToColor}}"
+                                                    CornerRadius="3" Padding="6,2" HorizontalAlignment="Left" Opacity="0.85">
+                                                <TextBlock Text="{Binding TypeDisplay}" Foreground="White"
+                                                           FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Text="{Binding BlobName}"
+                                                       Style="{StaticResource BodyText}" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding BlobUrl}" />
+                                            <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}"
+                                                       Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding EffectiveDate, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}"
+                                                       Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Step 3: Restore Options -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="3. RESTORE OPTIONS"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,16" />
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left Column -->
+                        <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                            <TextBlock Text="TARGET DATABASE NAME" Style="{StaticResource LabelText}" />
+                            <TextBox Text="{Binding TargetDatabaseName, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Margin="0,0,0,16"
+                                     ToolTip="The name of the database to restore to." />
+
+                            <CheckBox Content="WITH REPLACE"
+                                      IsChecked="{Binding WithReplace}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="Overwrite the existing database even if it already exists." />
+
+                            <CheckBox Content="Disconnect Sessions"
+                                      IsChecked="{Binding DisconnectSessions}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="SET SINGLE_USER WITH ROLLBACK IMMEDIATE before restore." />
+
+                            <CheckBox Content="KEEP_REPLICATION"
+                                      IsChecked="{Binding KeepReplication}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="Preserves replication settings during restore." />
+
+                            <CheckBox Content="ENABLE_BROKER"
+                                      IsChecked="{Binding EnableBroker}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="Enables Service Broker with the existing contract." />
+
+                            <CheckBox Content="NEW_BROKER"
+                                      IsChecked="{Binding NewBroker}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="Creates a new Service Broker identifier." />
+
+                            <CheckBox Content="WITH MOVE (relocate files)"
+                                      IsChecked="{Binding UseWithMove}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="Use WITH MOVE to relocate database files to different paths on the target server. Required when restoring to a server where the original file paths don't exist." />
+
+                            <StackPanel Visibility="{Binding ShowMoveOptions, Converter={StaticResource BoolToVis}}"
+                                        Margin="16,0,0,0">
+
+                                <!-- Path source indicator -->
+                                <Border CornerRadius="4" Padding="10,6" Margin="0,0,0,10">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#30F39C12" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PathsFromServer}" Value="True">
+                                                    <Setter Property="Background" Value="#1A27AE60" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,8,0">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding PathsFromServer}" Value="True">
+                                                            <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Grid.Column="1" Text="{Binding PathSourceText}"
+                                                   Style="{StaticResource SecondaryText}"
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   VerticalAlignment="Center" />
+                                        <Button Grid.Column="2" Content="Fetch from Server"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Command="{Binding FetchDefaultPathsCommand}"
+                                                Padding="8,3" FontSize="11"
+                                                Margin="8,0,0,0"
+                                                VerticalAlignment="Center"
+                                                ToolTip="Query the connected SQL Server for its default data and log directories."
+                                                IsEnabled="{Binding IsConnectedToServer}" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Text="DATA FILE PATH (.mdf)" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding MoveDataFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,0,0,8"
+                                         ToolTip="Full path for the data file on the target server, e.g. D:\SQLData\MyDatabase.mdf" />
+
+                                <TextBlock Text="LOG FILE PATH (.ldf)" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding MoveLogFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,0,0,8"
+                                         ToolTip="Full path for the log file on the target server, e.g. D:\SQLLogs\MyDatabase_log.ldf" />
+
+                                <TextBlock Style="{StaticResource SecondaryText}"
+                                           FontSize="10" TextWrapping="Wrap"
+                                           Margin="0,0,0,4"
+                                           Text="Logical file names are inferred by default. Use Verify backup to get actual names from the backup (RESTORE FILELISTONLY) for correct WITH MOVE." />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
+                                    <Button Content="Verify backup (FILELISTONLY)"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Command="{Binding FetchLogicalNamesCommand}"
+                                            Padding="8,4" FontSize="11"
+                                            ToolTip="Run RESTORE FILELISTONLY on the full backup to get logical file names for WITH MOVE."
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Copy FILELISTONLY command"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Command="{Binding CopyFileListOnlyCommandCommand}"
+                                            Padding="8,4" FontSize="11"
+                                            ToolTip="Copy the RESTORE FILELISTONLY T-SQL to clipboard to run in SSMS (e.g. when you get error 13)."
+                                            Margin="0,0,8,0" />
+                                    <Button Content="View metadata (HEADERONLY)"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Command="{Binding InspectBackupMetadataCommand}"
+                                            Padding="8,4" FontSize="11"
+                                            ToolTip="Run RESTORE HEADERONLY to inspect backup set metadata."
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Copy HEADERONLY command"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Command="{Binding CopyHeaderOnlyCommandCommand}"
+                                            Padding="8,4" FontSize="11"
+                                            ToolTip="Copy the RESTORE HEADERONLY T-SQL to clipboard to run in SSMS (e.g. when you get error 13)."
+                                            Margin="0,0,8,0" />
+                                </StackPanel>
+
+                                <Border Visibility="{Binding HasFetchedFileMoves, Converter={StaticResource BoolToVis}}"
+                                        Background="{StaticResource InputBackgroundBrush}"
+                                        CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="Logical files (from RESTORE FILELISTONLY)" Style="{StaticResource LabelText}" Margin="0,0,0,6" />
+                                        <DataGrid ItemsSource="{Binding FetchedFileMoves}"
+                                                  Style="{StaticResource DarkDataGrid}"
+                                                  AutoGenerateColumns="False"
+                                                  CanUserAddRows="False"
+                                                  CanUserDeleteRows="False"
+                                                  MaxHeight="140">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Logical name" Binding="{Binding LogicalName}" Width="*" IsReadOnly="True" />
+                                                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="50" IsReadOnly="True" />
+                                                <DataGridTextColumn Header="Target path (MOVE)" Binding="{Binding NewPhysicalName, UpdateSourceTrigger=PropertyChanged}" Width="*" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Visibility="{Binding BackupMetadataSummary, Converter={StaticResource NullToVis}}"
+                                        Background="{StaticResource InputBackgroundBrush}"
+                                        CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <TextBlock Text="Backup metadata (RESTORE HEADERONLY)" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                        <TextBlock Text="{Binding BackupMetadataSummary}"
+                                                   Style="{StaticResource BodyText}"
+                                                   FontFamily="Cascadia Code, Consolas, Courier New"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Right Column -->
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="RECOVERY MODE" Style="{StaticResource LabelText}" />
+                            <StackPanel Margin="0,4,0,16">
+                                <RadioButton Content="RECOVERY"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=Recovery}"
+                                             Margin="0,0,0,6" GroupName="RecoveryMode"
+                                             ToolTip="Database is fully recovered and ready for use." />
+                                <RadioButton Content="NORECOVERY"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=NoRecovery}"
+                                             Margin="0,0,0,6" GroupName="RecoveryMode"
+                                             ToolTip="Leaves database in restoring state for additional restores." />
+                                <RadioButton Content="STANDBY"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=Standby}"
+                                             GroupName="RecoveryMode"
+                                             ToolTip="Read-only with undo file." />
+                            </StackPanel>
+
+                            <TextBlock Text="STANDBY FILE PATH" Style="{StaticResource LabelText}"
+                                       Visibility="{Binding IsStandbyMode, Converter={StaticResource BoolToVis}}" />
+                            <TextBox Text="{Binding StandbyFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Margin="0,0,0,16"
+                                     Visibility="{Binding IsStandbyMode, Converter={StaticResource BoolToVis}}" />
+
+                            <TextBlock Text="STATS PERCENT" Style="{StaticResource LabelText}" />
+                            <TextBox Text="{Binding StatsPercent, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Width="80" HorizontalAlignment="Left"
+                                     Margin="0,0,0,16" />
+
+                            <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}" />
+                            <TextBox Text="{Binding SqlCredentialName, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Margin="0,0,0,8"
+                                     ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
+
+                            <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
+                            <Border Background="{StaticResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
+                                    Visibility="{Binding CredentialSectionVisible, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="BLOB CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                    <!-- Not connected: verify credential by connecting -->
+                                    <StackPanel Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                                            <Run Text="Verify credential by connecting to a SQL Server instance (SQL Servers tab). " />
+                                            <Run Text="Creating the credential is optional: once connected, this section will show whether the credential exists; you can then create it from here if needed, or ensure it already exists on the server before running the restore script." />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <!-- Connected: show status and optional Create -->
+                                    <StackPanel Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}}">
+                                        <Border Padding="0,0,0,8">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="{StaticResource InputBackgroundBrush}" />
+                                                    <Setter Property="BorderThickness" Value="0" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CredentialIsValidSas}" Value="True">
+                                                            <Setter Property="Background" Value="#1A27AE60" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                                            <Setter Property="BorderThickness" Value="1" />
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                            <Setter Property="Padding" Value="8,6,8,6" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding CredentialExistsOnServer}" Value="False">
+                                                            <Setter Property="Background" Value="#30E74C3C" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource ErrorBrush}" />
+                                                            <Setter Property="BorderThickness" Value="1" />
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                            <Setter Property="Padding" Value="8,6,8,6" />
+                                                        </DataTrigger>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding CredentialExistsOnServer}" Value="True" />
+                                                                <Condition Binding="{Binding CredentialIsValidSas}" Value="False" />
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Background" Value="#30E67E22" />
+                                                            <Setter Property="BorderBrush" Value="{StaticResource WarningBrush}" />
+                                                            <Setter Property="BorderThickness" Value="1" />
+                                                            <Setter Property="CornerRadius" Value="4" />
+                                                            <Setter Property="Padding" Value="8,6,8,6" />
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding CredentialStatusMessage}"
+                                                       Style="{StaticResource SecondaryText}"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                        <TextBlock Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                                   Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
+                                            <Run Text="Restore from URL requires a SQL credential (SHARED ACCESS SIGNATURE) for the container. Creating it is optional: you can create it from here or ensure it exists on the server before running the script. The SAS token is never included in the generated script." />
+                                        </TextBlock>
+                                        <Button Content="Create credential on server"
+                                                Command="{Binding CreateCredentialOnServerCommand}"
+                                                Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                                Margin="0,0,0,0" Padding="10,6"
+                                                Style="{StaticResource SecondaryButton}"
+                                                ToolTip="Creates or updates a SQL Server credential for this blob container URL so that RESTORE FROM URL can access the backups. Optional; the credential can also be created manually on the server. The SAS token is not included in the generated script."
+                                                HorizontalAlignment="Left" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Restore Summary -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
+                <StackPanel>
+                    <TextBlock Text="RESTORE SUMMARY"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,8" />
+                    <Border Background="{StaticResource InputBackgroundBrush}"
+                            CornerRadius="4" Padding="12,10">
+                        <TextBlock Text="{Binding RestoreSummaryText}"
+                                   Style="{StaticResource BodyText}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="22" />
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Step 4: Generate + Execute -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="4. GENERATE &amp; EXECUTE"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,16" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Generate Script"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding GenerateScriptCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Copy to Clipboard"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CopyScriptCommand}"
+                                IsEnabled="{Binding HasScript}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Save to File"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding SaveScriptCommand}"
+                                IsEnabled="{Binding HasScript}"
+                                Margin="0,0,8,0" />
+                        <Button Content="{Binding ExecuteButtonText}"
+                                Style="{StaticResource DangerButton}"
+                                Command="{Binding ExecuteScriptCommand}"
+                                IsEnabled="{Binding IsConnectedToServer}"
+                                MinWidth="140" />
+                    </StackPanel>
+
+                    <!-- Execute armed warning -->
+                    <Border Background="#30E74C3C" CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
+                            Visibility="{Binding IsExecuteArmed, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                            <Run Text="&#x26A0;" Foreground="{StaticResource ErrorBrush}" FontSize="14" />
+                            <Run Text=" Click again to execute restore against" />
+                            <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource ErrorBrush}" />
+                            <Run Text=". Target:" />
+                            <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
+                            <Run Text="(" />
+                            <Run Text="{Binding ChainSummary, Mode=OneWay}" />
+                            <Run Text="). This operation cannot be undone." Foreground="{StaticResource ErrorBrush}" />
+                        </TextBlock>
+                    </Border>
+
+                    <!-- Not connected warning -->
+                    <Border Background="{StaticResource DangerBackgroundBrush}"
+                            CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
+                            Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                        <TextBlock Style="{StaticResource SecondaryText}">
+                            <Run Text="&#x26A0;" Foreground="{StaticResource WarningBrush}" />
+                            <Run Text=" Connect to a SQL Server instance (SQL Servers tab) to enable script execution." />
+                        </TextBlock>
+                    </Border>
+
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="{StaticResource ErrorBrush}"
+                               Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
+                               Margin="0,0,0,12" TextWrapping="Wrap" />
+
+                    <!-- Script Output (hidden during execution) -->
+                    <Border Background="{StaticResource InputBackgroundBrush}"
+                            CornerRadius="4" Padding="0">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding HasScript}" Value="True" />
+                                            <Condition Binding="{Binding IsExecuting}" Value="False" />
+                                            <Condition Binding="{Binding ExecutionComplete}" Value="False" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBox Text="{Binding GeneratedScript, Mode=OneWay}"
+                                 Style="{StaticResource DarkTextBox}"
+                                 IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto" MaxHeight="400"
+                                 FontFamily="Cascadia Code, Consolas, Courier New" FontSize="12" />
+                    </Border>
+
+                    <!-- Execution Log -->
+                    <Border Background="{StaticResource InputBackgroundBrush}"
+                            CornerRadius="4" Padding="0" Margin="0,12,0,0"
+                            Visibility="{Binding ExecutionLog, Converter={StaticResource NullToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="EXECUTION LOG" Style="{StaticResource LabelText}" Margin="12,8,0,4" />
+                            <TextBox x:Name="ExecutionLogBox"
+                                     Text="{Binding ExecutionLog, Mode=OneWay}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto" MaxHeight="300"
+                                     FontFamily="Cascadia Code, Consolas, Courier New" FontSize="12"
+                                     TextChanged="ExecutionLogBox_TextChanged" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Loading -->
+            <Border Background="#80000000" CornerRadius="6"
+                    Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Padding="20">
+                <TextBlock Text="Loading..." Style="{StaticResource BodyText}" HorizontalAlignment="Center" />
+            </Border>
+
+            <!-- Status -->
+            <TextBlock Text="{Binding StatusMessage}"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,4,0,16"
+                       Visibility="{Binding StatusMessage, Converter={StaticResource NullToVis}}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
