@@ -17,7 +17,11 @@ public static class BlobUrlEncoder
             var path = uri.AbsolutePath.TrimStart('/');
             if (string.IsNullOrEmpty(path)) return blobUrl;
             var segments = path.Split('/');
-            var encodedSegments = segments.Select(s => Uri.EscapeDataString(s));
+            // Uri.AbsolutePath is ALREADY percent-encoded (a raw space arrives here as %20),
+            // so escape the DECODED segment - escaping the encoded form double-encodes
+            // (%20 -> %2520) and Azure would look up a blob literally named "%20".
+            // Unescape-then-escape is also idempotent for already-encoded input.
+            var encodedSegments = segments.Select(s => Uri.EscapeDataString(Uri.UnescapeDataString(s)));
             var encodedPath = string.Join("/", encodedSegments);
             return $"{uri.Scheme}://{uri.Authority}/{encodedPath}";
         }

@@ -51,7 +51,7 @@ public static class OlaAgFileNameParser
     }
 
     /// <summary>
-    /// Returns true if the blob name looks like Ola default AG naming (contains $ and _FULL_ or _DIFF_ or _LOG_ followed by date/time pattern).
+    /// Returns true if the blob name's file segment matches the full Ola default AG naming pattern (same regex TryParse uses).
     /// </summary>
     public static bool LooksLikeAgDefault(string blobName)
     {
