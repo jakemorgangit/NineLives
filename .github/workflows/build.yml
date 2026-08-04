@@ -62,7 +62,7 @@ jobs:
       # smoke publish above already proved the shape, and fork PRs shouldn't mint artifacts.
       - name: Upload build artifact
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: NineLives-main-${{ github.sha }}
           path: publish/NineLives.exe
