@@ -1,5 +1,7 @@
 # Nine Lives 🐈‍⬛
 
+[![Build](https://github.com/jakemorgangit/blackcat-nine-lives/actions/workflows/build.yml/badge.svg)](https://github.com/jakemorgangit/blackcat-nine-lives/actions/workflows/build.yml)
+
 **Every database deserves nine lives.**
 
 Nine Lives is a modern desktop application for restoring SQL Server databases from Azure Blob Storage backups — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 8, featuring a dark-mode UI.
@@ -124,6 +126,12 @@ dotnet build
 
 ```bash
 dotnet run --project src/NineLives
+```
+
+#### Run Tests
+
+```bash
+dotnet test
 ```
 
 #### Publish Single-File Executable
@@ -292,18 +300,21 @@ Built with:
 ### Project Structure
 ```
 blackcat-nine-lives/
+├── .github/
+│   └── workflows/               # CI: PR build/test gate + release pipeline
 ├── docs/
 │   └── screenshots/             # README screenshots
 ├── src/
-│   └── NineLives/
-│       ├── Assets/              # Application icon
-│       ├── Converters/          # XAML value converters
-│       ├── Models/              # Data models
-│       ├── Properties/          # Publish profiles
-│       ├── Services/            # Business logic services
-│       ├── Themes/              # Dark theme resources
-│       ├── ViewModels/          # MVVM ViewModels
-│       └── Views/               # XAML views
+│   ├── NineLives/
+│   │   ├── Assets/              # Application icon
+│   │   ├── Converters/          # XAML value converters
+│   │   ├── Models/              # Data models
+│   │   ├── Properties/          # Publish profiles
+│   │   ├── Services/            # Business logic services
+│   │   ├── Themes/              # Dark theme resources
+│   │   ├── ViewModels/          # MVVM ViewModels
+│   │   └── Views/               # XAML views
+│   └── NineLives.Tests/         # xunit tests (chain logic, parsers, script generation)
 ├── build_standalone.cmd         # One-shot publish script
 └── NineLives.sln                # Solution file
 ```

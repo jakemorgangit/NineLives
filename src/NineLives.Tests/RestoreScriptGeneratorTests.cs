@@ -1,0 +1,322 @@
+using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Services;
+using Xunit;
+
+namespace Blackcat.NineLives.Tests;
+
+public class RestoreScriptGeneratorTests
+{
+    private readonly RestoreScriptGenerator _generator = new();
+
+    private static readonly DateTime T0 = new(2026, 1, 10, 22, 0, 0);
+
+    private static BackupSet Set(BackupType type, DateTime timestamp, params string[] urls)
+    {
+        if (urls.Length == 0)
+            urls = [$"https://acct.blob.core.windows.net/backups/{timestamp:yyyyMMdd_HHmmss}.bak"];
+
+        return new BackupSet
+        {
+            SetId = timestamp.ToString("yyyyMMdd_HHmmss"),
+            Type = type,
+            Timestamp = timestamp,
+            Files = urls.Select(u => new BackupFileInfo
+            {
+                BlobName = u[(u.LastIndexOf('/') + 1)..],
+                BlobUrl = u,
+                Type = type
+            }).ToList()
+        };
+    }
+
+    private static BackupChain FullOnlyChain() => new() { FullSet = Set(BackupType.Full, T0) };
+
+    private static BackupChain FullDiffLogChain() => new()
+    {
+        FullSet = Set(BackupType.Full, T0),
+        DiffSets = [Set(BackupType.Differential, T0.AddHours(4))],
+        LogSets = [Set(BackupType.TransactionLog, T0.AddHours(5)), Set(BackupType.TransactionLog, T0.AddHours(6))]
+    };
+
+    private static RestoreOptions Options(Action<RestoreOptions>? mutate = null)
+    {
+        var o = new RestoreOptions
+        {
+            TargetDatabaseName = "TestDb",
+            WithReplace = false,
+            DisconnectSessions = false,
+            RecoveryMode = RecoveryMode.Recovery
+        };
+        mutate?.Invoke(o);
+        return o;
+    }
+
+    private static List<string> Lines(string script) =>
+        script.Replace("\r\n", "\n").Split('\n').ToList();
+
+    [Fact]
+    public void Generate_FullOnly_Recovery_EmitsRecoveryNotNoRecovery()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options());
+
+        Assert.Contains("RESTORE DATABASE [TestDb]", script);
+        Assert.Contains("RECOVERY,", script);
+        Assert.DoesNotContain("NORECOVERY", script);
+        Assert.Contains("STATS = 10;", script);
+    }
+
+    [Fact]
+    public void Generate_FullOnly_NoRecoveryMode_EmitsNoRecovery()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.RecoveryMode = RecoveryMode.NoRecovery));
+
+        Assert.Contains("NORECOVERY,", script);
+    }
+
+    [Fact]
+    public void Generate_FullOnly_Standby_EmitsStandbyPath()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.RecoveryMode = RecoveryMode.Standby;
+            o.StandbyFilePath = @"D:\standby\TestDb.tuf";
+        }));
+
+        Assert.Contains(@"STANDBY = 'D:\standby\TestDb.tuf',", script);
+    }
+
+    [Fact]
+    public void Generate_FullDiffLogChain_OnlyLastStepRecovers()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options());
+        var lines = Lines(script);
+
+        // Full and diff and the first log are intermediate: NORECOVERY.
+        var noRecoveryLines = lines.Where(l => l.Trim() == "NORECOVERY,").ToList();
+        Assert.Equal(3, noRecoveryLines.Count);
+
+        // Exactly one bare RECOVERY clause, and it belongs to the final RESTORE LOG.
+        var recoveryLines = lines.Where(l => l.Trim() == "RECOVERY,").ToList();
+        Assert.Single(recoveryLines);
+        var lastRestoreIdx = lines.FindLastIndex(l => l.StartsWith("RESTORE LOG"));
+        var recoveryIdx = lines.FindIndex(l => l.Trim() == "RECOVERY,");
+        Assert.True(recoveryIdx > lastRestoreIdx, "RECOVERY must come after the last RESTORE LOG statement");
+    }
+
+    [Fact]
+    public void Generate_ChainStatements_AppearInRestoreOrder()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options());
+
+        var fullIdx = script.IndexOf("Restore FULL backup");
+        var diffIdx = script.IndexOf("Restore DIFFERENTIAL backup");
+        var logIdx = script.IndexOf("Restore LOG backup");
+        Assert.True(fullIdx >= 0 && diffIdx > fullIdx && logIdx > diffIdx);
+        Assert.Equal(2, CountOccurrences(script, "RESTORE LOG [TestDb]"));
+    }
+
+    [Fact]
+    public void Generate_WithReplace_EmitsReplaceOnFullRestoreOnly()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options(o => o.WithReplace = true));
+
+        Assert.Equal(1, CountOccurrences(script, "REPLACE,"));
+        // REPLACE precedes the diff restore - it belongs to the full only
+        Assert.True(script.IndexOf("REPLACE,") < script.IndexOf("Restore DIFFERENTIAL"));
+    }
+
+    [Fact]
+    public void Generate_WithoutReplace_NoReplaceClause()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options());
+        Assert.DoesNotContain("REPLACE,", script);
+    }
+
+    [Fact]
+    public void Generate_FileMoves_OnlyNonEmptyTargetsEmitted()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.FileMoves =
+            [
+                new FileMoveOption { LogicalName = "TestDb_Data", NewPhysicalName = @"D:\Data\TestDb.mdf" },
+                new FileMoveOption { LogicalName = "TestDb_Log", NewPhysicalName = "" },
+            ];
+        }));
+
+        Assert.Contains(@"MOVE N'TestDb_Data' TO N'D:\Data\TestDb.mdf',", script);
+        Assert.DoesNotContain("TestDb_Log", script);
+    }
+
+    [Fact]
+    public void Generate_StopAtWithLogs_EmittedOnceOnLastLog()
+    {
+        var stopAt = T0.AddHours(5).AddMinutes(30);
+        var script = _generator.Generate(FullDiffLogChain(), Options(o => o.StopAt = stopAt));
+
+        Assert.Equal(1, CountOccurrences(script, "STOPAT"));
+        Assert.Contains($"STOPAT = '{stopAt:yyyy-MM-ddTHH:mm:ss}',", script);
+        // STOPAT belongs to the last log block: it appears after the final RESTORE LOG
+        Assert.True(script.LastIndexOf("RESTORE LOG") < script.IndexOf("STOPAT"));
+    }
+
+    [Fact]
+    public void Generate_StopAtWithoutLogs_NotEmitted()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.StopAt = T0.AddHours(1)));
+        Assert.DoesNotContain("STOPAT", script);
+        // ... but the header still documents the requested point-in-time
+        Assert.Contains("Point-in-Time:", script);
+    }
+
+    [Fact]
+    public void Generate_DisconnectSessions_EmitsSingleUserGuardAndMultiUserRestore()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.DisconnectSessions = true));
+
+        Assert.Contains("IF DB_ID('TestDb') IS NOT NULL", script);
+        Assert.Contains("ALTER DATABASE [TestDb] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;", script);
+        Assert.Contains("ALTER DATABASE [TestDb] SET MULTI_USER;", script);
+    }
+
+    [Fact]
+    public void Generate_DisconnectSessions_NoMultiUserWhenNotRecovering()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.DisconnectSessions = true;
+            o.RecoveryMode = RecoveryMode.NoRecovery;
+        }));
+
+        Assert.Contains("SINGLE_USER", script);
+        Assert.DoesNotContain("MULTI_USER", script);
+    }
+
+    [Fact]
+    public void Generate_NoDisconnectSessions_NoUserModeStatements()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options());
+        Assert.DoesNotContain("SINGLE_USER", script);
+        Assert.DoesNotContain("MULTI_USER", script);
+    }
+
+    [Fact]
+    public void Generate_PlainDbName_GetsBracketed()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.TargetDatabaseName = "MyDb"));
+        Assert.Contains("RESTORE DATABASE [MyDb]", script);
+    }
+
+    [Fact]
+    public void Generate_AlreadyBracketedDbName_KeptAsIs()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.TargetDatabaseName = "[My Db]"));
+        Assert.Contains("RESTORE DATABASE [My Db]", script);
+        Assert.DoesNotContain("[[", script);
+    }
+
+    [Fact]
+    public void Generate_EmptyDbName_UsesPlaceholder()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.TargetDatabaseName = ""));
+        Assert.Contains("RESTORE DATABASE [DatabaseName]", script);
+    }
+
+    [Fact]
+    public void Generate_StripedSet_EmitsAllUrlsCommaSeparated()
+    {
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T0,
+                "https://acct.blob.core.windows.net/backups/full_1.bak",
+                "https://acct.blob.core.windows.net/backups/full_2.bak",
+                "https://acct.blob.core.windows.net/backups/full_3.bak")
+        };
+
+        var script = _generator.Generate(chain, Options());
+        var lines = Lines(script);
+
+        Assert.Contains(lines, l => l.StartsWith("    FROM URL = N'") && l.EndsWith("full_1.bak',"));
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("URL = N'") && l.EndsWith("full_2.bak',"));
+        // Last URL has no trailing comma
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("URL = N'") && l.EndsWith("full_3.bak'"));
+    }
+
+    [Fact]
+    public void Generate_UrlWithSpace_PercentEncoded()
+    {
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T0, "https://acct.blob.core.windows.net/backups/my db/full backup.bak")
+        };
+
+        var script = _generator.Generate(chain, Options());
+
+        Assert.Contains("my%20db/full%20backup.bak", script);
+        Assert.DoesNotContain("my db/full backup.bak", script);
+    }
+
+    [Fact]
+    public void Generate_CommonOptionFlags_EmittedWhenSet()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.KeepReplication = true;
+            o.EnableBroker = true;
+            o.NewBroker = true;
+            o.StatsPercent = 5;
+        }));
+
+        Assert.Contains("KEEP_REPLICATION,", script);
+        Assert.Contains("ENABLE_BROKER,", script);
+        Assert.Contains("NEW_BROKER,", script);
+        Assert.Contains("STATS = 5;", script);
+    }
+
+    [Fact]
+    public void Generate_HeaderAndFooter_DescribeTheRestore()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options());
+
+        Assert.Contains("Nine Lives - Generated Restore Script", script);
+        Assert.Contains("-- Target Database: TestDb", script);
+        Assert.Contains("-- Restore Chain: 1 Full + 1 Diff(s) + 2 Log(s)", script);
+        Assert.Contains("-- Restore script complete.", script);
+        Assert.DoesNotContain("Point-in-Time:", script); // no StopAt requested
+    }
+
+    [Fact]
+    public void Generate_StatementsSeparatedByGo()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options(o => o.DisconnectSessions = true));
+        var goCount = Lines(script).Count(l => l.Trim() == "GO");
+
+        // disconnect + full + diff + 2 logs + reconnect
+        Assert.Equal(6, goCount);
+    }
+
+    [Fact]
+    public void Generate_NeverEmbedsCredentials()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options(o =>
+        {
+            o.SasToken = "sv=2026&sig=SECRET";
+            o.CredentialName = "MyCred";
+        }));
+
+        // The generator's contract: no credential or SAS material in the script, ever.
+        Assert.DoesNotContain("SECRET", script);
+        Assert.DoesNotContain("CREDENTIAL", script);
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0, idx = 0;
+        while ((idx = haystack.IndexOf(needle, idx, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            idx += needle.Length;
+        }
+        return count;
+    }
+}

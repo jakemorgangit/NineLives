@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+# Release runs are never cancelled and never share a concurrency group — each one must
+# finish and attach its assets to the release that triggered it.
+concurrency:
+  group: release-${{ github.run_id }}
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore NineLives.sln
+
+      - name: Build
+        run: dotnet build NineLives.sln -c Release --no-restore -warnaserror
+
+      # A release compiles AND tests from a cold tree — the tag is not exempt from the
+      # same gate every PR passes.
+      - name: Run tests
+        run: dotnet test src/NineLives.Tests/NineLives.Tests.csproj -c Release --no-build --verbosity normal
+
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content src/NineLives/NineLives.csproj)).Project.PropertyGroup.Version | Where-Object { $_ }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Publish single-file exe
+        run: dotnet publish src/NineLives/NineLives.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          New-Item -ItemType Directory -Force -Path releases | Out-Null
+
+          # The exe IS the product (portable, no installer) - ship it directly, plus a
+          # versioned zip for anyone whose tooling wants an archive.
+          Copy-Item publish/NineLives.exe releases/NineLives.exe
+          Compress-Archive -Path publish/NineLives.exe -DestinationPath "releases/NineLives-$version-win-x64.zip" -Force
+
+          $checksums = Get-ChildItem releases/NineLives* | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          $checksums | Out-File -FilePath releases/SHA256SUMS.txt -Encoding utf8
+          Write-Host "Checksums:"
+          $checksums | ForEach-Object { Write-Host $_ }
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.event.release.tag_name }} releases/NineLives.exe "releases/NineLives-${{ steps.version.outputs.VERSION }}-win-x64.zip" releases/SHA256SUMS.txt --clobber

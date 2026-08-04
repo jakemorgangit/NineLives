@@ -7,7 +7,7 @@ echo Close Nine Lives (NineLives.exe) if it is running, then press any key to pu
 pause >nul
 
 cd /d "%SCRIPT_DIR%src\NineLives"
-dotnet publish -c Release -o "%PUBLISH_OUT%" -r win-x64 --self-contained
+dotnet publish -c Release -o "%PUBLISH_OUT%" -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
 set "EXIT_CODE=%ERRORLEVEL%"
 if %EXIT_CODE% equ 0 (

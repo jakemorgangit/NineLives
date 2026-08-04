@@ -15,10 +15,10 @@
     <Company>Blackcat Data Solutions Ltd</Company>
     <Copyright>Copyright (c) 2026 Jake Morgan</Copyright>
     <Description>Nine Lives - point-in-time SQL Server restore from Azure Blob Storage. Every database deserves nine lives.</Description>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Publish-time settings (single-file, self-contained, win-x64) live in
+         Properties/PublishProfiles/SingleFileExe.pubxml and the publish commands in
+         build_standalone.cmd / README - not here, so NineLives.Tests can reference
+         this project and plain builds stay RID-agnostic. -->
   </PropertyGroup>
 
   <ItemGroup>
