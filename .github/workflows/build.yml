@@ -32,8 +32,12 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      # --locked-mode restores exactly the graph in packages.lock.json and fails (NU1004) on
+      # any drift. Two builds of the same commit therefore produce the same binaries, and a
+      # dependency cannot change under us without a commit that says so. Updating a package
+      # means running "dotnet restore --force-evaluate" and committing the new lock file.
       - name: Restore dependencies
-        run: dotnet restore NineLives.sln
+        run: dotnet restore NineLives.sln --locked-mode
 
       # -warnaserror locks in the current zero-warning state: a PR that introduces the
       # first compiler warning fails here instead of starting an accumulation nobody

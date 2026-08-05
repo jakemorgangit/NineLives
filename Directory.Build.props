@@ -1,0 +1,36 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Every project writes a packages.lock.json recording the whole resolved graph,
+         direct and transitive. CI restores in locked mode, so a package that changes
+         underneath us fails the build instead of quietly shipping. New projects
+         inherit this automatically.
+
+         The exception is a single-file publish. That restore additionally pulls
+         Microsoft.NET.ILLink.Tasks, an SDK-internal tool pack whose version tracks the
+         installed SDK rather than anything we chose. Recording it would mean the lock
+         file only validates on whichever SDK patch generated it - CI and every
+         contributor would break apart the moment their SDKs diverged. So the publish
+         restore neither reads nor rewrites the lock file. What it does still get is the
+         exact pinned versions from the csproj files, and the win-x64 runtime assets for
+         those packages are recorded in the lock file via RuntimeIdentifiers. The
+         unlocked part is SDK tooling, not our dependencies.
+
+         Clearing RestorePackagesWithLockFile is not enough on its own - NuGet keeps an
+         existing lock file up to date whether or not the property is set - so the publish
+         restore is also pointed at a throwaway file under obj/. Without that, every
+         publish leaves the committed lock file dirty. -->
+    <RestorePackagesWithLockFile Condition="'$(PublishSingleFile)' != 'true'">true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath Condition="'$(PublishSingleFile)' == 'true'">$(MSBuildProjectDirectory)\obj\publish-packages.lock.json</NuGetLockFilePath>
+
+    <!-- Pinned versions no longer pick up security patches on their own, so restore has to
+         say when a pinned package develops a known vulnerability. "all" covers the
+         transitive graph too, which is where most of them actually live. These stay
+         warnings rather than errors: a freshly disclosed CVE should be loud, but it
+         should not brick a release build at 2am. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+  </PropertyGroup>
+
+</Project>
