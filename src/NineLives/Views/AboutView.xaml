@@ -5,18 +5,19 @@
     <Grid VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
         <Border Style="{StaticResource CardBorder}" Padding="32">
             <StackPanel HorizontalAlignment="Center">
-                <!-- Icon -->
-                <TextBlock Text="&#x2601;" FontSize="56"
-                           Foreground="{StaticResource AccentBrush}"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,8" />
+                <!-- The real mark, not a stand-in glyph -->
+                <ContentControl Template="{StaticResource NineLivesLogo}"
+                                Height="96"
+                                HorizontalAlignment="Center"
+                                Margin="0,0,0,16" />
 
-                <TextBlock Text="{Binding AppName}"
-                           FontSize="28" FontWeight="Bold"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           HorizontalAlignment="Center"
-                           FontFamily="Segoe UI"
-                           Margin="0,0,0,12" />
+                <TextBlock Style="{StaticResource LogoWordmark}"
+                           FontSize="26"
+                           Margin="0,0,0,12">
+                    <Run Text="N I N E" Foreground="{StaticResource PrimaryTextBrush}" />
+                    <Run Text="  " />
+                    <Run Text="L I V E S" Foreground="#3B83E9" />
+                </TextBlock>
 
                 <TextBlock Text="{Binding Version}"
                            FontSize="14"

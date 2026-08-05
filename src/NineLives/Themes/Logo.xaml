@@ -1,0 +1,97 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ============================================================
+         Nine Lives logo, translated from Assets/nine-lives-logo.svg
+         into native WPF geometry.
+
+         Vector rather than an embedded bitmap so it stays crisp at any size and
+         on any DPI, and so the gradients and glow are real rather than baked in.
+         Path data, gradient stops and stroke widths are taken verbatim from the
+         SVG; the SVG's feGaussianBlur + blue flood on the nine is expressed as a
+         DropShadowEffect with no offset, which is the closest WPF equivalent.
+
+         Coordinate space matches the SVG viewBox (375 x 343). Wrap in a Viewbox
+         to size it - see NineLivesLogo below.
+         ============================================================ -->
+
+    <LinearGradientBrush x:Key="LogoPadFill" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Offset="0" Color="#373C43" />
+        <GradientStop Offset="0.48" Color="#262B31" />
+        <GradientStop Offset="1" Color="#15191F" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="LogoPadEdge" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Offset="0" Color="#89919B" />
+        <GradientStop Offset="0.46" Color="#5F6873" />
+        <GradientStop Offset="0.72" Color="#397FD8" />
+        <GradientStop Offset="1" Color="#147CFF" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="LogoNineFill" StartPoint="0,0" EndPoint="0.8,1">
+        <GradientStop Offset="0" Color="#69A9FF" />
+        <GradientStop Offset="0.45" Color="#3B83E9" />
+        <GradientStop Offset="1" Color="#1F61BB" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="LogoNineEdge" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Offset="0" Color="#9BC5FF" />
+        <GradientStop Offset="1" Color="#245CAE" />
+    </LinearGradientBrush>
+
+    <!-- Apply to a ContentControl and give it a Width or Height:
+             <ContentControl Template="{StaticResource NineLivesLogo}" Height="180" /> -->
+    <ControlTemplate x:Key="NineLivesLogo">
+        <Viewbox Stretch="Uniform">
+            <Canvas Width="375" Height="343">
+
+                <!-- Toe pads, outer left to outer right -->
+                <Path Data="M29,106 L55,106 L95,151 L97,193 L84,210 L64,217 L35,203 L20,185 L13,156 Z"
+                      Fill="{StaticResource LogoPadFill}"
+                      Stroke="{StaticResource LogoPadEdge}"
+                      StrokeThickness="2.4" StrokeLineJoin="Round" />
+
+                <Path Data="M115,9 L145,9 L178,70 L178,121 L166,139 L132,151 L100,143 L89,93 Z"
+                      Fill="{StaticResource LogoPadFill}"
+                      Stroke="{StaticResource LogoPadEdge}"
+                      StrokeThickness="2.4" StrokeLineJoin="Round" />
+
+                <Path Data="M236,9 L267,9 L293,59 L282,120 L267,141 L229,146 L205,124 L204,72 Z"
+                      Fill="{StaticResource LogoPadFill}"
+                      Stroke="{StaticResource LogoPadEdge}"
+                      StrokeThickness="2.4" StrokeLineJoin="Round" />
+
+                <Path Data="M327,106 L351,106 L370,156 L357,194 L338,210 L315,217 L294,205 L286,188 L288,150 Z"
+                      Fill="{StaticResource LogoPadFill}"
+                      Stroke="{StaticResource LogoPadEdge}"
+                      StrokeThickness="2.4" StrokeLineJoin="Round" />
+
+                <!-- Main pad -->
+                <Path Data="M167,163 L212,163 L245,181 L315,253 L315,296 L277,334 L210,327 L170,327 L106,334 L67,297 L67,254 L134,184 Z"
+                      Fill="{StaticResource LogoPadFill}"
+                      Stroke="{StaticResource LogoPadEdge}"
+                      StrokeThickness="2.8" StrokeLineJoin="Round" />
+
+                <!-- The nine, carrying the blue glow -->
+                <Path Data="M137,327 L169,327 L232,263 L232,220 L212,200 L169,200 L151,220 L151,254 L169,276 L188,276 L200,254 L181,254 L171,244 L171,222 L181,212 L201,212 L211,222 L211,253 Z"
+                      Fill="{StaticResource LogoNineFill}"
+                      Stroke="{StaticResource LogoNineEdge}"
+                      StrokeThickness="1.6" StrokeLineJoin="Round">
+                    <Path.Effect>
+                        <DropShadowEffect Color="#1686FF" BlurRadius="14" ShadowDepth="0" Opacity="0.55" />
+                    </Path.Effect>
+                </Path>
+
+            </Canvas>
+        </Viewbox>
+    </ControlTemplate>
+
+    <!-- Wordmark: NINE in white, LIVES in brand blue, widely tracked. -->
+    <Style x:Key="LogoWordmark" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="FontSize" Value="34" />
+        <Setter Property="FontWeight" Value="Light" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+</ResourceDictionary>
