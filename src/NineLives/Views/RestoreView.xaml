@@ -958,6 +958,60 @@
                                      TextChanged="ExecutionLogBox_TextChanged" />
                         </StackPanel>
                     </Border>
+
+                    <!-- What a failed restore left behind, and how to undo it (#14). A chain that
+                         stops part-way leaves the target in RESTORING, and in SINGLE_USER too if
+                         Disconnect sessions was on. Both block other connections, and this is the
+                         worst moment to be left working that out from a raw SQL error. Each action
+                         shows the exact statement before it runs. -->
+                    <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                            Background="#3A1E1E" BorderBrush="#A33F3F" BorderThickness="1"
+                            Visibility="{Binding HasRecoveryActions, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="THE TARGET DATABASE NEEDS ATTENTION"
+                                       Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                            <TextBlock Text="{Binding RecoveryStateMessage}"
+                                       Style="{StaticResource BodyText}"
+                                       TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <ItemsControl ItemsSource="{Binding RecoveryActions}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource InputBackgroundBrush}"
+                                                CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                                           TextWrapping="Wrap" />
+                                                <TextBox Text="{Binding Sql, Mode=OneWay}"
+                                                         Style="{StaticResource DarkTextBox}"
+                                                         IsReadOnly="True" TextWrapping="Wrap"
+                                                         FontFamily="Cascadia Code, Consolas, Courier New"
+                                                         FontSize="12" Margin="0,6,0,6" />
+                                                <TextBlock Text="{Binding Caution}"
+                                                           Style="{StaticResource SecondaryText}"
+                                                           TextWrapping="Wrap" Margin="0,0,0,8" />
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Content="Run this"
+                                                            Command="{Binding DataContext.RunRecoveryActionCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource SecondaryButton}"
+                                                            Padding="10,6" Margin="0,0,8,0" />
+                                                    <Button Content="Copy"
+                                                            Command="{Binding DataContext.CopyRecoveryActionCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource SecondaryButton}"
+                                                            Padding="10,6" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

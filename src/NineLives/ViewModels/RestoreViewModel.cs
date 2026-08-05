@@ -167,6 +167,20 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasInventoryIssues;
 
+    // ── Aftermath of a failed restore (#14) ─────────────────────────────────────
+    // A chain that stops part-way leaves the target in RESTORING, and in SINGLE_USER too if
+    // Disconnect sessions was on, because the closing SET MULTI_USER never ran. Both block other
+    // connections, at the worst possible moment.
+
+    [ObservableProperty]
+    private string _recoveryStateMessage = string.Empty;
+
+    [ObservableProperty]
+    private ObservableCollection<RecoveryAction> _recoveryActions = [];
+
+    [ObservableProperty]
+    private bool _hasRecoveryActions;
+
     /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
     [ObservableProperty]
     private bool _chainLsnVerified;
@@ -1126,45 +1140,23 @@ public partial class RestoreViewModel : ViewModelBase
 
     [RelayCommand]
     private void CopyScript()
-    {
-        if (!string.IsNullOrEmpty(GeneratedScript))
-        {
-            Clipboard.SetText(GeneratedScript);
-            SetStatus("Script copied to clipboard.");
-        }
-    }
+        => TryCopyToClipboard(GeneratedScript, "Script copied to clipboard.");
 
     [RelayCommand]
     private void CopyPathHttps(BackupFileInfo? file)
     {
         if (file == null || SelectedContainer == null) return;
-        try
-        {
-            var url = BlobStorageService.BuildBlobUrl(SelectedContainer, file.BlobName);
-            Clipboard.SetText(url);
-            SetStatus("HTTPS path copied to clipboard (no SAS token).");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(
+            BlobStorageService.BuildBlobUrl(SelectedContainer, file.BlobName),
+            "HTTPS path copied to clipboard (no SAS token).");
     }
 
     [RelayCommand]
     private void CopyPathContainer(BackupFileInfo? file)
     {
         if (file == null || SelectedContainer == null) return;
-        try
-        {
-            var containerName = SelectedContainer.ContainerName ?? "container";
-            var path = $"{containerName}/{file.BlobName}";
-            Clipboard.SetText(path);
-            SetStatus("Container path copied to clipboard.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        var containerName = SelectedContainer.ContainerName ?? "container";
+        TryCopyToClipboard($"{containerName}/{file.BlobName}", "Container path copied to clipboard.");
     }
 
     [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
@@ -1270,15 +1262,7 @@ public partial class RestoreViewModel : ViewModelBase
         var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE FILELISTONLY FROM {urlClauses}";
-        try
-        {
-            Clipboard.SetText(sql);
-            SetStatus("RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(sql, "RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
     }
 
     /// <summary>Builds the exact T-SQL for RESTORE HEADERONLY (encoded URLs, no WITH CREDENTIAL) for pasting into SSMS.</summary>
@@ -1289,15 +1273,7 @@ public partial class RestoreViewModel : ViewModelBase
         var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE HEADERONLY FROM {urlClauses}";
-        try
-        {
-            Clipboard.SetText(sql);
-            SetStatus("RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(sql, "RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
     }
 
     [RelayCommand]
@@ -1312,10 +1288,18 @@ public partial class RestoreViewModel : ViewModelBase
             FileName = $"restore_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.sql"
         };
 
-        if (dialog.ShowDialog() == true)
+        if (dialog.ShowDialog() != true) return;
+
+        try
         {
             File.WriteAllText(dialog.FileName, GeneratedScript);
             SetStatus($"Script saved to {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            // Read-only location, full disk, or a path the database name made invalid. Any of
+            // those used to take the whole app down from inside a synchronous command (#13).
+            SetError($"Could not save the script: {ex.Message}");
         }
     }
 
@@ -1432,12 +1416,89 @@ public partial class RestoreViewModel : ViewModelBase
             ExecutionSuccess = false;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
+
+            // The restore has stopped part-way and the target is almost certainly not usable.
+            // Find out exactly how, and say so, while the connection is still open (#14).
+            if (ConnectedServer != null)
+                await ReportRecoveryStateAsync(ConnectedServer);
         }
         finally
         {
             IsExecuting = false;
             ExecutionComplete = true;
         }
+    }
+
+    /// <summary>
+    /// After a failed restore, works out what state the target database was left in and offers the
+    /// statements that put it right.
+    ///
+    /// This is the moment of maximum stress - a restore has failed mid-incident and the database is
+    /// now in a state that blocks other connections. Leaving someone to work that out from a raw
+    /// SQL error, when the app is still holding the connection that could tell them, is the wrong
+    /// place to stop.
+    /// </summary>
+    private async Task ReportRecoveryStateAsync(ServerConnection server)
+    {
+        RecoveryActions = [];
+        HasRecoveryActions = false;
+        RecoveryStateMessage = string.Empty;
+
+        try
+        {
+            var state = await _sqlService.GetDatabaseRecoveryStateAsync(server, TargetDatabaseName);
+            if (!state.NeedsAttention)
+            {
+                if (!state.Exists)
+                    AppendLog($"\n[{TargetDatabaseName}] is not on the server - nothing was left behind.");
+                return;
+            }
+
+            RecoveryStateMessage = state.Explain(TargetDatabaseName);
+            RecoveryActions = new ObservableCollection<RecoveryAction>(
+                state.SuggestedActions(TargetDatabaseName));
+            HasRecoveryActions = RecoveryActions.Count > 0;
+
+            AppendLog($"\n{RecoveryStateMessage}");
+            foreach (var action in RecoveryActions)
+                AppendLog($"\n  {action.Title}:  {action.Sql}");
+        }
+        catch (Exception ex)
+        {
+            // Best effort. The restore failure is the news; failing to describe the aftermath must
+            // not replace the error the user actually needs to read.
+            AppendLog($"\nCould not check the state of [{TargetDatabaseName}]: {ex.Message}");
+        }
+    }
+
+    /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
+    [RelayCommand]
+    private async Task RunRecoveryActionAsync(RecoveryAction? action)
+    {
+        if (action == null || ConnectedServer == null) return;
+
+        try
+        {
+            AppendLog($"\nRunning: {action.Sql}");
+            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql);
+            AppendLog("Completed.");
+            await ReportRecoveryStateAsync(ConnectedServer);
+
+            if (!HasRecoveryActions)
+                SetStatus($"[{TargetDatabaseName}] is back to a usable state.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"\nERROR: {ex.Message}");
+            SetError($"Recovery step failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void CopyRecoveryAction(RecoveryAction? action)
+    {
+        if (action != null)
+            TryCopyToClipboard(action.Sql, "Recovery statement copied to clipboard.");
     }
 
     private void AppendLog(string message)
