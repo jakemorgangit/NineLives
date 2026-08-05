@@ -5,8 +5,11 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    labels: [dependencies]
     groups:
-      # One PR per week for routine bumps instead of five.
+      # One PR per week for routine bumps instead of five. Major bumps are deliberately
+      # left out of the group, so each one arrives as its own PR and gets looked at on its
+      # own merits - SqlClient 5.x to 7.x went through here unnoticed once already (#16).
       nuget-minor-patch:
         update-types: [minor, patch]
 
@@ -15,3 +18,4 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    labels: [dependencies]

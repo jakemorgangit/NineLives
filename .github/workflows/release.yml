@@ -25,8 +25,10 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      # Locked, same as build.yml — the shipped exe is built from the exact dependency graph
+      # that was reviewed and tested, not from whatever was newest on nuget.org that morning.
       - name: Restore dependencies
-        run: dotnet restore NineLives.sln
+        run: dotnet restore NineLives.sln --locked-mode
 
       - name: Build
         run: dotnet build NineLives.sln -c Release --no-restore -warnaserror
