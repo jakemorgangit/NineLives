@@ -1038,6 +1038,10 @@
                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Padding="20">
                 <StackPanel HorizontalAlignment="Center">
                     <TextBlock Text="Loading..." Style="{StaticResource BodyText}" HorizontalAlignment="Center" />
+                    <TextBlock Text="{Binding LoadProgressText}"
+                               Style="{StaticResource SecondaryText}"
+                               HorizontalAlignment="Center"
+                               Margin="0,4,0,0" />
                     <Button Content="Cancel"
                             Style="{StaticResource SecondaryButton}"
                             Command="{Binding CancelLoadCommand}"

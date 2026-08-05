@@ -42,14 +42,92 @@ public class BlobStorageService
         return true;
     }
 
-    public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
+    /// <summary>The container's top-level folders, read without listing a single blob.</summary>
+    public async Task<List<string>> ListTopLevelFoldersAsync(
         BlobContainerConfig config, CancellationToken ct = default)
+    {
+        var client = CreateClient(config);
+        var folders = new List<string>();
+
+        await foreach (var item in client.GetBlobsByHierarchyAsync(
+            BlobTraits.None, BlobStates.None, delimiter: "/", prefix: null, cancellationToken: ct))
+        {
+            if (item.IsPrefix) folders.Add(item.Prefix.TrimEnd('/'));
+        }
+
+        return folders;
+    }
+
+    public Task<List<BackupFileInfo>> ListBackupFilesAsync(
+        BlobContainerConfig config, CancellationToken ct = default)
+        => ListBackupFilesAsync(config, scope: null, progress: null, ct);
+
+    /// <summary>
+    /// Lists backup files, optionally scoped to a server and database so the listing is pushed
+    /// down to Azure as a prefix instead of walking the container and filtering afterwards (#28).
+    ///
+    /// A scope is a hint, not a promise: when the container's layout cannot produce a safe prefix -
+    /// flat Ola AG naming, a pattern whose leading segments are not known - this falls back to the
+    /// full scan and returns exactly what it always did. Returning too FEW backups would silently
+    /// remove restore points, so anything short of a provable prefix scans everything.
+    /// </summary>
+    /// <param name="progress">Reports the running blob count, for containers big enough to wait on.</param>
+    public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
+        BlobContainerConfig config,
+        BlobListingScope? scope,
+        IProgress<int>? progress,
+        CancellationToken ct = default)
     {
         var client = CreateClient(config);
         var files = new List<BackupFileInfo>();
 
-        await foreach (var blob in client.GetBlobsAsync(
-            BlobTraits.Metadata, BlobStates.None, prefix: null, cancellationToken: ct))
+        var prefixes = await ResolvePrefixesAsync(config, scope, ct);
+
+        foreach (var prefix in prefixes)
+        {
+            await foreach (var blob in client.GetBlobsAsync(
+                BlobTraits.Metadata, BlobStates.None, prefix, cancellationToken: ct))
+            {
+                ReadBlob(config, blob, files);
+                if (files.Count % 250 == 0) progress?.Report(files.Count);
+            }
+        }
+
+        progress?.Report(files.Count);
+        return files.OrderBy(f => f.LastModified).ToList();
+    }
+
+    /// <summary>
+    /// Turns a scope into the prefixes to list. A single null prefix means "scan everything".
+    /// </summary>
+    private async Task<IReadOnlyList<string?>> ResolvePrefixesAsync(
+        BlobContainerConfig config, BlobListingScope? scope, CancellationToken ct)
+    {
+        if (scope is null || !scope.HasAnything) return [null];
+        if (!BlobPrefix.SupportsPrefixes(config.BackupSourceType)) return [null];
+
+        // {BackupType} leads the default pattern, so without the real folder names no prefix can
+        // be built at all. One cheap hierarchy call buys the whole optimisation.
+        IReadOnlyCollection<string>? folders = null;
+        if (config.PathPattern.Contains("{BackupType}", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                folders = await ListTopLevelFoldersAsync(config, ct);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                // Cannot discover the folders - fall back rather than guess at names.
+                return [null];
+            }
+        }
+
+        var prefixes = BlobPrefix.Derive(config.PathPattern, scope.ServerName, scope.DatabaseName, folders);
+        return prefixes is { Count: > 0 } ? [.. prefixes] : [null];
+    }
+
+    private void ReadBlob(BlobContainerConfig config, BlobItem blob, List<BackupFileInfo> files)
+    {
         {
             var blobUrl = $"{config.ContainerUrl.TrimEnd('/')}/{blob.Name}";
 
@@ -113,8 +191,6 @@ public class BlobStorageService
 
             files.Add(file);
         }
-
-        return files.OrderBy(f => f.LastModified).ToList();
     }
 
     public ContainerSummary GetContainerSummary(List<BackupFileInfo> files)
