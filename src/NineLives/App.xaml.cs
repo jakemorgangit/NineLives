@@ -1,4 +1,5 @@
 using System.Windows;
+using Blackcat.NineLives.Services;
 using Blackcat.NineLives.Views;
 
 namespace Blackcat.NineLives;
@@ -7,6 +8,12 @@ public partial class App : Application
 {
     /// <summary>How long the splash stays up once the main window has been built.</summary>
     private static readonly TimeSpan SplashDwell = TimeSpan.FromMilliseconds(2500);
+
+    /// <summary>
+    /// One log for the whole app. Static because the exception handlers here and the viewmodels
+    /// both need it, and there is no container to resolve it from.
+    /// </summary>
+    public static OperationLog Log { get; } = new();
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -19,6 +26,9 @@ public partial class App : Application
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+        Log.Prune();
+        Log.Info($"Nine Lives {AppVersion.Display} starting on {Environment.OSVersion}");
 
         // Explicit for the whole startup sequence: while the splash is briefly the only window,
         // the default OnLastWindowClose would quit the app the moment it closed. Handed back to
@@ -79,6 +89,7 @@ public partial class App : Application
         object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;
+        Log.Error("Unhandled exception on the UI thread", e.Exception);
 
         MessageBox.Show(
             "Nine Lives hit an unexpected error.\n\n" +
@@ -98,6 +109,8 @@ public partial class App : Application
         var message = e.ExceptionObject is Exception ex
             ? $"{ex.GetType().Name}: {ex.Message}"
             : "Unknown error.";
+
+        Log.Error($"Fatal unhandled exception: {message}");
 
         MessageBox.Show(
             $"Nine Lives has to close.\n\n{message}",
