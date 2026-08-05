@@ -192,6 +192,74 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         });
     }
 
+    /// <summary>
+    /// The Stop button that appears while a restore is running (#25). It is the only way to
+    /// interrupt a restore aimed at the wrong server, so a binding that silently failed would
+    /// leave the user back at killing the process.
+    /// </summary>
+    [Fact]
+    public void TheStopRestoreButtonAppearsAndBindsWhileExecuting()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            // The execute card only exists once backups are loaded, which is correct - there is
+            // no script to run before then.
+            vm.BackupsLoaded = true;
+            vm.HasScript = true;
+            vm.IsConnectedToServer = true;
+            var view = new RestoreView { DataContext = vm };
+
+            // Not running: nothing to stop, so the button must not be offered.
+            vm.CanCancelExecute = false;
+            Realise(view);
+            Assert.DoesNotContain(VisibleButtons(view), b => (b.Content as string) == "Stop restore");
+
+            vm.CanCancelExecute = true;
+            Realise(view);
+
+            var stop = Assert.Single(VisibleButtons(view), b => (b.Content as string) == "Stop restore");
+            Assert.NotNull(stop.Command);
+        });
+    }
+
+    /// <summary>The Cancel button over the loading overlay, for a long container listing (#25).</summary>
+    [Fact]
+    public void TheCancelLoadButtonAppearsAndBindsWhileLoading()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.IsBusy = true;
+            vm.CanCancelLoad = true;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var cancel = Assert.Single(VisibleButtons(view), b => (b.Content as string) == "Cancel");
+            Assert.NotNull(cancel.Command);
+        });
+    }
+
+    [Fact]
+    public void TheBrowserCancelButtonAppearsAndBindsWhileLoading()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = new BlobBrowserViewModel(new BlobStorageService(Store()), Store())
+            {
+                IsBusy = true,
+                CanCancelLoad = true
+            };
+
+            var view = new BlobBrowserView { DataContext = vm };
+            Realise(view);
+
+            var cancel = Assert.Single(VisibleButtons(view), b => (b.Content as string) == "Cancel");
+            Assert.NotNull(cancel.Command);
+        });
+    }
+
     /// <summary>The inventory warnings panel added with #46 - separate from the chain issues one.</summary>
     [Fact]
     public void TheInventoryPanelShowsItsFindings()
@@ -276,6 +344,26 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
             store);
+    }
+
+    /// <summary>
+    /// Buttons that would be on screen. A collapsed element still exists in the visual tree, so
+    /// asserting a button is absent means asserting it is not shown, not that it is missing.
+    ///
+    /// Uses Visibility rather than IsVisible: IsVisible is false for everything until the element
+    /// is attached to a rendered window, and these tests never show one.
+    /// </summary>
+    private static List<Button> VisibleButtons(DependencyObject root)
+        => FindAll<Button>(root).Where(IsShown).ToList();
+
+    private static bool IsShown(FrameworkElement element)
+    {
+        for (DependencyObject? node = element; node != null;
+             node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is UIElement { Visibility: not Visibility.Visible }) return false;
+        }
+        return true;
     }
 
     private static IEnumerable<T> FindAll<T>(DependencyObject root) where T : DependencyObject

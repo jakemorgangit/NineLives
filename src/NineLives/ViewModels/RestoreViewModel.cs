@@ -23,6 +23,11 @@ public partial class RestoreViewModel : ViewModelBase
     private List<BackupSet> _allSets = [];
     private List<BackupSet> _dbSets = [];
 
+    // Two separate operations, two separate sources: browsing a container and running a restore
+    // can both be in flight, and cancelling one must not touch the other (#25).
+    private readonly OperationCancellation _loadCancellation = new();
+    private readonly OperationCancellation _executeCancellation = new();
+
     #region Observable Properties
 
     [ObservableProperty]
@@ -188,6 +193,28 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _hasRecoveryActions;
+
+    // ── Cancellation (#25) ──────────────────────────────────────────────────────
+
+    /// <summary>True while a backup listing is running and has not been asked to stop.</summary>
+    [ObservableProperty]
+    private bool _canCancelLoad;
+
+    /// <summary>True while a restore is running and has not been asked to stop.</summary>
+    [ObservableProperty]
+    private bool _canCancelExecute;
+
+    /// <summary>True between asking to stop and the operation actually unwinding.</summary>
+    [ObservableProperty]
+    private bool _isCancelling;
+
+    /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
+    private void RefreshCancelState()
+    {
+        CanCancelLoad = _loadCancellation.CanCancel;
+        CanCancelExecute = _executeCancellation.CanCancel;
+        IsCancelling = _loadCancellation.IsCancelling || _executeCancellation.IsCancelling;
+    }
 
     /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
     [ObservableProperty]
@@ -528,11 +555,13 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
+        var ct = _loadCancellation.Begin();
         IsBusy = true;
+        RefreshCancelState();
         ClearStatus();
         try
         {
-            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer);
+            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer, ct);
             _allSets = _blobService.GroupIntoBackupSets(_allBackups);
 
             var servers = _blobService.GetDiscoveredServers(_allBackups);
@@ -562,6 +591,13 @@ public partial class RestoreViewModel : ViewModelBase
 
             SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
+        catch (OperationCanceledException)
+        {
+            // Asked for, not a failure. Nothing was written anywhere - listing is read-only - so
+            // there is nothing to explain beyond saying it stopped.
+            SetStatus("Loading cancelled.");
+            BackupsLoaded = false;
+        }
         catch (Exception ex)
         {
             SetError($"Failed to load backups: {ex.Message}");
@@ -569,8 +605,19 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
+            _loadCancellation.End();
             IsBusy = false;
+            RefreshCancelState();
         }
+    }
+
+    /// <summary>Stops an in-progress backup listing.</summary>
+    [RelayCommand]
+    private void CancelLoad()
+    {
+        _loadCancellation.Cancel();
+        RefreshCancelState();
+        SetStatus("Cancelling...");
     }
 
     private void ComputeAndDisplayRestorePoints()
@@ -1343,9 +1390,13 @@ public partial class RestoreViewModel : ViewModelBase
         IsExecuteArmed = false;
         ExecuteButtonText = "Execute on Server";
 
+        var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
         ExecutionComplete = false;
         ExecutionLog = string.Empty;
+        RecoveryActions = [];
+        HasRecoveryActions = false;
+        RefreshCancelState();
 
         try
         {
@@ -1421,11 +1472,30 @@ public partial class RestoreViewModel : ViewModelBase
             await _sqlService.ExecuteRestoreWithProgressAsync(
                 server,
                 GeneratedScript,
-                msg => Application.Current.Dispatcher.Invoke(() => AppendLog(msg)));
+                msg => Application.Current.Dispatcher.Invoke(() => AppendLog(msg)),
+                executeToken);
 
             ExecutionSuccess = true;
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
+            // the client waiting and SQL Server rolls back the statement that was in flight, but
+            // the target stays mid-restore - so this must be as loud as a failure, and it goes
+            // through the same recovery guidance (#14, #25).
+            ExecutionSuccess = false;
+            AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
+                      "restore stopped part-way through the chain.");
+
+            App.Log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
+                $"restore CANCELLED by user, target [{TargetDatabaseName}]");
+
+            SetError("Restore cancelled. The target database has been left mid-restore - see below.");
+
+            if (ConnectedServer != null)
+                await ReportRecoveryStateAsync(ConnectedServer);
         }
         catch (Exception ex)
         {
@@ -1440,9 +1510,28 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
+            _executeCancellation.End();
             IsExecuting = false;
             ExecutionComplete = true;
+            RefreshCancelState();
         }
+    }
+
+    /// <summary>
+    /// Stops a running restore.
+    ///
+    /// Deliberately worded as a warning rather than a neutral action: stopping a restore part-way
+    /// leaves the target database in RESTORING, which is not a state anyone wants to discover by
+    /// accident. The recovery panel that appears afterwards explains how to get out of it.
+    /// </summary>
+    [RelayCommand]
+    private void CancelExecute()
+    {
+        if (!_executeCancellation.CanCancel) return;
+
+        _executeCancellation.Cancel();
+        RefreshCancelState();
+        AppendLog("\nCancellation requested - waiting for SQL Server to roll back the current statement...");
     }
 
     /// <summary>

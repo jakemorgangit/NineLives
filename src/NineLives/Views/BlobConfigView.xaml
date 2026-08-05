@@ -204,6 +204,13 @@
                                             Style="{StaticResource PrimaryButton}"
                                             Command="{Binding TestConnectionCommand}"
                                             Margin="0,0,8,0" />
+                                    <!-- "Stop test" rather than "Cancel": there is already a
+                                         Cancel on this screen and it means cancel the edit. -->
+                                    <Button Content="Stop test"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Command="{Binding CancelTestCommand}"
+                                            Visibility="{Binding CanCancelTest, Converter={StaticResource BoolToVis}}"
+                                            Margin="0,0,8,0" />
                                     <Button Content="Delete"
                                             Style="{StaticResource DangerButton}"
                                             Command="{Binding DeleteCommand}" />
@@ -606,6 +613,11 @@
                                 <Button Content="Test Connection"
                                         Style="{StaticResource PrimaryButton}"
                                         Command="{Binding TestConnectionCommand}"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Stop test"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Command="{Binding CancelTestCommand}"
+                                        Visibility="{Binding CanCancelTest, Converter={StaticResource BoolToVis}}"
                                         Margin="0,0,8,0" />
                                 <Button Content="Cancel"
                                         Style="{StaticResource SecondaryButton}"

@@ -884,6 +884,17 @@
                                 Command="{Binding ExecuteScriptCommand}"
                                 IsEnabled="{Binding IsConnectedToServer}"
                                 MinWidth="140" />
+
+                        <!-- Only while a restore is actually running. Until now the only way to
+                             stop one aimed at the wrong server was to kill the process, which
+                             leaves the database mid-restore with nothing written down (#25). -->
+                        <Button Content="Stop restore"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CancelExecuteCommand}"
+                                Visibility="{Binding CanCancelExecute, Converter={StaticResource BoolToVis}}"
+                                Margin="8,0,0,0"
+                                MinWidth="110"
+                                ToolTip="Asks SQL Server to abort the statement in flight. It rolls that statement back, but the target database is left mid-restore and will need recovering - the app will tell you how." />
                     </StackPanel>
 
                     <!-- Execute armed warning. The server's tags appear here deliberately: this is
@@ -1025,7 +1036,15 @@
             <!-- Loading -->
             <Border Background="#80000000" CornerRadius="6"
                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Padding="20">
-                <TextBlock Text="Loading..." Style="{StaticResource BodyText}" HorizontalAlignment="Center" />
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="Loading..." Style="{StaticResource BodyText}" HorizontalAlignment="Center" />
+                    <Button Content="Cancel"
+                            Style="{StaticResource SecondaryButton}"
+                            Command="{Binding CancelLoadCommand}"
+                            Visibility="{Binding CanCancelLoad, Converter={StaticResource BoolToVis}}"
+                            Padding="10,6" Margin="0,10,0,0"
+                            HorizontalAlignment="Center" />
+                </StackPanel>
             </Border>
 
             <!-- Status -->

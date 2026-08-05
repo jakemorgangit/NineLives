@@ -11,6 +11,11 @@ public partial class BlobConfigViewModel : ViewModelBase
 {
     private readonly CredentialStore _credentialStore;
     private readonly BlobStorageService _blobService;
+    private readonly OperationCancellation _testCancellation = new();
+
+    /// <summary>True while a connection test is running and has not been asked to stop (#25).</summary>
+    [ObservableProperty]
+    private bool _canCancelTest;
 
     [ObservableProperty]
     private ObservableCollection<BlobContainerConfig> _containers = [];
@@ -540,16 +545,26 @@ public partial class BlobConfigViewModel : ViewModelBase
 
         if (config == null) return;
 
+        // Test Connection sounds quick, but it enumerates the whole container to build the summary
+        // - 4000+ blobs on a real one - so it needs the same escape as the other listings (#25).
+        var ct = _testCancellation.Begin();
         IsBusy = true;
+        CanCancelTest = true;
         TestResult = string.Empty;
         try
         {
-            await _blobService.VerifyConnectionAsync(config);
-            var files = await _blobService.ListBackupFilesAsync(config);
+            await _blobService.VerifyConnectionAsync(config, ct);
+            var files = await _blobService.ListBackupFilesAsync(config, ct);
             var summary = _blobService.GetContainerSummary(files);
             ContainerSummary = summary;
             TestSuccess = true;
             TestResult = $"Connected! {summary.TotalFiles} files found ({summary.TotalSizeDisplay})";
+        }
+        catch (OperationCanceledException)
+        {
+            TestSuccess = false;
+            TestResult = "Cancelled.";
+            ContainerSummary = null;
         }
         catch (Exception ex)
         {
@@ -559,7 +574,18 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
         finally
         {
+            _testCancellation.End();
             IsBusy = false;
+            CanCancelTest = false;
         }
+    }
+
+    /// <summary>Stops an in-progress connection test.</summary>
+    [RelayCommand]
+    private void CancelTest()
+    {
+        _testCancellation.Cancel();
+        CanCancelTest = false;
+        TestResult = "Cancelling...";
     }
 }

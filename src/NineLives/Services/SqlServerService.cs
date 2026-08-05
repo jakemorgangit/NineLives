@@ -410,6 +410,20 @@ public class SqlServerService
             {
                 await cmd.ExecuteNonQueryAsync(ct);
             }
+            catch (SqlException) when (ct.IsCancellationRequested)
+            {
+                // SqlClient reports a command cancelled mid-flight as a SqlException - "A severe
+                // error occurred on the current command. The results, if any, should be discarded.
+                // Operation cancelled by user." - and NOT as an OperationCanceledException. Left
+                // alone, a caller who catches OperationCanceledException to show "cancelled"
+                // misses it entirely and tells the user their own Stop was a severe error.
+                //
+                // Only when the token was actually signalled, so a genuine severe error still
+                // propagates as the failure it is.
+                messageCallback?.Invoke(
+                    $"Cancelled during statement {i + 1} of {executable.Count}: {Summarize(statement)}");
+                throw new OperationCanceledException("The restore was cancelled.", ct);
+            }
             catch (SqlException)
             {
                 // Say WHICH step of the chain failed before it propagates. Without this the
