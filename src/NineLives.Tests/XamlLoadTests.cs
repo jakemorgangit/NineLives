@@ -261,8 +261,12 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
     }
 
     /// <summary>
-    /// The execution console renders its lines, colours them by kind, and no longer shares a slot
-    /// with the generated script - both are visible at once.
+    /// The console renders its lines and no longer shares a slot with the generated script - both
+    /// are on screen together.
+    ///
+    /// Checked in the state AFTER a restore, which is when the inline console is the one in use:
+    /// during a restore the console lives in its own window and the inline one is deliberately
+    /// hidden.
     /// </summary>
     [Fact]
     public void TheConsoleAndTheScriptAreBothVisibleTogether()
@@ -280,7 +284,8 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
                 new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
             ];
             vm.HasConsoleOutput = true;
-            vm.IsExecuting = true;
+            vm.IsExecuting = false;
+            vm.ExecutionComplete = true;
 
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
@@ -308,6 +313,58 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
             {
                 listener.Detach();
             }
+        });
+    }
+
+    /// <summary>
+    /// The inline console and the execution window are mutually exclusive: while the console is
+    /// showing in its own window the inline one must be gone, not sitting behind it.
+    /// </summary>
+    [Fact]
+    public void TheInlineConsoleHidesWhileTheConsoleIsInItsOwnWindow()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.BackupsLoaded = true;
+            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
+            vm.HasConsoleOutput = true;
+
+            var view = new RestoreView { DataContext = vm };
+
+            vm.IsConsoleDetached = false;
+            Realise(view);
+            Assert.True(FindAll<ListBox>(view).Any(IsShown),
+                "The inline console should be visible when it is not shown in its own window.");
+
+            vm.IsConsoleDetached = true;
+            Realise(view);
+            Assert.False(FindAll<ListBox>(view).Any(IsShown),
+                "The inline console is still on screen behind the execution window.");
+        });
+    }
+
+    /// <summary>
+    /// The belt-and-braces half: while a restore is running the console is always in its own
+    /// window, so the inline one must be gone even if the detach flag never got set.
+    /// </summary>
+    [Fact]
+    public void TheInlineConsoleHidesWhileARestoreIsRunning()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.BackupsLoaded = true;
+            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
+            vm.HasConsoleOutput = true;
+            vm.IsConsoleDetached = false;   // as if the wiring failed
+            vm.IsExecuting = true;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            Assert.False(FindAll<ListBox>(view).Any(IsShown),
+                "Two consoles would be on screen at once during a restore.");
         });
     }
 

@@ -983,6 +983,12 @@
                                         <MultiDataTrigger.Conditions>
                                             <Condition Binding="{Binding HasConsoleOutput}" Value="True" />
                                             <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
+                                            <!-- Belt and braces. While a restore runs the console
+                                                 is always in its own window, so the inline one
+                                                 must be gone even if the detach flag never got
+                                                 set - a wiring failure should not put two
+                                                 consoles on screen. -->
+                                            <Condition Binding="{Binding IsExecuting}" Value="False" />
                                         </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible" />
                                     </MultiDataTrigger>
