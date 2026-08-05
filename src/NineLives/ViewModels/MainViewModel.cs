@@ -198,27 +198,48 @@ public partial class MainViewModel : ViewModelBase
         ServerManager.DisconnectCommand.Execute(null);
     }
 
+    /// <summary>
+    /// The sidebar's view names. Constants rather than literals scattered across the switch,
+    /// because an unrecognised name here silently lands on Blob Storage rather than failing -
+    /// so a typo looks like a button that goes to the wrong place (#42).
+    ///
+    /// The XAML still passes them as strings; <see cref="Views"/> is what a test can check the
+    /// switch against.
+    /// </summary>
+    public static class Nav
+    {
+        public const string BlobStorage = "Blob Storage";
+        public const string SqlServers = "SQL Servers";
+        public const string BrowseBackups = "Browse Backups";
+        public const string Restore = "Restore";
+        public const string History = "History";
+        public const string About = "About";
+
+        public static IReadOnlyList<string> Views =>
+            [BlobStorage, SqlServers, BrowseBackups, Restore, History, About];
+    }
+
     [RelayCommand]
     private void NavigateTo(string viewName)
     {
         CurrentViewName = viewName;
         CurrentView = viewName switch
         {
-            "Blob Storage" => BlobConfig,
-            "SQL Servers" => ServerManager,
-            "Browse Backups" => BlobBrowser,
-            "Restore" => Restore,
-            "History" => History,
-            "About" => About,
+            Nav.BlobStorage => BlobConfig,
+            Nav.SqlServers => ServerManager,
+            Nav.BrowseBackups => BlobBrowser,
+            Nav.Restore => Restore,
+            Nav.History => History,
+            Nav.About => About,
             _ => BlobConfig
         };
 
         // Refresh container lists when navigating to views that depend on them
-        if (viewName is "Browse Backups")
+        if (viewName is Nav.BrowseBackups)
             BlobBrowser.RefreshContainers();
-        else if (viewName is "Restore")
+        else if (viewName is Nav.Restore)
             Restore.RefreshContainers();
-        else if (viewName is "History")
+        else if (viewName is Nav.History)
             // Re-read on every visit: a restore run since the last look must be here, and the
             // history is written by the Restore screen rather than by this one.
             History.Refresh();

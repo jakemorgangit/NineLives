@@ -373,34 +373,9 @@ public class BackupChainBuilderTests
         Assert.Equal(T(3), window.Value.latest);
     }
 
-    // ---- GetRestoreWindow (BackupFileInfo overload) ----------------------
-
-    [Fact]
-    public void GetRestoreWindow_Files_NoFulls_ReturnsNull()
-    {
-        var files = new List<BackupFileInfo>
-        {
-            File(BackupType.TransactionLog, T(1)),
-            File(BackupType.Unknown, T(2))
-        };
-
-        Assert.Null(_builder.GetRestoreWindow(files));
-    }
-
-    [Fact]
-    public void GetRestoreWindow_Files_UsesBackupStartDateWhenPresentOtherwiseLastModified()
-    {
-        // The full's EffectiveDate comes from BackupStartDate (not LastModified);
-        // the log has no header metadata so its LastModified wins for the latest bound.
-        var full = File(BackupType.Full, lastModified: T(9), backupStartDate: T(1));
-        var log = File(BackupType.TransactionLog, lastModified: T(12));
-
-        var window = _builder.GetRestoreWindow(new List<BackupFileInfo> { full, log });
-
-        Assert.NotNull(window);
-        Assert.Equal(T(1), window.Value.earliest);
-        Assert.Equal(T(12), window.Value.latest);
-    }
+    // The file-level GetRestoreWindow overload and its two tests are gone (#42). It had no
+    // production caller and compared BackupStartDate against LastModified - two different clocks
+    // (#47) - so its tests were pinning behaviour nothing depended on and nobody should copy.
 
     // ---- BuildChainFromRestorePoint --------------------------------------
 

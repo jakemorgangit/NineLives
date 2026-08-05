@@ -1517,10 +1517,6 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        var sasToken = SelectedContainer != null
-            ? _credentialStore.GetSasToken(SelectedContainer)
-            : null;
-
         var fileMoves = new List<FileMoveOption>();
         if (UseWithMove)
         {
@@ -1554,9 +1550,6 @@ public partial class RestoreViewModel : ViewModelBase
             NewBroker = NewBroker,
             WithChecksum = WithChecksum,
             ContinueAfterError = ContinueAfterError,
-            SqlCredentialName = SqlCredentialName,
-            SasToken = sasToken,
-            StorageAccountUrl = SelectedContainer?.ContainerUrl,
             FileMoves = fileMoves
         };
 
