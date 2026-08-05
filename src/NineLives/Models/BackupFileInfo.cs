@@ -79,21 +79,7 @@ public class BackupFileInfo
         _ => "Unknown"
     };
 
-    public string SizeDisplay
-    {
-        get
-        {
-            string[] units = ["B", "KB", "MB", "GB", "TB"];
-            double size = SizeBytes;
-            int unit = 0;
-            while (size >= 1024 && unit < units.Length - 1)
-            {
-                size /= 1024;
-                unit++;
-            }
-            return $"{size:F1} {units[unit]}";
-        }
-    }
+    public string SizeDisplay => ByteSize.Format(SizeBytes);
 
     public override string ToString()
         => $"[{TypeDisplay}] {BlobName} ({SizeDisplay}) - {EffectiveDate:yyyy-MM-dd HH:mm:ss}";
@@ -137,21 +123,7 @@ public class BackupSet
     public int FileCount => Files.Count;
     public bool IsStriped => Files.Count > 1;
 
-    public string SizeDisplay
-    {
-        get
-        {
-            string[] units = ["B", "KB", "MB", "GB", "TB"];
-            double size = TotalSizeBytes;
-            int unit = 0;
-            while (size >= 1024 && unit < units.Length - 1)
-            {
-                size /= 1024;
-                unit++;
-            }
-            return $"{size:F1} {units[unit]}";
-        }
-    }
+    public string SizeDisplay => ByteSize.Format(TotalSizeBytes);
 
     public string TypeDisplay => Type switch
     {
@@ -261,21 +233,7 @@ public class RestorePoint
         }
     }
 
-    public string SizeDisplay
-    {
-        get
-        {
-            string[] units = ["B", "KB", "MB", "GB", "TB"];
-            double size = TotalSizeBytes;
-            int unit = 0;
-            while (size >= 1024 && unit < units.Length - 1)
-            {
-                size /= 1024;
-                unit++;
-            }
-            return $"{size:F1} {units[unit]}";
-        }
-    }
+    public string SizeDisplay => ByteSize.Format(TotalSizeBytes);
 
     public string ChainDescription
     {

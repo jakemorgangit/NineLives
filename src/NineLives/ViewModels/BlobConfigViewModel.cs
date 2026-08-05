@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -463,6 +464,18 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void Delete()
     {
         if (SelectedContainer == null) return;
+
+        // Deleting takes the SAS token out of Credential Manager, and the token is never displayed
+        // anywhere in the app - so if it was the only copy, it is gone for good. That deserves a
+        // question rather than a single click (#42).
+        var confirm = MessageBox.Show(
+            $"Remove the container \"{SelectedContainer.Name}\"?\n\n" +
+            "Its stored SAS token will be deleted from Windows Credential Manager. The app never " +
+            "displays stored tokens, so if this is the only copy you will need to obtain a new one.\n\n" +
+            "Nothing in Azure is affected - no backups are deleted.",
+            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+        if (confirm != MessageBoxResult.Yes) return;
 
         // Remove from the config first and only destroy the secret once that write has actually
         // landed. The other order threw the SAS token away and then, if the save failed, left the
