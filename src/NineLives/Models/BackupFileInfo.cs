@@ -10,6 +10,61 @@ public enum BackupType
     Unknown
 }
 
+/// <summary>
+/// Where a backup's time reading came from - which also says what clock it is on.
+///
+/// These are NOT the same time base, and nothing in a container tells us the offset between
+/// them, so they can only be compared once you accept the skew. A container whose files are
+/// homogeneous is fine either way; the problem case is one database with both kinds, where a
+/// fallback-derived set can sort hours out of position.
+/// </summary>
+public enum BackupTimestampSource
+{
+    /// <summary>Parsed out of the filename, so it reads the BACKUP SERVER's local clock.</summary>
+    FileName,
+
+    /// <summary>Read from SQL Server's own header, so it reads the backup server's local clock.</summary>
+    BackupHeader,
+
+    /// <summary>
+    /// Fallback: the blob's LastModified, which is UTC, and additionally records when the file
+    /// finished uploading rather than when the backup was taken.
+    /// </summary>
+    BlobLastModified
+}
+
+/// <summary>
+/// Helpers for the app's backup time readings.
+/// </summary>
+public static class BackupTime
+{
+    /// <summary>
+    /// Reduces a blob's LastModified to a bare wall-clock reading.
+    ///
+    /// Kind is deliberately Unspecified. Every time value the app sorts on is a wall clock whose
+    /// zone is recorded separately in a <see cref="BackupTimestampSource"/>; leaving Kind unset
+    /// keeps anything from quietly converting one base into another - notably
+    /// <c>new DateTimeOffset(value)</c>, which silently assumes the WORKSTATION's offset, and
+    /// <c>ToLocalTime()</c>, which is the workstation's zone rather than the backup server's.
+    /// </summary>
+    public static DateTime WallClock(DateTimeOffset value)
+        => DateTime.SpecifyKind(value.UtcDateTime, DateTimeKind.Unspecified);
+
+    /// <summary>Explains an approximate reading. Shown as a tooltip wherever one is displayed.</summary>
+    public const string ApproximateNote =
+        "Approximate. This file's name carries no timestamp, so the time shown is when the blob "
+        + "was last modified (UTC), not when the backup was taken on the server. It may sit hours "
+        + "away from the other entries.";
+
+    /// <summary>Prefix marking a displayed time as approximate.</summary>
+    public const string ApproximateMarker = "~";
+
+    public static string Format(DateTime value, bool approximate)
+        => approximate
+            ? ApproximateMarker + value.ToString("yyyy-MM-dd HH:mm:ss")
+            : value.ToString("yyyy-MM-dd HH:mm:ss");
+}
+
 public class BackupFileInfo
 {
     public string BlobName { get; set; } = string.Empty;
@@ -69,7 +124,22 @@ public class BackupFileInfo
     public bool MatchesServer(string? serverFilter)
         => ServerIdentity.Matches(InferredServerName, InferredInstanceName, serverFilter);
 
-    public DateTime EffectiveDate => BackupStartDate ?? LastModified.DateTime;
+    /// <summary>
+    /// Best available time for this file. Prefer the header's BackupStartDate, which is the
+    /// backup server's local clock; without it fall back to the blob's LastModified, which is
+    /// UTC. <see cref="EffectiveDateSource"/> says which you got - the two are not interchangeable.
+    /// </summary>
+    public DateTime EffectiveDate => BackupStartDate ?? BackupTime.WallClock(LastModified);
+
+    public BackupTimestampSource EffectiveDateSource => BackupStartDate.HasValue
+        ? BackupTimestampSource.BackupHeader
+        : BackupTimestampSource.BlobLastModified;
+
+    public bool IsEffectiveDateApproximate => !BackupStartDate.HasValue;
+
+    public string EffectiveDateDisplay => BackupTime.Format(EffectiveDate, IsEffectiveDateApproximate);
+
+    public string? EffectiveDateNote => IsEffectiveDateApproximate ? BackupTime.ApproximateNote : null;
 
     public string TypeDisplay => Type switch
     {
@@ -94,7 +164,24 @@ public class BackupSet
     public string SetId { get; set; } = string.Empty;
     public BackupType Type { get; set; }
     public List<BackupFileInfo> Files { get; set; } = [];
+    /// <summary>
+    /// When this backup was taken, as a bare wall clock. <see cref="TimestampSource"/> says which
+    /// clock it is on - sets in one container can differ, and nothing reconciles them.
+    /// </summary>
     public DateTime Timestamp { get; set; }
+
+    public BackupTimestampSource TimestampSource { get; set; } = BackupTimestampSource.FileName;
+
+    /// <summary>
+    /// True when the time had to be taken from the blob rather than the filename, which puts it
+    /// on a different clock (UTC) from its neighbours and can sort it hours out of position.
+    /// </summary>
+    public bool IsTimestampApproximate => TimestampSource == BackupTimestampSource.BlobLastModified;
+
+    public string TimestampDisplay => BackupTime.Format(Timestamp, IsTimestampApproximate);
+
+    public string? TimestampNote => IsTimestampApproximate ? BackupTime.ApproximateNote : null;
+
     public string? DatabaseName { get; set; }
     public string? ServerName { get; set; }
 
@@ -198,6 +285,16 @@ public class RestorePoint
     /// Vertical stacking row (0 = bottom/track level, 1 = above, etc.). Computed by ViewModel.
     /// </summary>
     public int Row { get; set; }
+
+    /// <summary>
+    /// True when this point's own time is a blob-derived approximation, which is what decides
+    /// where it lands on the timeline.
+    /// </summary>
+    public bool IsTimestampApproximate => PrimarySet?.IsTimestampApproximate ?? false;
+
+    public string TimestampDisplay => BackupTime.Format(Timestamp, IsTimestampApproximate);
+
+    public string? TimestampNote => IsTimestampApproximate ? BackupTime.ApproximateNote : null;
 
     public string TypeDisplay => Type switch
     {

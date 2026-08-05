@@ -261,7 +261,15 @@ public partial class BlobBrowserViewModel : ViewModelBase
         {
             var earliest = filtered.Min(s => s.Timestamp);
             var latest = filtered.Max(s => s.Timestamp);
-            DbSummaryText = $"{Summary.FullBackups} Full, {Summary.DiffBackups} Diff, {Summary.LogBackups} Log sets  |  {earliest:yyyy-MM-dd} to {latest:yyyy-MM-dd}";
+
+            // Sets whose filename carried no timestamp fall back to the blob's LastModified, which
+            // is UTC rather than the backup server's clock - so the range they bound is only as
+            // good as that skew. Say so rather than presenting one exact-looking window.
+            var approximate = Summary.ApproximateSets > 0
+                ? $"  |  {Summary.ApproximateSets} approximate"
+                : string.Empty;
+
+            DbSummaryText = $"{Summary.FullBackups} Full, {Summary.DiffBackups} Diff, {Summary.LogBackups} Log sets  |  {earliest:yyyy-MM-dd} to {latest:yyyy-MM-dd}{approximate}";
         }
         else
         {
