@@ -222,4 +222,10 @@ public class AppConfig
     public List<ServerConnection> Servers { get; set; } = [];
     public string? LastSelectedContainer { get; set; }
     public string? LastSelectedServer { get; set; }
+
+    /// <summary>Check GitHub for a newer release at startup. Turn off for offline installs.</summary>
+    public bool CheckForUpdates { get; set; } = true;
+
+    /// <summary>Last release tag the user was told about, so the banner does not nag.</summary>
+    public string? LastNotifiedReleaseTag { get; set; }
 }

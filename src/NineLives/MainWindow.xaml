@@ -37,11 +37,50 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0">
+        <!-- Update banner. Non-modal and dismissible on purpose: the app may well be open
+             because something is on fire, and a popup between the DBA and the restore button
+             would be exactly wrong. -->
+        <Border Grid.Row="0"
+                Background="#1B2A44"
+                BorderBrush="#2E4468"
+                BorderThickness="0,0,0,1"
+                Padding="16,8"
+                Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Text="{Binding UpdateMessage}"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           FontFamily="Segoe UI"
+                           FontSize="12.5" />
+
+                <Button Grid.Column="1"
+                        Content="View release"
+                        Command="{Binding OpenReleasesPageCommand}"
+                        Style="{StaticResource SecondaryButton}"
+                        Padding="12,4"
+                        Margin="12,0,8,0" />
+
+                <Button Grid.Column="2"
+                        Content="Dismiss"
+                        Command="{Binding DismissUpdateCommand}"
+                        Style="{StaticResource SecondaryButton}"
+                        Padding="12,4" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="220" />
                 <ColumnDefinition Width="*" />
@@ -205,7 +244,7 @@
         </Grid>
 
         <!-- Status Bar -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 Background="{StaticResource StatusBarBackgroundBrush}"
                 Padding="16,6">
             <Grid>

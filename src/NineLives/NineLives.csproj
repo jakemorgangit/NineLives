@@ -31,4 +31,9 @@
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets the tests reach pure decision helpers without widening the public API. -->
+    <InternalsVisibleTo Include="NineLives.Tests" />
+  </ItemGroup>
+
 </Project>

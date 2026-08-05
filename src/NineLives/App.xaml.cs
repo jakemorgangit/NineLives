@@ -6,7 +6,7 @@ namespace Blackcat.NineLives;
 public partial class App : Application
 {
     /// <summary>How long the splash stays up once the main window has been built.</summary>
-    private static readonly TimeSpan SplashDwell = TimeSpan.FromMilliseconds(1400);
+    private static readonly TimeSpan SplashDwell = TimeSpan.FromMilliseconds(2500);
 
     protected override async void OnStartup(StartupEventArgs e)
     {
