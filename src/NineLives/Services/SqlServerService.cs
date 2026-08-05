@@ -150,6 +150,49 @@ public class SqlServerService
         return result?.ToString() ?? "Unknown";
     }
 
+    /// <summary>
+    /// Reads what state a database is in, so a failed restore can say what it left behind (#14).
+    /// Parameterised - the name comes from a text box.
+    /// </summary>
+    public async Task<DatabaseRecoveryState> GetDatabaseRecoveryStateAsync(
+        ServerConnection server, string databaseName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(databaseName))
+            return DatabaseRecoveryState.Missing;
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT state_desc, user_access_desc FROM sys.databases WHERE name = @name";
+        cmd.Parameters.AddWithValue("@name", databaseName);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return DatabaseRecoveryState.Missing;
+
+        return new DatabaseRecoveryState(
+            true,
+            reader["state_desc"]?.ToString(),
+            reader["user_access_desc"]?.ToString());
+    }
+
+    /// <summary>
+    /// Runs a single remediation statement chosen by the user from
+    /// <see cref="DatabaseRecoveryState.SuggestedActions"/>. Deliberately takes the whole statement
+    /// rather than building one - the user has already been shown exactly what will run.
+    /// </summary>
+    public async Task ExecuteRecoveryActionAsync(
+        ServerConnection server, string sql, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
     {
         await using var conn = CreateConnection(server);

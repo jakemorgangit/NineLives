@@ -256,16 +256,9 @@ public partial class BlobBrowserViewModel : ViewModelBase
     {
         var target = file ?? SelectedFile;
         if (target == null || SelectedContainer == null) return;
-        try
-        {
-            var url = BlobStorageService.BuildBlobUrl(SelectedContainer, target.BlobName);
-            Clipboard.SetText(url);
-            SetStatus("HTTPS path copied to clipboard (no SAS token).");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(
+            BlobStorageService.BuildBlobUrl(SelectedContainer, target.BlobName),
+            "HTTPS path copied to clipboard (no SAS token).");
     }
 
     [RelayCommand]
@@ -273,16 +266,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     {
         var target = file ?? SelectedFile;
         if (target == null || SelectedContainer == null) return;
-        try
-        {
-            var containerName = SelectedContainer.ContainerName ?? "container";
-            var path = $"{containerName}/{target.BlobName}";
-            Clipboard.SetText(path);
-            SetStatus("Container path copied to clipboard.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        var containerName = SelectedContainer.ContainerName ?? "container";
+        TryCopyToClipboard($"{containerName}/{target.BlobName}", "Container path copied to clipboard.");
     }
 }
