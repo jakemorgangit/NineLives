@@ -22,6 +22,79 @@
 
     <FontFamily x:Key="ConsoleFont">Cascadia Code, Cascadia Mono, Consolas, Courier New</FontFamily>
 
+    <!-- Console rows. A ListBox for the virtualisation, stripped of every ListBox affordance:
+         no selection highlight, no hover, no focus rectangle, tight line spacing. -->
+    <Style x:Key="ConsoleListBoxItem" TargetType="ListBoxItem">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <ContentPresenter />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ConsoleListBox" TargetType="ListBox">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="12,8,12,10" />
+        <Setter Property="Foreground" Value="{StaticResource ConsoleTextBrush}" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource ConsoleListBoxItem}" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True" />
+        <Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling" />
+        <Setter Property="ItemTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <TextBlock Text="{Binding Text}"
+                               FontFamily="{StaticResource ConsoleFont}"
+                               FontSize="12"
+                               TextWrapping="NoWrap"
+                               Padding="0"
+                               Margin="0"
+                               LineHeight="16"
+                               LineStackingStrategy="BlockLineHeight">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{StaticResource ConsoleTextBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Step">
+                                        <Setter Property="Foreground" Value="{StaticResource ConsoleStepBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Success">
+                                        <Setter Property="Foreground" Value="{StaticResource ConsoleSuccessBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Warning">
+                                        <Setter Property="Foreground" Value="{StaticResource ConsoleWarningBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Kind}" Value="Error">
+                                        <Setter Property="Foreground" Value="{StaticResource ConsoleErrorBrush}" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- T-SQL syntax colouring, same family as the console so the two panes belong together. -->
+    <SolidColorBrush x:Key="SqlKeywordBrush" Color="#FF7B9EFF" />
+    <SolidColorBrush x:Key="SqlLiteralBrush" Color="#A5D6A7" />
+    <SolidColorBrush x:Key="SqlCommentBrush" Color="#5C6773" />
+    <SolidColorBrush x:Key="SqlNumberBrush" Color="#F0B457" />
+    <SolidColorBrush x:Key="SqlIdentifierBrush" Color="#E2C08D" />
+
     <!-- Color Palette -->
     <Color x:Key="WindowBackgroundColor">#1B1E2B</Color>
     <Color x:Key="SidebarBackgroundColor">#141722</Color>

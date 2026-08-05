@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
@@ -1605,6 +1606,7 @@ public partial class RestoreViewModel : ViewModelBase
             _executeCancellation.End();
             IsExecuting = false;
             ExecutionComplete = true;
+            FlushConsole();   // nothing buffered may outlive the run
             RefreshCancelState();
         }
     }
@@ -1716,12 +1718,68 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void AppendLog(string message)
     {
-        foreach (var line in message.Split('\n'))
-            ConsoleLines.Add(ConsoleLine.From(line));
+        foreach (var raw in message.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
 
-        HasConsoleOutput = true;
+            // Messages routinely arrive with a leading or trailing newline for spacing, and SQL
+            // Server's own output has its own blank lines. Left alone that produced a gap between
+            // almost every line. One blank line is allowed as a separator; runs of them are not.
+            if (line.Trim().Length == 0)
+            {
+                if (_pending.Count > 0 && _pending[^1].Text.Length == 0) continue;
+                if (_pending.Count == 0 && (ConsoleLines.Count == 0 || ConsoleLines[^1].Text.Length == 0)) continue;
+                _pending.Add(new ConsoleLine(string.Empty));
+                continue;
+            }
+
+            _pending.Add(ConsoleLine.From(line));
+        }
+
         App.Log.Info($"[execute] {message.Trim()}");
+        ScheduleConsoleFlush();
     }
+
+    /// <summary>
+    /// Moves buffered lines onto the bound collection on a timer rather than as they arrive.
+    ///
+    /// SQL Server emits progress in clusters - several messages within a millisecond, then nothing
+    /// for a second. Adding each one individually meant a layout pass and a scroll per message, in
+    /// bursts, which is what made the console judder. Flushing on a fixed tick turns any arrival
+    /// pattern into a steady redraw, and a whole cluster costs one layout pass instead of ten.
+    /// </summary>
+    private void ScheduleConsoleFlush()
+    {
+        if (_consoleFlushTimer != null) return;
+
+        _consoleFlushTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(60)
+        };
+        _consoleFlushTimer.Tick += (_, _) => FlushConsole();
+        _consoleFlushTimer.Start();
+    }
+
+    private void FlushConsole()
+    {
+        if (_pending.Count == 0)
+        {
+            // Nothing arriving and nothing running - stop ticking rather than spin forever.
+            if (!IsExecuting)
+            {
+                _consoleFlushTimer?.Stop();
+                _consoleFlushTimer = null;
+            }
+            return;
+        }
+
+        foreach (var line in _pending) ConsoleLines.Add(line);
+        _pending.Clear();
+        HasConsoleOutput = true;
+    }
+
+    private readonly List<ConsoleLine> _pending = [];
+    private DispatcherTimer? _consoleFlushTimer;
 
     /// <summary>The console as plain text, for copying into a bug report.</summary>
     public string ConsoleText => string.Join(Environment.NewLine, ConsoleLines.Select(l => l.Text));

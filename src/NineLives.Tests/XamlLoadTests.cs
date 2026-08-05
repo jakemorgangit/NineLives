@@ -294,10 +294,13 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
 
                 // The script pane used to be hidden the moment execution started, so the two
                 // shared one slot. Both must now be on screen at the same time.
-                var script = FindAll<TextBox>(view)
-                    .Select(b => b.Text)
-                    .FirstOrDefault(t => t.Contains("RESTORE DATABASE [MyDb]", StringComparison.Ordinal));
-                Assert.NotNull(script);
+                var script = Assert.Single(FindAll<SqlTextBlock>(view));
+                Assert.Contains("RESTORE DATABASE [MyDb]", script.Sql, StringComparison.Ordinal);
+
+                // ...and it is actually highlighted, not one undifferentiated run.
+                var runs = script.Inlines.OfType<System.Windows.Documents.Run>().ToList();
+                Assert.True(runs.Count > 1, "The script rendered as a single run - no highlighting applied.");
+                Assert.Contains(runs, r => r.Text == "RESTORE");
 
                 listener.AssertNone("RestoreView console");
             }

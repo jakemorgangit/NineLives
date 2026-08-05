@@ -15,6 +15,8 @@ public partial class RestoreView : UserControl
     private const double FollowThreshold = 40;
 
     private INotifyCollectionChanged? _observedLines;
+    private RestoreViewModel? _viewModel;
+    private ExecutionWindow? _executionWindow;
     private bool _follow = true;
 
     public RestoreView()
@@ -30,8 +32,10 @@ public partial class RestoreView : UserControl
 
         if (e.NewValue is RestoreViewModel vm)
         {
+            _viewModel = vm;
             _observedLines = vm.ConsoleLines;
             _observedLines.CollectionChanged += OnConsoleLinesChanged;
+            vm.PropertyChanged += OnViewModelPropertyChanged;
         }
     }
 
@@ -39,7 +43,38 @@ public partial class RestoreView : UserControl
     {
         if (_observedLines != null)
             _observedLines.CollectionChanged -= OnConsoleLinesChanged;
+        if (_viewModel != null)
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
         _observedLines = null;
+        _viewModel = null;
+    }
+
+    /// <summary>
+    /// Brings the console up as a modal window when a restore starts.
+    ///
+    /// Showing a window is the view's job, not the viewmodel's - which is why this watches a
+    /// property rather than the viewmodel calling out to a dialog service. The window is modal
+    /// because a restore is the one operation here that cannot be undone: it should not compete
+    /// with the form behind it, and nobody should be editing the options that produced the script
+    /// currently running.
+    ///
+    /// The inline console stays behind it, so the record is still there once the window is closed.
+    /// </summary>
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(RestoreViewModel.IsExecuting)) return;
+        if (_viewModel is not { IsExecuting: true } vm || _executionWindow != null) return;
+
+        _executionWindow = new ExecutionWindow(vm) { Owner = Window.GetWindow(this) };
+
+        // ShowDialog blocks, so it must not run inside the property-changed notification that the
+        // restore itself is unwinding through. Posting lets the execution carry on underneath.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try { _executionWindow?.ShowDialog(); }
+            finally { _executionWindow = null; }
+        }), DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -53,21 +88,12 @@ public partial class RestoreView : UserControl
     {
         if (e.Action != NotifyCollectionChangedAction.Add || !_follow) return;
 
-        // At Background priority, so the new item has been realised and the extent has grown by
-        // the time this runs. Scrolling first would land short of the real end.
-        Dispatcher.BeginInvoke(new Action(() => ConsoleScroller?.ScrollToEnd()),
-            DispatcherPriority.Background);
-    }
-
-    private void ConsoleScroller_ScrollChanged(object sender, ScrollChangedEventArgs e)
-    {
-        if (sender is not ScrollViewer viewer) return;
-
-        // Only reconsider when the user moved, not when new output changed the extent - otherwise
-        // arriving lines would themselves look like a deliberate scroll away from the bottom.
-        if (e.ExtentHeightChange != 0) return;
-
-        var distanceFromBottom = viewer.ExtentHeight - viewer.VerticalOffset - viewer.ViewportHeight;
-        _follow = distanceFromBottom <= FollowThreshold;
+        // At Background priority, so the new rows have been realised by the time this runs.
+        // Scrolling first would land short of the real end.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (ConsoleList.Items.Count > 0)
+                ConsoleList.ScrollIntoView(ConsoleList.Items[^1]);
+        }), DispatcherPriority.Background);
     }
 }
