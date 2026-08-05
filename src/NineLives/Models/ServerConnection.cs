@@ -3,6 +3,8 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 
+using Blackcat.NineLives.Services;
+
 namespace Blackcat.NineLives.Models;
 
 public enum AuthMode
@@ -125,10 +127,16 @@ public class ServerConnection : INotifyPropertyChanged
     /// Manual and automatic tags as one sequence, so the UI can render them from a SINGLE
     /// wrapping panel. Two adjacent ItemsControls inside a WrapPanel cannot wrap - each is
     /// measured with infinite width - and their pills get clipped by the row instead.
+    ///
+    /// Each group is alphabetical, and manual tags come before automatic ones. Sorting here as
+    /// well as in ParseTags means entries saved before this change display in order straight away,
+    /// without waiting to be edited and re-saved. Automatic tags stay in their own group at the
+    /// end so a derived fact is not shuffled in among the user's own labels.
     /// </summary>
     [JsonIgnore]
     public IEnumerable<TagChip> TagChips =>
-        Tags.Select(TagChip.Manual).Concat(AutoTags.Select(TagChip.Automatic));
+        TagPalette.Sort(Tags).Select(TagChip.Manual)
+            .Concat(TagPalette.Sort(AutoTags).Select(TagChip.Automatic));
 
     /// <summary>True when any tag marks this as a production-like environment.</summary>
     [JsonIgnore]

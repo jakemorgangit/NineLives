@@ -101,8 +101,42 @@ public class TagNotificationTests
 
         var chips = server.TagChips.ToList();
 
-        Assert.Equal(["prod", "eu", "SQL Server 2022"], chips.Select(c => c.Text));
+        // Manual tags alphabetical, automatic ones after them. The manual group is sorted at
+        // display as well as on save, so a server stored before sorting existed still reads in
+        // order without being edited first.
+        Assert.Equal(["eu", "prod", "SQL Server 2022"], chips.Select(c => c.Text));
         Assert.Equal([false, false, true], chips.Select(c => c.IsAutomatic));
+    }
+
+    [Fact]
+    public void Server_TagChips_AreSortedEvenWhenTheStoredOrderIsNot()
+    {
+        // Exactly the case in an existing config: tags saved in the order they were created.
+        var server = new ServerConnection();
+        server.Tags.Add("homelab");
+        server.Tags.Add("blackcat");
+
+        Assert.Equal(["blackcat", "homelab"], server.TagChips.Select(c => c.Text));
+    }
+
+    [Fact]
+    public void Container_TagChips_AreSortedEvenWhenTheStoredOrderIsNot()
+    {
+        var container = new BlobContainerConfig();
+        container.Tags.Add("uat");
+        container.Tags.Add("archive");
+
+        Assert.Equal(["archive", "uat"], container.TagChips.Select(c => c.Text));
+    }
+
+    [Fact]
+    public void Server_TagChips_SortIgnoringCase()
+    {
+        var server = new ServerConnection();
+        server.Tags.Add("Zebra");
+        server.Tags.Add("apple");
+
+        Assert.Equal(["apple", "Zebra"], server.TagChips.Select(c => c.Text));
     }
 
     [Fact]

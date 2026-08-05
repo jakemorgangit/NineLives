@@ -101,8 +101,22 @@ public static class TagPalette
     }
 
     /// <summary>
+    /// Alphabetical, ignoring case.
+    ///
+    /// Ordinal rather than culture-aware so two people looking at the same server see the same
+    /// order. Tags are short ASCII labels in practice - prod, uat, homelab - so the collation
+    /// differences that would favour a culture-aware comparison do not arise.
+    /// </summary>
+    public static IEnumerable<string> Sort(IEnumerable<string>? tags)
+        => tags is null ? [] : tags.OrderBy(t => t, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Splits and normalises a user-entered tag list. Trims, drops blanks, removes duplicates
-    /// case-insensitively while keeping the first spelling the user chose, and preserves order.
+    /// case-insensitively while keeping the first spelling the user chose, and sorts.
+    ///
+    /// Sorted rather than in entry order so the stored list is canonical: two servers carrying the
+    /// same tags then read identically instead of differing by the order someone happened to type
+    /// them in.
     /// </summary>
     public static List<string> ParseTags(string? input)
     {
@@ -119,7 +133,7 @@ public static class TagPalette
             if (seen.Add(tag)) result.Add(tag);
         }
 
-        return result;
+        return [.. Sort(result)];
     }
 
     public static string FormatTags(IEnumerable<string>? tags)

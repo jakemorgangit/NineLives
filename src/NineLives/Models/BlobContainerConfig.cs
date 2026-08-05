@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Web;
 
+using Blackcat.NineLives.Services;
+
 namespace Blackcat.NineLives.Models;
 
 /// <summary>
@@ -93,9 +95,12 @@ public class BlobContainerConfig : INotifyPropertyChanged
     /// <summary>
     /// Tags as chips, matching the server list. Containers have no automatic tags yet, but going
     /// through the same shape keeps one rendering path.
+    ///
+    /// Alphabetical. Sorted here as well as in ParseTags so containers saved before this change
+    /// display in order straight away, rather than waiting to be edited and re-saved.
     /// </summary>
     [JsonIgnore]
-    public IEnumerable<TagChip> TagChips => Tags.Select(TagChip.Manual);
+    public IEnumerable<TagChip> TagChips => TagPalette.Sort(Tags).Select(TagChip.Manual);
 
     private void OnTagsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         => RaiseTagMembersChanged();
