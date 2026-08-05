@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -13,12 +13,12 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class RestoreViewModel : ViewModelBase
 {
-    private readonly BlobStorageService _blobService;
-    private readonly SqlServerService _sqlService;
+    private readonly IBlobStorageService _blobService;
+    private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
     private readonly BackupChainValidator _chainValidator = new();
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
     private List<BackupFileInfo> _allBackups = [];
     private List<BackupSet> _allSets = [];
@@ -461,19 +461,28 @@ public partial class RestoreViewModel : ViewModelBase
     #endregion
 
     public RestoreViewModel(
-        BlobStorageService blobService,
-        SqlServerService sqlService,
+        IBlobStorageService blobService,
+        ISqlServerService sqlService,
         BackupChainBuilder chainBuilder,
         RestoreScriptGenerator scriptGenerator,
-        CredentialStore credentialStore)
+        ICredentialStore credentialStore,
+        OperationLog? log = null)
     {
         _blobService = blobService;
         _sqlService = sqlService;
         _chainBuilder = chainBuilder;
         _scriptGenerator = scriptGenerator;
         _credentialStore = credentialStore;
+
+        // Defaults to the app's one log. Optional so a test can point it at a temp directory -
+        // without it, running the execute path in a test appends real restore lines to the user's
+        // actual log file, which is the same class of side effect this whole change is about.
+        _log = log ?? App.Log;
+
         RefreshContainers();
     }
+
+    private readonly OperationLog _log;
 
     public void RefreshContainers()
     {
@@ -651,7 +660,12 @@ public partial class RestoreViewModel : ViewModelBase
                 ComputeAndDisplayRestorePoints();
             }
 
-            SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
+            // Only when nothing above went wrong. Selecting the first server or database runs the
+            // whole filter-and-compute cascade, which can end in "no valid restore points found" -
+            // and painting a success line over that left an empty timeline with the status bar
+            // cheerfully reporting how many files had loaded. Found by the first ViewModel test.
+            if (!HasError)
+                SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
         catch (OperationCanceledException)
         {
@@ -1653,13 +1667,13 @@ public partial class RestoreViewModel : ViewModelBase
 
                         // Changing a credential is a change to shared state on someone's instance.
                         // It belongs in the file, not only in a console that closes with the app.
-                        App.Log.ServerChange(server.ServerName,
+                        _log.ServerChange(server.ServerName,
                             $"credential [{SqlCredentialName}] {change.ToString().ToLowerInvariant()}");
                     }
                 }
             }
 
-            App.Log.ServerChange(server.ServerName,
+            _log.ServerChange(server.ServerName,
                 $"restore starting: target [{TargetDatabaseName}], " +
                 $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
                 $"recovery={RecoveryMode}, stopAt={EffectiveStopAt?.ToString("s") ?? "none"}");
@@ -1691,7 +1705,7 @@ public partial class RestoreViewModel : ViewModelBase
             AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
                       "restore stopped part-way through the chain.");
 
-            App.Log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
+            _log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
                 $"restore CANCELLED by user, target [{TargetDatabaseName}]");
 
             SetError("Restore cancelled. The target database has been left mid-restore - see below.");
@@ -1845,7 +1859,7 @@ public partial class RestoreViewModel : ViewModelBase
             _pending.Add(ConsoleLine.From(line));
         }
 
-        App.Log.Info($"[execute] {message.Trim()}");
+        _log.Info($"[execute] {message.Trim()}");
         ScheduleConsoleFlush();
     }
 

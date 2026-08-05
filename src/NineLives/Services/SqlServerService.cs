@@ -6,11 +6,11 @@ using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
-public class SqlServerService
+public class SqlServerService : ISqlServerService
 {
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
-    public SqlServerService(CredentialStore credentialStore)
+    public SqlServerService(ICredentialStore credentialStore)
     {
         _credentialStore = credentialStore;
     }

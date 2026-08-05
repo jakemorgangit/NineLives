@@ -10,9 +10,10 @@
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource WindowBackgroundBrush}">
 
-    <Window.DataContext>
-        <vm:MainViewModel />
-    </Window.DataContext>
+    <!-- DataContext is set in the constructor, not here. Declaring it in XAML meant every
+         construction of this window - including a test that only wanted to check the markup -
+         built a MainViewModel against the real %LOCALAPPDATA% config and ran the secret-key
+         migration over it. -->
 
     <Window.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />

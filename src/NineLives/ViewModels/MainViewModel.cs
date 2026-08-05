@@ -8,9 +8,9 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
-    private readonly CredentialStore _credentialStore;
-    private readonly BlobStorageService _blobService;
-    private readonly SqlServerService _sqlService;
+    private readonly ICredentialStore _credentialStore;
+    private readonly IBlobStorageService _blobService;
+    private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
 
@@ -50,9 +50,21 @@ public partial class MainViewModel : ViewModelBase
     public RestoreViewModel Restore { get; }
     public AboutViewModel About { get; }
 
-    public MainViewModel()
+    /// <summary>
+    /// The app's one composition point: builds the real services against the real credential
+    /// store. Deliberately not a DI container - three services and one place that wires them does
+    /// not need one (#41).
+    /// </summary>
+    public MainViewModel() : this(new CredentialStore()) { }
+
+    /// <summary>
+    /// Takes the store so a test can point the whole object graph at a temp directory instead of
+    /// the user's actual profile. Constructing this type used to migrate and read the real
+    /// %LOCALAPPDATA% config as a side effect of a XAML load test.
+    /// </summary>
+    public MainViewModel(ICredentialStore credentialStore)
     {
-        _credentialStore = new CredentialStore();
+        _credentialStore = credentialStore;
 
         // Before anything reads the config: move secrets from name-derived keys onto stable ids
         // (#8). Must happen ahead of the child viewmodels, which load containers and servers in

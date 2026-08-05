@@ -15,6 +15,17 @@ namespace Blackcat.NineLives.Tests;
 /// One Application per process and it belongs to the thread that created it, so everything runs on
 /// this single thread and the fixture is shared by the whole class.
 /// </summary>
+/// <summary>
+/// Shares the one Application across every class that needs it. A second WpfFixture instance would
+/// try to construct a second Application, which the runtime refuses - so classes join this
+/// collection rather than each taking their own class fixture.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class WpfCollection : ICollectionFixture<WpfFixture>
+{
+    public const string Name = "Wpf";
+}
+
 public sealed class WpfFixture : IDisposable
 {
     private readonly Thread _thread;
