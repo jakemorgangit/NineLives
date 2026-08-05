@@ -11,7 +11,7 @@ namespace Blackcat.NineLives.Services;
 /// Manages credentials via Windows Credential Manager and persists
 /// non-secret configuration (server names, container URLs) to a local JSON file.
 /// </summary>
-public class CredentialStore
+public class CredentialStore : ICredentialStore
 {
     private const string AppPrefix = "NineLives";
     private static readonly string DefaultConfigDir = Path.Combine(

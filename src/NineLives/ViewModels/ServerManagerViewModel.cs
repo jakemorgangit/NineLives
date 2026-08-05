@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +9,8 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class ServerManagerViewModel : ViewModelBase
 {
-    private readonly CredentialStore _credentialStore;
-    private readonly SqlServerService _sqlService;
+    private readonly ICredentialStore _credentialStore;
+    private readonly ISqlServerService _sqlService;
 
     public event EventHandler<ServerConnectionChangedEventArgs>? ConnectionChanged;
 
@@ -73,7 +73,7 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerDisplay = string.Empty;
 
-    public ServerManagerViewModel(CredentialStore credentialStore, SqlServerService sqlService)
+    public ServerManagerViewModel(ICredentialStore credentialStore, ISqlServerService sqlService)
     {
         _credentialStore = credentialStore;
         _sqlService = sqlService;

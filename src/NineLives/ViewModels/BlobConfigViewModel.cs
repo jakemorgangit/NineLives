@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +9,8 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class BlobConfigViewModel : ViewModelBase
 {
-    private readonly CredentialStore _credentialStore;
-    private readonly BlobStorageService _blobService;
+    private readonly ICredentialStore _credentialStore;
+    private readonly IBlobStorageService _blobService;
     private readonly OperationCancellation _testCancellation = new();
 
     /// <summary>True while a connection test is running and has not been asked to stop (#25).</summary>
@@ -109,7 +109,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     private BackupSourceType _originalBackupSourceType = BackupSourceType.Standalone;
     private string? _originalAgPathPattern;
 
-    public BlobConfigViewModel(CredentialStore credentialStore, BlobStorageService blobService)
+    public BlobConfigViewModel(ICredentialStore credentialStore, IBlobStorageService blobService)
     {
         _credentialStore = credentialStore;
         _blobService = blobService;

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -13,12 +13,12 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class RestoreViewModel : ViewModelBase
 {
-    private readonly BlobStorageService _blobService;
-    private readonly SqlServerService _sqlService;
+    private readonly IBlobStorageService _blobService;
+    private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
     private readonly BackupChainValidator _chainValidator = new();
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
     private List<BackupFileInfo> _allBackups = [];
     private List<BackupSet> _allSets = [];
@@ -461,11 +461,11 @@ public partial class RestoreViewModel : ViewModelBase
     #endregion
 
     public RestoreViewModel(
-        BlobStorageService blobService,
-        SqlServerService sqlService,
+        IBlobStorageService blobService,
+        ISqlServerService sqlService,
         BackupChainBuilder chainBuilder,
         RestoreScriptGenerator scriptGenerator,
-        CredentialStore credentialStore)
+        ICredentialStore credentialStore)
     {
         _blobService = blobService;
         _sqlService = sqlService;
@@ -651,7 +651,12 @@ public partial class RestoreViewModel : ViewModelBase
                 ComputeAndDisplayRestorePoints();
             }
 
-            SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
+            // Only when nothing above went wrong. Selecting the first server or database runs the
+            // whole filter-and-compute cascade, which can end in "no valid restore points found" -
+            // and painting a success line over that left an empty timeline with the status bar
+            // cheerfully reporting how many files had loaded. Found by the first ViewModel test.
+            if (!HasError)
+                SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
         catch (OperationCanceledException)
         {

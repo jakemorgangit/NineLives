@@ -22,18 +22,14 @@ namespace Blackcat.NineLives.Tests;
 /// What this deliberately does not check is whether the result LOOKS right - colours, spacing,
 /// whether a panel is where you expect. That still needs eyes on the running app.
 /// </summary>
-public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposable
+[Collection(WpfCollection.Name)]
+public class XamlLoadTests(WpfFixture wpf)
 {
-    private readonly string _dir = Path.Combine(
-        Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"));
-
-    public void Dispose()
-    {
-        try { Directory.Delete(_dir, recursive: true); } catch { }
-        GC.SuppressFinalize(this);
-    }
-
-    private CredentialStore Store() => new(_dir);
+    /// <summary>
+    /// In-memory throughout. These tests are about markup, so nothing here should be reading the
+    /// machine's credential vault or writing a config file anywhere (#41).
+    /// </summary>
+    private static ICredentialStore Store() => new FakeCredentialStore();
 
     /// <summary>Realises the visual tree. Bindings are not evaluated until something lays out.</summary>
     private static void Realise(FrameworkElement element)
@@ -106,7 +102,10 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
     {
         wpf.Invoke(() =>
         {
-            var window = new MainWindow();
+            // Against a fake store, not the real one. This used to construct a MainViewModel over
+            // the actual %LOCALAPPDATA% config and run the secret-key migration across it - a test
+            // reaching into the user's own data (#41).
+            var window = new MainWindow(new MainViewModel(new FakeCredentialStore()));
             Realise(window);
         });
     }

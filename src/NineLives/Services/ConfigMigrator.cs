@@ -21,7 +21,7 @@ namespace Blackcat.NineLives.Services;
 /// secrets are already where the ids point. There is no window in which a secret exists only under
 /// a key nothing references.
 /// </summary>
-public class ConfigMigrator(CredentialStore store)
+public class ConfigMigrator(ICredentialStore store)
 {
     public record Result(int ContainersMigrated, int ServersMigrated, string? Error)
     {

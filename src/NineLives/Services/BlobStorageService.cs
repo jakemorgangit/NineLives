@@ -5,11 +5,11 @@ using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
-public class BlobStorageService
+public class BlobStorageService : IBlobStorageService
 {
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
-    public BlobStorageService(CredentialStore credentialStore)
+    public BlobStorageService(ICredentialStore credentialStore)
     {
         _credentialStore = credentialStore;
     }

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +9,8 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class BlobBrowserViewModel : ViewModelBase
 {
-    private readonly BlobStorageService _blobService;
-    private readonly CredentialStore _credentialStore;
+    private readonly IBlobStorageService _blobService;
+    private readonly ICredentialStore _credentialStore;
     private readonly OperationCancellation _loadCancellation = new();
 
     /// <summary>True while a listing is running and has not been asked to stop (#25).</summary>
@@ -68,7 +68,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [ObservableProperty]
     private string _dbSummaryText = string.Empty;
 
-    public BlobBrowserViewModel(BlobStorageService blobService, CredentialStore credentialStore)
+    public BlobBrowserViewModel(IBlobStorageService blobService, ICredentialStore credentialStore)
     {
         _blobService = blobService;
         _credentialStore = credentialStore;
