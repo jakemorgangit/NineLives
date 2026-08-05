@@ -1117,9 +1117,9 @@ public partial class RestoreViewModel : ViewModelBase
         if (file == null || SelectedContainer == null) return;
         try
         {
-            var url = _blobService.BuildBlobUrlWithSas(SelectedContainer, file.BlobName);
+            var url = BlobStorageService.BuildBlobUrl(SelectedContainer, file.BlobName);
             Clipboard.SetText(url);
-            SetStatus("HTTPS path copied to clipboard.");
+            SetStatus("HTTPS path copied to clipboard (no SAS token).");
         }
         catch (Exception ex)
         {

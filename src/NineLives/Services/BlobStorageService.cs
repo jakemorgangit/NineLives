@@ -259,11 +259,17 @@ public class BlobStorageService
         return idx >= 0 ? blobName[..idx] : string.Empty;
     }
 
-    public string BuildBlobUrlWithSas(BlobContainerConfig config, string blobName)
-    {
-        var sasToken = _credentialStore.GetSasToken(config);
-        return $"{config.ContainerUrl.TrimEnd('/')}/{blobName}?{sasToken?.TrimStart('?')}";
-    }
+    /// <summary>
+    /// The plain HTTPS URL of a blob, with no SAS token on it.
+    ///
+    /// This replaced BuildBlobUrlWithSas, which existed only to feed the two "copy HTTPS path"
+    /// buttons and put a live credential on the Windows clipboard - where clipboard history
+    /// (Win+V) and cloud clipboard sync can keep it long after the app has closed (#18). The
+    /// token-free URL is what the generated scripts use anyway, since RESTORE FROM URL
+    /// authenticates with the server-side credential rather than anything in the URL.
+    /// </summary>
+    public static string BuildBlobUrl(BlobContainerConfig config, string blobName)
+        => $"{config.ContainerUrl.TrimEnd('/')}/{blobName}";
 
     private static void ParseBlobPath(BackupFileInfo file, string pathPattern)
     {

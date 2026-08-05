@@ -165,14 +165,17 @@ public class CredentialStore
     {
         var sasToken = GetSasToken(config);
         if (sasToken == null) return true;
-        var expiry = config.GetSasExpiry(sasToken);
-        return expiry.HasValue && expiry.Value < DateTime.UtcNow;
+        return config.ReadSasExpiry(sasToken).IsExpired;
     }
 
     public DateTime? GetSasTokenExpiry(BlobContainerConfig config)
+        => ReadSasTokenExpiry(config).ExpiresAt;
+
+    /// <summary>Full expiry state, so callers can tell "no expiry" from "unreadable" (#21).</summary>
+    public SasExpiryInfo ReadSasTokenExpiry(BlobContainerConfig config)
     {
         var sasToken = GetSasToken(config);
-        return sasToken != null ? config.GetSasExpiry(sasToken) : null;
+        return sasToken != null ? config.ReadSasExpiry(sasToken) : SasExpiryInfo.None;
     }
 
     #endregion
