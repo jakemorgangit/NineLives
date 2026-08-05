@@ -1,0 +1,89 @@
+name: Check version bump
+
+# A dev -> main pull request is a release: main is meant to match the published binary, so the
+# version must move. Feature work targets dev and never reaches this check.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    # Only the release PR is gated. A direct hotfix branch into main is rare enough to bump by
+    # hand, and gating it would block genuine emergency fixes.
+    if: github.head_ref == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Deliberately one job that always runs and always reports, rather than paths-ignore:
+      # a required check that is skipped entirely sits pending forever and blocks the merge.
+      # Documentation-only release PRs pass without a bump.
+      - name: Check the version being released is not already published
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          csproj='src/NineLives/NineLives.csproj'
+
+          changed=$(git diff --name-only "$BASE_SHA" HEAD)
+          echo "Changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          # Anything that is not markdown, the licence, gitignore, or a docs asset counts as a
+          # code change. A new file type defaults to being treated as code, which is the safe
+          # direction to be wrong in.
+          code_changes=$(echo "$changed" \
+            | grep -vE '(\.md$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^docs/)' || true)
+
+          if [ -z "$code_changes" ]; then
+            echo "::notice title=Version bump not required::Only documentation changed in this release PR."
+            exit 0
+          fi
+
+          # POSIX sed rather than grep -oP: PCRE grep is not available on every platform a
+          # contributor might run this logic on, and the runner image should not be the only
+          # place it works.
+          extract_version() { sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' "$1" | head -1; }
+
+          pr_version=$(extract_version "$csproj")
+          git show "$BASE_SHA:$csproj" > /tmp/main.csproj
+          main_version=$(extract_version /tmp/main.csproj)
+
+          echo "main version: $main_version"
+          echo "PR version:   $pr_version"
+
+          if [ -z "$pr_version" ]; then
+            echo "::error::Could not read <Version> from $csproj."
+            exit 1
+          fi
+
+          # The rule this gate actually enforces is "never publish two different builds under one
+          # version number". Comparing against main is only a proxy for that, and it gets the
+          # first release wrong: main can carry an unreleased version marker, in which case
+          # shipping it is legitimate because nothing was ever published under it.
+          #
+          # So the authoritative check is whether a release already exists for the version being
+          # shipped. That is stricter where it matters (it also catches re-releasing a version
+          # that main has since moved past) and correct on the first release.
+          if gh release view "v$pr_version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v$pr_version has already been published. Bump <Version> in $csproj before releasing again."
+            exit 1
+          fi
+
+          if [ "$pr_version" = "$main_version" ]; then
+            echo "::notice title=Version unchanged from main::main is also at $pr_version, but v$pr_version has never been published - shipping it is safe."
+          else
+            echo "Version bumped: $main_version -> $pr_version"
+          fi
+
+          echo "OK to release v$pr_version"
