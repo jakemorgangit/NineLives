@@ -206,51 +206,31 @@ public class SqlServerService
         return databases;
     }
 
-    public async Task<List<BackupFileInfo>> RestoreHeaderOnlyAsync(
-        ServerConnection server, string blobUrl, string credentialName, CancellationToken ct = default)
-    {
-        await using var conn = CreateConnection(server);
-        await conn.OpenAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
-        cmd.CommandText = $"RESTORE HEADERONLY FROM URL = N'{TSql.EscapeLiteral(blobUrl)}' WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'";
+    // These two read backup metadata off blob URLs, and neither takes a credential name any more.
+    //
+    // They used to, and passing one could never work. SQL Server rejects WITH CREDENTIAL against a
+    // SAS-backed credential outright:
+    //
+    //     Msg 3225: Use of WITH CREDENTIAL syntax is not valid for credentials containing a
+    //     Shared Access Signature.
+    //
+    // A SAS credential is the only kind this app ever creates - EnsureCredentialExistsAsync
+    // hardcodes WITH IDENTITY = 'SHARED ACCESS SIGNATURE' - so the branch could not succeed in any
+    // configuration the app produces. Both production callers already passed null, which is why
+    // the shipping app worked, but the parameter was positional and required: a new caller had to
+    // pass something, and the obvious something failed with an error about syntax rather than
+    // about the real cause. Removing it makes the wrong call unrepresentable rather than merely
+    // unused (#60).
+    //
+    // The server-side credential still does the authenticating. It is matched by URL prefix, which
+    // is exactly how the generated restore script has always worked.
+    //
+    // If a non-SAS credential is ever supported (managed identity, #29), bring the option back
+    // keyed off the identity type that CredentialExistsAsync already reports - not off a flag.
 
-        var results = new List<BackupFileInfo>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            int? backupTypeCode = GetIntFromReader(reader, "BackupType");
-            results.Add(new BackupFileInfo
-            {
-                DatabaseName = GetStringFromReader(reader, "DatabaseName"),
-                BackupStartDate = GetDateTimeFromReader(reader, "BackupStartDate"),
-                BackupFinishDate = GetDateTimeFromReader(reader, "BackupFinishDate"),
-                BackupTypeCode = backupTypeCode,
-                Type = (backupTypeCode ?? 0) switch
-                {
-                    1 => BackupType.Full,
-                    5 => BackupType.Differential,
-                    2 => BackupType.TransactionLog,
-                    _ => BackupType.Unknown
-                },
-                FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
-                LastLsn = GetDecimalFromReader(reader, "LastLSN"),
-                DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
-            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
-            });
-        }
-        return results;
-    }
-
+    /// <summary>RESTORE FILELISTONLY across the files of one backup set, striped or not.</summary>
     public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
-        ServerConnection server, string blobUrl, string credentialName, CancellationToken ct = default)
-    {
-        return await RestoreFileListOnlyAsync(server, [blobUrl], credentialName, urlsContainSas: false, ct);
-    }
-
-    /// <summary>RESTORE FILELISTONLY for striped backup. When urlsContainSas is true, omit WITH CREDENTIAL (SQL Server does not allow WITH CREDENTIAL for SAS credentials).</summary>
-    public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
-        ServerConnection server, IReadOnlyList<string> blobUrls, string? credentialName, bool urlsContainSas = false, CancellationToken ct = default)
+        ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
         if (blobUrls.Count == 0) return [];
 
@@ -260,10 +240,7 @@ public class SqlServerService
         cmd.CommandTimeout = 120;
 
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        var withCredential = !urlsContainSas && !string.IsNullOrEmpty(credentialName)
-            ? $" WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'"
-            : "";
-        cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}{withCredential}";
+        cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}";
 
         var files = new List<FileMoveOption>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -280,9 +257,9 @@ public class SqlServerService
         return files;
     }
 
-    /// <summary>RESTORE HEADERONLY for striped backup. When urlsContainSas is true, omit WITH CREDENTIAL (SQL Server does not allow WITH CREDENTIAL for SAS credentials).</summary>
+    /// <summary>RESTORE HEADERONLY across the files of one backup set, striped or not.</summary>
     public async Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
-        ServerConnection server, IReadOnlyList<string> blobUrls, string? credentialName, bool urlsContainSas = false, CancellationToken ct = default)
+        ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
         if (blobUrls.Count == 0) return null;
 
@@ -292,10 +269,7 @@ public class SqlServerService
         cmd.CommandTimeout = 120;
 
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        var withCredential = !urlsContainSas && !string.IsNullOrEmpty(credentialName)
-            ? $" WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'"
-            : "";
-        cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}{withCredential}";
+        cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}";
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
