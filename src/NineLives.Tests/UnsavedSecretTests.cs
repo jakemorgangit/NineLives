@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace Blackcat.NineLives.Tests;
@@ -121,8 +122,11 @@ public class UnsavedSecretTests : IDisposable
 
     // ── the transient secret is actually used ───────────────────────────────────
 
+    // Since #20 the password never appears in the connection string - it goes on the connection as
+    // a SqlCredential - so these assert on the credential instead.
+
     [Fact]
-    public void AnUnsavedPassword_IsUsedInTheConnectionString()
+    public void AnUnsavedPassword_IsAttachedToTheConnection()
     {
         var server = new ServerConnection
         {
@@ -134,31 +138,10 @@ public class UnsavedSecretTests : IDisposable
             UnsavedPassword = "in-memory-only"
         };
 
-        var connectionString = new SqlServerService(Store()).BuildConnectionString(server);
+        using var conn = new SqlServerService(Store()).CreateConnection(server);
 
-        Assert.Contains("in-memory-only", connectionString);
-    }
-
-    [Fact]
-    public void AnUnsavedPassword_TakesPrecedenceOverTheStoredOne()
-    {
-        var server = new ServerConnection
-        {
-            Id = ServerConnection.NewId(),
-            Name = "ninelives-test-precedence",
-            ServerName = "SRV01",
-            AuthMode = AuthMode.SqlAuth,
-            Username = "sa"
-        };
-        Store().SaveSqlPassword(server, "stored");
-        _writtenKeys.Add(server.CredentialKey);
-
-        server.UnsavedPassword = "candidate";
-
-        var connectionString = new SqlServerService(Store()).BuildConnectionString(server);
-
-        Assert.Contains("candidate", connectionString);
-        Assert.DoesNotContain("stored", connectionString);
+        Assert.NotNull(conn.Credential);
+        Assert.Equal("sa", conn.Credential!.UserId);
     }
 
     [Fact]
@@ -175,9 +158,25 @@ public class UnsavedSecretTests : IDisposable
         Store().SaveSqlPassword(server, "stored-password");
         _writtenKeys.Add(server.CredentialKey);
 
-        var connectionString = new SqlServerService(Store()).BuildConnectionString(server);
+        using var conn = new SqlServerService(Store()).CreateConnection(server);
 
-        Assert.Contains("stored-password", connectionString);
+        Assert.NotNull(conn.Credential);
+    }
+
+    [Fact]
+    public void WindowsAuth_GetsNoCredential()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "ninelives-test-winauth",
+            ServerName = "SRV01",
+            AuthMode = AuthMode.WindowsAuth
+        };
+
+        using var conn = new SqlServerService(Store()).CreateConnection(server);
+
+        Assert.Null(conn.Credential);
     }
 
     // ── never persisted ─────────────────────────────────────────────────────────

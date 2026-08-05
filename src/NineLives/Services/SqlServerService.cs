@@ -1,4 +1,5 @@
 using System.Data;
+using System.Security;
 using Microsoft.Data.SqlClient;
 using Blackcat.NineLives.Models;
 
@@ -30,32 +31,118 @@ public class SqlServerService
             MultipleActiveResultSets = false
         };
 
-        if (server.AuthMode == AuthMode.WindowsAuth)
-        {
-            builder.IntegratedSecurity = true;
-        }
-        else
-        {
-            builder.IntegratedSecurity = false;
-            builder.UserID = server.Username;
-            // An unsaved password wins, so Test Connection can try one without it having to be
-            // persisted first (#12). Null for every ordinary connection.
-            builder.Password = server.UnsavedPassword ?? _credentialStore.GetSqlPassword(server);
-        }
+        builder.IntegratedSecurity = server.AuthMode == AuthMode.WindowsAuth;
 
+        // No UserID or Password here - SQL auth credentials go on the SqlConnection as a
+        // SqlCredential instead (#20). A connection string is a long-lived managed string that
+        // cannot be zeroed and turns up in crash dumps and memory captures; SqlCredential holds
+        // the password in a SecureString the driver disposes. It also means anything that logs or
+        // displays a connection string cannot leak the password by accident.
+        //
+        // SqlCredential refuses to attach to a connection string that already carries either, so
+        // leaving them out is required rather than merely tidy.
         return builder.ConnectionString;
+    }
+
+    /// <summary>
+    /// Opens nothing; builds the connection with the password attached out-of-band.
+    /// Every SQL operation in this class goes through here.
+    /// </summary>
+    public SqlConnection CreateConnection(ServerConnection server)
+    {
+        var conn = new SqlConnection(BuildConnectionString(server));
+
+        if (server.AuthMode != AuthMode.SqlAuth)
+            return conn;
+
+        // Unsaved wins, so Test Connection can try a password without persisting it first (#12).
+        var password = server.UnsavedPassword ?? _credentialStore.GetSqlPassword(server);
+        if (string.IsNullOrEmpty(server.Username) || password == null)
+            return conn;
+
+        var secure = new SecureString();
+        foreach (var c in password) secure.AppendChar(c);
+        secure.MakeReadOnly();
+
+        conn.Credential = new SqlCredential(server.Username, secure);
+        return conn;
     }
 
     public async Task<bool> TestConnectionAsync(ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         return conn.State == ConnectionState.Open;
     }
 
+    /// <summary>
+    /// Would this server connect with certificate validation switched on?
+    ///
+    /// TrustServerCertificate defaults to true, which is the pragmatic default for a DBA tool -
+    /// self-signed certificates are what a stock SQL Server install has, and a tool that refuses
+    /// to connect out of the box gets uninstalled. But it means the app accepts any certificate
+    /// without validation, and it sends the SQL password and the SAS token over that connection
+    /// (#17).
+    ///
+    /// Rather than nag about it, this answers the question that actually matters: is the setting
+    /// doing anything? A great many instances have a properly issued certificate and are trusting
+    /// blindly for no reason at all. When that is the case the UI can say so and the user can turn
+    /// it off with real information rather than a warning they will learn to ignore.
+    ///
+    /// Returns null when the answer is not knowable - the probe failed for some reason other than
+    /// the certificate.
+    /// </summary>
+    public async Task<bool?> WouldConnectWithCertificateValidationAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (!server.TrustServerCertificate)
+            return true;   // already validating
+
+        var validated = new ServerConnection
+        {
+            Id = server.Id,
+            Name = server.Name,
+            ServerName = server.ServerName,
+            AuthMode = server.AuthMode,
+            Username = server.Username,
+            ConnectionTimeoutSeconds = server.ConnectionTimeoutSeconds,
+            Encrypt = server.Encrypt,
+            TrustServerCertificate = false,
+            UnsavedPassword = server.UnsavedPassword
+        };
+
+        try
+        {
+            await using var conn = CreateConnection(validated);
+            await conn.OpenAsync(ct);
+            return true;
+        }
+        catch (SqlException ex) when (IsCertificateFailure(ex))
+        {
+            return false;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// SQL Server surfaces a rejected certificate as a generic SSL provider error, so this matches
+    /// on the message. Getting it wrong only costs a "could not determine" instead of a definite
+    /// answer, which is why the caller treats null as "say nothing".
+    /// </summary>
+    private static bool IsCertificateFailure(SqlException ex)
+    {
+        var message = ex.ToString();
+        return message.Contains("certificate", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("trust relationship", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("SSL", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<string> GetServerVersionAsync(ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT @@VERSION";
@@ -65,7 +152,7 @@ public class SqlServerService
 
     public async Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT name FROM sys.databases ORDER BY name";
@@ -79,7 +166,7 @@ public class SqlServerService
     public async Task<List<BackupFileInfo>> RestoreHeaderOnlyAsync(
         ServerConnection server, string blobUrl, string credentialName, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
@@ -124,7 +211,7 @@ public class SqlServerService
     {
         if (blobUrls.Count == 0) return [];
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
@@ -156,7 +243,7 @@ public class SqlServerService
     {
         if (blobUrls.Count == 0) return null;
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
@@ -263,7 +350,7 @@ public class SqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         if (messageCallback != null)
         {
             conn.InfoMessage += (_, e) => messageCallback(e.Message);
@@ -280,7 +367,7 @@ public class SqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         if (messageCallback != null)
         {
             conn.InfoMessage += (_, e) => messageCallback(e.Message);
@@ -328,7 +415,7 @@ public class SqlServerService
         if (string.IsNullOrWhiteSpace(credentialName))
             return (false, false);
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
 
         await using var cmd = conn.CreateCommand();
@@ -371,7 +458,7 @@ public class SqlServerService
         TSql.ValidateIdentifier(credentialName, nameof(credentialName));
         var quotedName = TSql.QuoteName(credentialName);
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
 
         await using var checkCmd = conn.CreateCommand();
@@ -395,7 +482,7 @@ public class SqlServerService
     public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(
         ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT

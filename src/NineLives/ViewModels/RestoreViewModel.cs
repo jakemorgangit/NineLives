@@ -1375,6 +1375,14 @@ public partial class RestoreViewModel : ViewModelBase
                             ? $"Credential [{SqlCredentialName}] exists but is not a SAS credential - updating it..."
                             : $"Credential [{SqlCredentialName}] is missing - creating it...");
 
+                        // This statement carries the SAS token to the server. It is the one moment
+                        // in a restore where a secret crosses the wire, so if the connection is
+                        // encrypted but unverified, say so here rather than only in settings (#17).
+                        if (server.TrustServerCertificate)
+                            AppendLog(
+                                "  Note: this connection trusts the server certificate without validating it, " +
+                                "and the SAS token is sent over it.");
+
                         var change = await _sqlService.EnsureCredentialExistsAsync(
                             server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
 
