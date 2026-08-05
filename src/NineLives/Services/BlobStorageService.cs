@@ -478,19 +478,5 @@ public class ContainerSummary
     public DateTimeOffset? EarliestBackup { get; set; }
     public DateTimeOffset? LatestBackup { get; set; }
 
-    public string TotalSizeDisplay
-    {
-        get
-        {
-            string[] units = ["B", "KB", "MB", "GB", "TB"];
-            double size = TotalSizeBytes;
-            int unit = 0;
-            while (size >= 1024 && unit < units.Length - 1)
-            {
-                size /= 1024;
-                unit++;
-            }
-            return $"{size:F1} {units[unit]}";
-        }
-    }
+    public string TotalSizeDisplay => ByteSize.Format(TotalSizeBytes);
 }

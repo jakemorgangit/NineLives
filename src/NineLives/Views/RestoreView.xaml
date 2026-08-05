@@ -114,6 +114,42 @@
                 </StackPanel>
             </Border>
 
+            <!-- Findings about the discovered backups rather than the selected chain: things that
+                 exist in the container but can never be offered as a restore point (#46).
+
+                 Deliberately OUTSIDE the restore-point card below. It used to be nested inside it,
+                 which hid it exactly when it mattered most - "no full backup found" is precisely
+                 the case where there are no restore points, so the user got an empty screen and no
+                 explanation. A XAML load test caught that. -->
+            <Border CornerRadius="4" Padding="12" Margin="0,0,0,16"
+                    Background="#332B1A" BorderBrush="#8A6D2F" BorderThickness="1"
+                    Visibility="{Binding HasInventoryIssues, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="About the backups found in this container"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8" />
+                    <ItemsControl ItemsSource="{Binding InventoryIssues}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock TextWrapping="Wrap" FontWeight="SemiBold">
+                                        <Run Text="{Binding SeverityDisplay, Mode=OneWay}" />
+                                        <Run Text="  " />
+                                        <Run Text="{Binding Title, Mode=OneWay}" />
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Detail}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,2,0,0" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
             <!-- Step 2: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding HasRestorePoints, Converter={StaticResource BoolToVis}}">
@@ -259,7 +295,7 @@
                             <!-- Start/End date labels -->
                             <Grid Grid.Row="3" Margin="7,2,7,0">
                                 <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Left"
-                                           Text="{Binding RestorePoints[0].Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm}', FallbackValue=''}"
+                                           Text="{Binding TimelineStartText}"
                                            FontSize="10" />
                                 <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Right"
                                            FontSize="10">
@@ -420,35 +456,6 @@
                          things that exist in the container but can never be offered as a restore
                          point. Shown whether or not a point is selected, because they explain why
                          the timeline has fewer entries than the browse list has files (#46). -->
-                    <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
-                            Background="#332B1A" BorderBrush="#8A6D2F" BorderThickness="1"
-                            Visibility="{Binding HasInventoryIssues, Converter={StaticResource BoolToVis}}">
-                        <StackPanel>
-                            <TextBlock Text="About the backups found in this container"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource PrimaryTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,8" />
-                            <ItemsControl ItemsSource="{Binding InventoryIssues}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Margin="0,0,0,8">
-                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold">
-                                                <Run Text="{Binding SeverityDisplay, Mode=OneWay}" />
-                                                <Run Text="  " />
-                                                <Run Text="{Binding Title, Mode=OneWay}" />
-                                            </TextBlock>
-                                            <TextBlock Text="{Binding Detail}"
-                                                       Style="{StaticResource SecondaryText}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,2,0,0" />
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </Border>
-
                     <!-- Restore Chain Detail (togglable) -->
                     <Border Background="{StaticResource InputBackgroundBrush}"
                             CornerRadius="4" Padding="12" Margin="0,12,0,0"

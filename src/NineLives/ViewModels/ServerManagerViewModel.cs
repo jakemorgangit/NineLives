@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -252,6 +253,19 @@ public partial class ServerManagerViewModel : ViewModelBase
     private void Delete()
     {
         if (SelectedServer == null) return;
+
+        // Same reasoning as deleting a container: a stored SQL password is removed from Credential
+        // Manager and the app never displays it, so a single click should not be enough (#42).
+        var secretNote = SelectedServer.AuthMode == AuthMode.SqlAuth
+            ? "\n\nIts stored SQL password will be deleted from Windows Credential Manager."
+            : string.Empty;
+
+        var confirm = MessageBox.Show(
+            $"Remove the server \"{SelectedServer.Name}\"?{secretNote}\n\n" +
+            "Nothing on the SQL Server itself is affected.",
+            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+        if (confirm != MessageBoxResult.Yes) return;
 
         // Take the server out of the config first and only destroy its stored password once that
         // write has landed. The other order threw the password away and then, if the save failed,
