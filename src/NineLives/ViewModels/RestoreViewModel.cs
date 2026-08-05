@@ -436,6 +436,24 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private ObservableCollection<FileMoveOption> _fetchedFileMoves = [];
 
+    /// <summary>
+    /// Each row is edited in place in the grid, so the script has to follow the ROW, not just the
+    /// collection. Without this, retyping a target path changed what was on screen and nothing
+    /// else - and the script is what gets executed.
+    /// </summary>
+    partial void OnFetchedFileMovesChanged(
+        ObservableCollection<FileMoveOption>? oldValue,
+        ObservableCollection<FileMoveOption> newValue)
+    {
+        if (oldValue != null)
+            foreach (var move in oldValue) move.PropertyChanged -= OnFileMoveChanged;
+
+        foreach (var move in newValue) move.PropertyChanged += OnFileMoveChanged;
+    }
+
+    private void OnFileMoveChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        => UpdateRestoreSummary();
+
     [ObservableProperty]
     private bool _hasFetchedFileMoves;
 
@@ -1440,6 +1458,16 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnWithChecksumChanged(bool value) => UpdateRestoreSummary();
     partial void OnContinueAfterErrorChanged(bool value) => UpdateRestoreSummary();
 
+    // These four are typed into text boxes rather than ticked, and every one of them was missing
+    // its handler - so the script on screen did not change when they did. That is the exact
+    // failure RegenerateScript exists to prevent: typing a new data-file path, watching the box
+    // update, and running a script that still had the old one - or, for WITH MOVE, no MOVE clause
+    // at all, sending the restore to the file paths baked into the backup.
+    partial void OnMoveDataFilePathChanged(string value) => UpdateRestoreSummary();
+    partial void OnMoveLogFilePathChanged(string value) => UpdateRestoreSummary();
+    partial void OnStandbyFilePathChanged(string value) => UpdateRestoreSummary();
+    partial void OnStatsPercentChanged(int value) => UpdateRestoreSummary();
+
     // Verification opens its own connection and reads whole backups. Letting it start while a
     // restore is running would put a second heavy reader on the same server at the worst moment.
     partial void OnIsExecutingChanged(bool value) => VerifyChainCommand.NotifyCanExecuteChanged();
@@ -1460,6 +1488,15 @@ public partial class RestoreViewModel : ViewModelBase
         CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
         CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
     }
+
+    /// <summary>
+    /// STANDBY needs somewhere to put its undo file. Blank produced <c>STANDBY = ''</c>, which
+    /// SQL Server rejects - as the LAST statement of the chain, so it failed after SET SINGLE_USER
+    /// and WITH REPLACE had already dropped and overwritten the target, leaving it in RESTORING
+    /// and single-user with nothing to show for it.
+    /// </summary>
+    private bool HasStandbyFileIfNeeded =>
+        RecoveryMode != RecoveryMode.Standby || !string.IsNullOrWhiteSpace(StandbyFilePath);
 
     /// <summary>
     /// Explicit Generate. Same work as the live rebuild, but it says why nothing was produced -
@@ -1488,6 +1525,13 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
+        if (!HasStandbyFileIfNeeded)
+        {
+            SetError("STANDBY needs an undo file path. Without one the script would end in " +
+                     "STANDBY = '', which fails after the database has already been overwritten.");
+            return;
+        }
+
         RegenerateScript();
         if (HasScript) SetStatus("Script generated successfully.");
     }
@@ -1510,7 +1554,8 @@ public partial class RestoreViewModel : ViewModelBase
 
         if (RestoreChain == null
             || string.IsNullOrWhiteSpace(TargetDatabaseName)
-            || (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null))
+            || (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
+            || !HasStandbyFileIfNeeded)
         {
             GeneratedScript = string.Empty;
             HasScript = false;
@@ -1763,14 +1808,32 @@ public partial class RestoreViewModel : ViewModelBase
         if (string.IsNullOrEmpty(GeneratedScript) || !IsConnectedToServer)
             return;
 
-        // Refuse to arm when the chain cannot possibly restore. This is the last safe moment:
+        // Rebuild before arming, so what runs is what the options currently say - not whatever the
+        // last change handler happened to leave behind. Every option is supposed to keep the script
+        // in step on its own; this is the backstop that makes forgetting one a stale display rather
+        // than a restore that does something different from what it shows.
+        RegenerateScript();
+        if (string.IsNullOrEmpty(GeneratedScript))
+        {
+            SetError("The current options do not produce a script. Check the settings above.");
+            IsExecuteArmed = false;
+            ExecuteButtonText = "Execute on Server";
+            return;
+        }
+
+        // Refuse to run when the chain cannot possibly restore. This is the last safe moment:
         // once execution starts, WITH REPLACE drops the target database, and a chain that fails
         // partway leaves nothing usable behind. Failing here costs the user a few seconds;
         // failing mid-restore costs them the database they were restoring over.
-        if (HasChainErrors && !IsExecuteArmed)
+        //
+        // Checked on the confirm press as well as when arming: validation can finish during the
+        // five-second countdown and find an error that was not known when the button was armed.
+        if (HasChainErrors)
         {
             var first = ChainIssues.First(i => i.IsError);
             SetError($"Cannot execute: {first.Title}. {first.Detail}");
+            IsExecuteArmed = false;
+            ExecuteButtonText = "Execute on Server";
             return;
         }
 
@@ -1801,6 +1864,10 @@ public partial class RestoreViewModel : ViewModelBase
 
         var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
+        // Reset alongside ExecutionComplete. Left over from a previous run it could combine with an
+        // early bail-out to show the success banner - and write "Outcome: Succeeded" into a saved
+        // log - for a restore that never ran.
+        ExecutionSuccess = false;
         ExecutionComplete = false;
         ConsoleLines.Clear();
         HasConsoleOutput = false;
