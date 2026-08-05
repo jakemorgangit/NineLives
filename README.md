@@ -1,6 +1,6 @@
 # Nine Lives 🐈‍⬛
 
-[![Build](https://github.com/jakemorgangit/blackcat-nine-lives/actions/workflows/build.yml/badge.svg)](https://github.com/jakemorgangit/blackcat-nine-lives/actions/workflows/build.yml)
+[![Build](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml/badge.svg)](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml)
 
 **Every database deserves nine lives.**
 
@@ -12,7 +12,7 @@ Nine Lives is a modern desktop application for restoring SQL Server databases fr
 
 ### Download Release
 
-Download the latest release from the [Releases page](https://github.com/jakemorgangit/blackcat-nine-lives/releases).
+Download the latest release from the [Releases page](https://github.com/jakemorgangit/NineLives/releases).
 
 The application is distributed as a single self-contained executable (`NineLives.exe`) — no installation required. Simply download and run.
 
@@ -102,7 +102,7 @@ Nine Lives points at a container, discovers every backup, groups striped sets, c
 
 ### Download Release
 
-Download the latest release from the [Releases page](https://github.com/jakemorgangit/blackcat-nine-lives/releases).
+Download the latest release from the [Releases page](https://github.com/jakemorgangit/NineLives/releases).
 
 **Requirements:**
 - Windows 10/11 (x64)
@@ -117,8 +117,8 @@ Download the latest release from the [Releases page](https://github.com/jakemorg
 #### Clone and Build
 
 ```bash
-git clone https://github.com/jakemorgangit/blackcat-nine-lives.git
-cd blackcat-nine-lives
+git clone https://github.com/jakemorgangit/NineLives.git
+cd NineLives
 dotnet build
 ```
 
@@ -299,7 +299,7 @@ Built with:
 
 ### Project Structure
 ```
-blackcat-nine-lives/
+NineLives/
 ├── .github/
 │   └── workflows/               # CI: PR build/test gate + release pipeline
 ├── docs/
