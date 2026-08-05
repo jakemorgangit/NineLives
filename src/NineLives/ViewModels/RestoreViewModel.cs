@@ -257,6 +257,37 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isVerifyingChain;
 
+    // ── restore point filters (#27) ─────────────────────────────────────────────
+
+    /// <summary>True when the container holds any restore points at all.</summary>
+    [ObservableProperty]
+    private bool _hasVisiblePoints;
+
+    [ObservableProperty]
+    private string _pointCountText = string.Empty;
+
+    [ObservableProperty]
+    private bool _showFullPoints = true;
+
+    [ObservableProperty]
+    private bool _showDiffPoints = true;
+
+    [ObservableProperty]
+    private bool _showLogPoints = true;
+
+    [ObservableProperty]
+    private string _pointsFromText = string.Empty;
+
+    [ObservableProperty]
+    private string _pointsToText = string.Empty;
+
+    /// <summary>Parsed from the text boxes; null means no bound on that end.</summary>
+    [ObservableProperty]
+    private DateTime? _pointsFrom;
+
+    [ObservableProperty]
+    private DateTime? _pointsTo;
+
     /// <summary>Per-set RESTORE VERIFYONLY results for the selected chain.</summary>
     public ObservableCollection<ChainVerifyResult> ChainVerifyResults { get; } = [];
 
@@ -526,7 +557,17 @@ public partial class RestoreViewModel : ViewModelBase
             SelectedDatabaseName = DiscoveredDatabases[0];
     }
 
-    partial void OnSelectedDatabaseNameChanged(string? value)
+    partial void OnSelectedDatabaseNameChanged(string? value) => RefreshSelectedDatabase(value);
+
+    /// <summary>
+    /// Rebuilds the working set and the restore points for the chosen database.
+    ///
+    /// Called on selection change AND at the end of every load. Relying on the change alone meant
+    /// a reload with the same server and database still selected - the natural thing to do after
+    /// taking a fresh backup - raised no property change at all, so the sets and the timeline kept
+    /// the PREVIOUS scan's contents and the new backup never appeared.
+    /// </summary>
+    private void RefreshSelectedDatabase(string? value)
     {
         if (value == null || _allSets.Count == 0) return;
 
@@ -665,6 +706,10 @@ public partial class RestoreViewModel : ViewModelBase
                 ComputeAndDisplayRestorePoints();
             }
 
+
+            // Unconditionally, not just when the selection changed - see RefreshSelectedDatabase.
+            RefreshSelectedDatabase(SelectedDatabaseName);
+
             // Only when nothing above went wrong. Selecting the first server or database runs the
             // whole filter-and-compute cascade, which can end in "no valid restore points found" -
             // and painting a success line over that left an empty timeline with the status bar
@@ -722,9 +767,15 @@ public partial class RestoreViewModel : ViewModelBase
         SetStatus("Cancelling...");
     }
 
+    /// <summary>
+    /// Every computed restore point, before the view's filters. The timeline and the list both
+    /// show a subset of this (#27).
+    /// </summary>
+    private List<RestorePoint> _allPoints = [];
+
     private void ComputeAndDisplayRestorePoints()
     {
-        var points = _chainBuilder.ComputeRestorePoints(_dbSets);
+        _allPoints = _chainBuilder.ComputeRestorePoints(_dbSets);
 
         // Inventory-level findings: backups that exist but can never be offered. These belong to
         // the discovered set rather than to any one chain, so they are held separately and survive
@@ -734,14 +785,93 @@ public partial class RestoreViewModel : ViewModelBase
         // orphaned logs and "no full backup at all" were being computed nowhere and shown nowhere.
         InventoryIssues = new ObservableCollection<ChainIssue>(
             _chainValidator.ValidateInventory(_dbSets)
-                .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
+                .Concat(_chainValidator.ValidateReachability(_dbSets, _allPoints)));
         HasInventoryIssues = InventoryIssues.Count > 0;
 
-        // Compute timeline positions (0-1)
+        // A fresh load starts wide open. Carrying a previous database's date range over would
+        // silently hide points that have nothing to do with it.
+        _suppressPointFilterRefresh = true;
+        ShowFullPoints = ShowDiffPoints = ShowLogPoints = true;
+        PointsFromText = string.Empty;
+        PointsToText = string.Empty;
+        _suppressPointFilterRefresh = false;
+
+        HasRestorePoints = _allPoints.Count > 0;
+
+        if (_allPoints.Count == 0)
+        {
+            RestorePoints = [];
+            HasVisiblePoints = false;
+            RestoreWindowText = string.Empty;
+            PointCountText = string.Empty;
+            TimelineTicks.Clear();
+            TimelineHeight = 50;
+            SetError("No valid restore points found. Ensure there is at least one full backup.");
+            return;
+        }
+
+        ApplyPointFilters(selectLatest: true);
+        ClearStatus();
+    }
+
+    /// <summary>
+    /// Narrows the timeline and the list to the points the filters allow, then lays the timeline
+    /// out over just those.
+    ///
+    /// Laying out over the VISIBLE set rather than all of them is what makes the date range behave
+    /// like a zoom: narrow to a two-hour window and those points spread across the whole track
+    /// instead of staying bunched in the sliver they occupied before (#27).
+    /// </summary>
+    private void ApplyPointFilters(bool selectLatest = false)
+    {
+        var previous = SelectedRestorePoint;
+        var visible = _allPoints.Where(PointMatchesFilters).ToList();
+
+        LayOutTimeline(visible);
+
+        RestorePoints = new ObservableCollection<RestorePoint>(visible);
+        HasVisiblePoints = visible.Count > 0;
+
+        PointCountText = visible.Count == _allPoints.Count
+            ? $"{_allPoints.Count} restore point(s)"
+            : $"Showing {visible.Count} of {_allPoints.Count} restore point(s)";
+
+        if (visible.Count == 0)
+        {
+            RestoreWindowText = string.Empty;
+            return;
+        }
+
+        // Keep the selection when it survives the filter - changing a type toggle should not throw
+        // away the point someone had already chosen.
+        SelectedRestorePoint = !selectLatest && previous != null && visible.Contains(previous)
+            ? previous
+            : visible[^1];
+    }
+
+    private bool PointMatchesFilters(RestorePoint p)
+    {
+        var typeAllowed = p.Type switch
+        {
+            BackupType.Full => ShowFullPoints,
+            BackupType.Differential => ShowDiffPoints,
+            BackupType.TransactionLog => ShowLogPoints,
+            _ => true
+        };
+        if (!typeAllowed) return false;
+
+        if (PointsFrom.HasValue && p.Timestamp < PointsFrom.Value) return false;
+        if (PointsTo.HasValue && p.Timestamp > PointsTo.Value) return false;
+
+        return true;
+    }
+
+    private void LayOutTimeline(List<RestorePoint> points)
+    {
         if (points.Count > 1)
         {
-            var minTicks = points.First().Timestamp.Ticks;
-            var maxTicks = points.Last().Timestamp.Ticks;
+            var minTicks = points[0].Timestamp.Ticks;
+            var maxTicks = points[^1].Timestamp.Ticks;
             var range = (double)(maxTicks - minTicks);
             foreach (var p in points)
                 p.TimelinePosition = range > 0 ? (p.Timestamp.Ticks - minTicks) / range : 0.5;
@@ -751,36 +881,99 @@ public partial class RestoreViewModel : ViewModelBase
             points[0].TimelinePosition = 0.5;
         }
 
-        // Compute vertical stacking rows to avoid horizontal overlap
+        // Vertical stacking, so points too close together to draw side by side are not drawn on
+        // top of each other.
         ComputeRows(points);
 
-        RestorePoints = new ObservableCollection<RestorePoint>(points);
-        HasRestorePoints = points.Count > 0;
-
-        if (points.Count > 0)
+        if (points.Count == 0)
         {
-            var first = points.First().Timestamp;
-            var last = points.Last().Timestamp;
-            RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
-            TimelineStartText = $"{first:yyyy-MM-dd HH:mm}";
-
-            // Compute time-interval tick marks
-            TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
-
-            // Timeline height based on max row
-            int maxRow = points.Max(p => p.Row);
-            TimelineHeight = Math.Max(50, 30 + (maxRow + 1) * 18);
-
-            SelectedRestorePoint = points.Last();
-            ClearStatus();
-        }
-        else
-        {
-            RestoreWindowText = string.Empty;
             TimelineTicks.Clear();
             TimelineHeight = 50;
-            SetError("No valid restore points found. Ensure there is at least one full backup.");
+            return;
         }
+
+        var first = points[0].Timestamp;
+        var last = points[^1].Timestamp;
+        RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
+        TimelineStartText = $"{first:yyyy-MM-dd HH:mm}";
+
+        TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
+
+        int maxRow = points.Max(p => p.Row);
+        TimelineHeight = Math.Max(50, 30 + (maxRow + 1) * 18);
+    }
+
+    /// <summary>Set while the filters are being reset in bulk, so each one does not re-filter.</summary>
+    private bool _suppressPointFilterRefresh;
+
+    private void OnPointFilterChanged()
+    {
+        if (_suppressPointFilterRefresh || _allPoints.Count == 0) return;
+        ApplyPointFilters();
+    }
+
+    partial void OnShowFullPointsChanged(bool value) => OnPointFilterChanged();
+    partial void OnShowDiffPointsChanged(bool value) => OnPointFilterChanged();
+    partial void OnShowLogPointsChanged(bool value) => OnPointFilterChanged();
+
+    partial void OnPointsFromTextChanged(string value)
+    {
+        PointsFrom = ParseFilterDate(value);
+        OnPointFilterChanged();
+    }
+
+    partial void OnPointsToTextChanged(string value)
+    {
+        PointsTo = ParseFilterDate(value);
+        OnPointFilterChanged();
+    }
+
+    /// <summary>
+    /// Invariant, and forgiving about how much of a timestamp was typed - "2026-01-10" is a
+    /// perfectly reasonable thing to enter into a date box. Unparsable means no bound rather than
+    /// an error, so half-typed input does not blank the timeline mid-keystroke.
+    /// </summary>
+    private static DateTime? ParseFilterDate(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        return DateTime.TryParse(
+            text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    /// <summary>Back to every point, without reloading anything from the container.</summary>
+    [RelayCommand]
+    private void ResetPointFilters()
+    {
+        _suppressPointFilterRefresh = true;
+        ShowFullPoints = ShowDiffPoints = ShowLogPoints = true;
+        PointsFromText = string.Empty;
+        PointsToText = string.Empty;
+        _suppressPointFilterRefresh = false;
+
+        if (_allPoints.Count > 0) ApplyPointFilters();
+    }
+
+    /// <summary>
+    /// Narrows the range to the day the selected point falls on. A week of 15-minute logs is
+    /// roughly 670 points; picking one precisely means getting to a day first, and doing that by
+    /// typing two timestamps is a chore when the answer is nearly always "the day it broke".
+    /// </summary>
+    [RelayCommand]
+    private void ZoomToSelectedDay()
+    {
+        if (SelectedRestorePoint == null) return;
+
+        var day = SelectedRestorePoint.Timestamp.Date;
+
+        _suppressPointFilterRefresh = true;
+        PointsFromText = day.ToString("yyyy-MM-dd HH:mm:ss");
+        PointsToText = day.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss");
+        _suppressPointFilterRefresh = false;
+
+        ApplyPointFilters();
     }
 
     private static void ComputeRows(List<RestorePoint> points)
