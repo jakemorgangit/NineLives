@@ -38,6 +38,10 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
     /// <summary>Realises the visual tree. Bindings are not evaluated until something lays out.</summary>
     private static void Realise(FrameworkElement element)
     {
+        // A Window builds nothing under itself until its template is applied - measuring alone
+        // leaves the content unrealised, so nothing inside it can be found or asserted on.
+        element.ApplyTemplate();
+
         element.Measure(new Size(1600, 1200));
         element.Arrange(new Rect(0, 0, 1600, 1200));
         element.UpdateLayout();
@@ -106,6 +110,14 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
             Realise(window);
         });
     }
+
+    // The update banner is not asserted on beyond MainWindowLoads above, which does cover what
+    // can break silently: it parses the banner's markup, its storyboard and its drop shadow, and
+    // resolves every {StaticResource} it uses - a missing key would throw there.
+    //
+    // Whether it is VISIBLE cannot be checked this way. A Window builds nothing under itself until
+    // it is shown, and showing one would flash a real window and run the actual startup path. Not
+    // worth contorting the harness for a banner whose appearance needs eyes anyway.
 
     // ── the panels that only appear in a particular state ───────────────────────
 
@@ -469,6 +481,10 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         for (DependencyObject? node = element; node != null;
              node = System.Windows.Media.VisualTreeHelper.GetParent(node))
         {
+            // A Window that has never been shown reports itself as not visible, which would make
+            // every element inside it look hidden. What is being asked here is whether the content
+            // would be on screen, so the window itself is not part of the question.
+            if (node is Window) break;
             if (node is UIElement { Visibility: not Visibility.Visible }) return false;
         }
         return true;
