@@ -265,8 +265,11 @@
                            VerticalAlignment="Center"
                            Margin="0,0,24,0" />
 
+                <!-- From the assembly, not a literal. This said v1.0.0 while the About box read
+                     v1.1.0 from AppVersion - #35 fixed the About box and missed the status bar,
+                     which is the version most people would glance at. -->
                 <TextBlock Grid.Column="2"
-                           Text="v1.0.0"
+                           Text="{Binding VersionText, Mode=OneWay}"
                            Style="{StaticResource SecondaryText}"
                            VerticalAlignment="Center" />
             </Grid>

@@ -16,7 +16,9 @@ public class BlobStorageService
 
     private BlobContainerClient CreateClient(BlobContainerConfig config)
     {
-        var sasToken = _credentialStore.GetSasToken(config);
+        // An unsaved token wins, so Test Connection can try one without it having to be persisted
+        // first (#12). Null for every ordinary operation, which falls through to the stored token.
+        var sasToken = config.UnsavedSasToken ?? _credentialStore.GetSasToken(config);
         if (string.IsNullOrEmpty(sasToken))
             throw new InvalidOperationException(
                 "No SAS token found. Please configure the SAS token for this container.");
@@ -40,14 +42,92 @@ public class BlobStorageService
         return true;
     }
 
-    public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
+    /// <summary>The container's top-level folders, read without listing a single blob.</summary>
+    public async Task<List<string>> ListTopLevelFoldersAsync(
         BlobContainerConfig config, CancellationToken ct = default)
+    {
+        var client = CreateClient(config);
+        var folders = new List<string>();
+
+        await foreach (var item in client.GetBlobsByHierarchyAsync(
+            BlobTraits.None, BlobStates.None, delimiter: "/", prefix: null, cancellationToken: ct))
+        {
+            if (item.IsPrefix) folders.Add(item.Prefix.TrimEnd('/'));
+        }
+
+        return folders;
+    }
+
+    public Task<List<BackupFileInfo>> ListBackupFilesAsync(
+        BlobContainerConfig config, CancellationToken ct = default)
+        => ListBackupFilesAsync(config, scope: null, progress: null, ct);
+
+    /// <summary>
+    /// Lists backup files, optionally scoped to a server and database so the listing is pushed
+    /// down to Azure as a prefix instead of walking the container and filtering afterwards (#28).
+    ///
+    /// A scope is a hint, not a promise: when the container's layout cannot produce a safe prefix -
+    /// flat Ola AG naming, a pattern whose leading segments are not known - this falls back to the
+    /// full scan and returns exactly what it always did. Returning too FEW backups would silently
+    /// remove restore points, so anything short of a provable prefix scans everything.
+    /// </summary>
+    /// <param name="progress">Reports the running blob count, for containers big enough to wait on.</param>
+    public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
+        BlobContainerConfig config,
+        BlobListingScope? scope,
+        IProgress<int>? progress,
+        CancellationToken ct = default)
     {
         var client = CreateClient(config);
         var files = new List<BackupFileInfo>();
 
-        await foreach (var blob in client.GetBlobsAsync(
-            BlobTraits.Metadata, BlobStates.None, prefix: null, cancellationToken: ct))
+        var prefixes = await ResolvePrefixesAsync(config, scope, ct);
+
+        foreach (var prefix in prefixes)
+        {
+            await foreach (var blob in client.GetBlobsAsync(
+                BlobTraits.Metadata, BlobStates.None, prefix, cancellationToken: ct))
+            {
+                ReadBlob(config, blob, files);
+                if (files.Count % 250 == 0) progress?.Report(files.Count);
+            }
+        }
+
+        progress?.Report(files.Count);
+        return files.OrderBy(f => f.LastModified).ToList();
+    }
+
+    /// <summary>
+    /// Turns a scope into the prefixes to list. A single null prefix means "scan everything".
+    /// </summary>
+    private async Task<IReadOnlyList<string?>> ResolvePrefixesAsync(
+        BlobContainerConfig config, BlobListingScope? scope, CancellationToken ct)
+    {
+        if (scope is null || !scope.HasAnything) return [null];
+        if (!BlobPrefix.SupportsPrefixes(config.BackupSourceType)) return [null];
+
+        // {BackupType} leads the default pattern, so without the real folder names no prefix can
+        // be built at all. One cheap hierarchy call buys the whole optimisation.
+        IReadOnlyCollection<string>? folders = null;
+        if (config.PathPattern.Contains("{BackupType}", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                folders = await ListTopLevelFoldersAsync(config, ct);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                // Cannot discover the folders - fall back rather than guess at names.
+                return [null];
+            }
+        }
+
+        var prefixes = BlobPrefix.Derive(config.PathPattern, scope.ServerName, scope.DatabaseName, folders);
+        return prefixes is { Count: > 0 } ? [.. prefixes] : [null];
+    }
+
+    private void ReadBlob(BlobContainerConfig config, BlobItem blob, List<BackupFileInfo> files)
+    {
         {
             var blobUrl = $"{config.ContainerUrl.TrimEnd('/')}/{blob.Name}";
 
@@ -111,8 +191,6 @@ public class BlobStorageService
 
             files.Add(file);
         }
-
-        return files.OrderBy(f => f.LastModified).ToList();
     }
 
     public ContainerSummary GetContainerSummary(List<BackupFileInfo> files)
@@ -257,11 +335,17 @@ public class BlobStorageService
         return idx >= 0 ? blobName[..idx] : string.Empty;
     }
 
-    public string BuildBlobUrlWithSas(BlobContainerConfig config, string blobName)
-    {
-        var sasToken = _credentialStore.GetSasToken(config);
-        return $"{config.ContainerUrl.TrimEnd('/')}/{blobName}?{sasToken?.TrimStart('?')}";
-    }
+    /// <summary>
+    /// The plain HTTPS URL of a blob, with no SAS token on it.
+    ///
+    /// This replaced BuildBlobUrlWithSas, which existed only to feed the two "copy HTTPS path"
+    /// buttons and put a live credential on the Windows clipboard - where clipboard history
+    /// (Win+V) and cloud clipboard sync can keep it long after the app has closed (#18). The
+    /// token-free URL is what the generated scripts use anyway, since RESTORE FROM URL
+    /// authenticates with the server-side credential rather than anything in the URL.
+    /// </summary>
+    public static string BuildBlobUrl(BlobContainerConfig config, string blobName)
+        => $"{config.ContainerUrl.TrimEnd('/')}/{blobName}";
 
     private static void ParseBlobPath(BackupFileInfo file, string pathPattern)
     {
@@ -377,31 +461,75 @@ public class BlobStorageService
         };
     }
 
-    private static BackupType InferBackupTypeFromExtension(string blobName)
+    /// <summary>
+    /// Last-resort type inference from the filename, reached only when the path structure did not
+    /// say what a backup is.
+    ///
+    /// Getting this wrong is not cosmetic. A log misread as a full enters the fulls collection in
+    /// BackupChainBuilder and becomes a chain root, so the timeline offers a log file as a
+    /// restorable Full point and every earlier log is dropped from the chain (#44). A full misread
+    /// as a differential never enters that collection at all, and if it is the only full in the
+    /// container the database gets no restore points whatsoever (#45).
+    /// </summary>
+    internal static BackupType InferBackupTypeFromExtension(string blobName)
     {
         var name = blobName.ToLowerInvariant();
 
         if (name.EndsWith(".trn") || name.EndsWith(".log"))
             return BackupType.TransactionLog;
 
-        if (name.EndsWith(".bak") || name.EndsWith(".bkp"))
-        {
-            if (ContainsDiffIndicator(name))
-                return BackupType.Differential;
-            return BackupType.Full;
-        }
-
         if (name.EndsWith(".diff"))
             return BackupType.Differential;
+
+        if (name.EndsWith(".bak") || name.EndsWith(".bkp"))
+        {
+            // Indicators are read from the filename only, never the folders above it - those are
+            // the primary path's job, and a container called "logs" should not retype every file
+            // underneath it.
+            var fileName = name[(name.LastIndexOf('/') + 1)..];
+
+            if (ContainsDiffIndicator(fileName))
+                return BackupType.Differential;
+
+            // A log written as .bak used to land here as Full. Ola and maintenance plans both emit
+            // .trn so this needs a hand-rolled job, but the failure was bad enough to be worth
+            // catching (#44).
+            if (ContainsLogIndicator(fileName))
+                return BackupType.TransactionLog;
+
+            return BackupType.Full;
+        }
 
         return BackupType.Unknown;
     }
 
-    private static bool ContainsDiffIndicator(string name)
-    {
-        string[] diffIndicators = ["diff", "differential", "_diff", "-diff", ".diff"];
-        return diffIndicators.Any(name.Contains);
-    }
+    // Delimited, not a bare substring. The old version tested name.Contains("diff"), which made
+    // every other entry in its list redundant and classified DiffusionDb's FULL backups as
+    // differentials (#45). Same anchoring as CopyOnlyRegex above.
+    private static readonly Regex DiffIndicatorRegex = new(
+        @"(?:^|[_\-.])(?:diff|differential)(?:$|[_\-.])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Deliberately delimited for the same reason, and more sharply here: a bare "log" substring
+    // would retype CatalogDb, BlogDb and DialogDb backups as transaction logs.
+    private static readonly Regex LogIndicatorRegex = new(
+        @"(?:^|[_\-.])(?:log|tlog|trn|translog|transactionlog)(?:$|[_\-.])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>True when a filename carries a delimited differential marker. Public for testing.</summary>
+    public static bool ContainsDiffIndicator(string fileName)
+        => !string.IsNullOrEmpty(fileName) && DiffIndicatorRegex.IsMatch(fileName);
+
+    /// <summary>
+    /// True when a filename carries a delimited transaction-log marker. Public for testing.
+    ///
+    /// Known limitation: a database actually named "Log" or "Diff" would match on its own name.
+    /// Nothing in a filename can settle that, and the alternative - a bare substring - is the bug
+    /// being fixed. Path-based typing takes precedence anyway, so this only bites a flat container
+    /// holding a database with one of those names.
+    /// </summary>
+    public static bool ContainsLogIndicator(string fileName)
+        => !string.IsNullOrEmpty(fileName) && LogIndicatorRegex.IsMatch(fileName);
 
     /// <summary>
     /// For path-based AG files, extract backup set id from the filename segment (e.g. 20260226_200032_1.bak → 20260226_200032).
@@ -426,19 +554,5 @@ public class ContainerSummary
     public DateTimeOffset? EarliestBackup { get; set; }
     public DateTimeOffset? LatestBackup { get; set; }
 
-    public string TotalSizeDisplay
-    {
-        get
-        {
-            string[] units = ["B", "KB", "MB", "GB", "TB"];
-            double size = TotalSizeBytes;
-            int unit = 0;
-            while (size >= 1024 && unit < units.Length - 1)
-            {
-                size /= 1024;
-                unit++;
-            }
-            return $"{size:F1} {units[unit]}";
-        }
-    }
+    public string TotalSizeDisplay => ByteSize.Format(TotalSizeBytes);
 }

@@ -280,8 +280,19 @@
                             <CheckBox Content="Trust Server Certificate"
                                       IsChecked="{Binding EditTrustServerCert}"
                                       Style="{StaticResource DarkCheckBox}"
-                                      Margin="0,0,0,16"
+                                      Margin="0,0,0,4"
                                       ToolTip="When enabled, the server certificate is accepted without validation. Common for development and self-signed certificates. Disable for production environments with valid CA-issued certificates." />
+
+                            <!-- Shown only while the box is ticked. The default is on, which is the
+                                 pragmatic choice for a DBA tool, but it should be a decision rather
+                                 than something that happens quietly - this connection carries the
+                                 SQL password and the SAS token. Test Connection follows up with
+                                 whether the certificate would actually have validated (#17). -->
+                            <TextBlock Style="{StaticResource SecondaryText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,16"
+                                       Visibility="{Binding EditTrustServerCert, Converter={StaticResource BoolToVis}}"
+                                       Text="The connection is encrypted but the certificate is not verified, and both the SQL password and the SAS token travel over it. Run Test Connection and it will tell you whether this server's certificate validates - if it does, you can untick this." />
 
                             <TextBlock Text="CONNECTION TIMEOUT (SECONDS)" Style="{StaticResource LabelText}" />
                             <TextBox Text="{Binding EditTimeout, UpdateSourceTrigger=PropertyChanged}"

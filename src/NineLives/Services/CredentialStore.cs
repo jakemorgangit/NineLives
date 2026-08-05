@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
@@ -13,10 +14,21 @@ namespace Blackcat.NineLives.Services;
 public class CredentialStore
 {
     private const string AppPrefix = "NineLives";
-    private static readonly string ConfigDir = Path.Combine(
+    private static readonly string DefaultConfigDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "NineLives");
-    private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
+
+    private readonly string _configDir;
+    private readonly string _configPath;
+
+    public CredentialStore() : this(DefaultConfigDir) { }
+
+    /// <summary>Lets the tests point config persistence at a temp directory instead of the real profile.</summary>
+    internal CredentialStore(string configDir)
+    {
+        _configDir = configDir;
+        _configPath = Path.Combine(configDir, "config.json");
+    }
 
     #region Windows Credential Manager P/Invoke
 
@@ -153,14 +165,17 @@ public class CredentialStore
     {
         var sasToken = GetSasToken(config);
         if (sasToken == null) return true;
-        var expiry = config.GetSasExpiry(sasToken);
-        return expiry.HasValue && expiry.Value < DateTime.UtcNow;
+        return config.ReadSasExpiry(sasToken).IsExpired;
     }
 
     public DateTime? GetSasTokenExpiry(BlobContainerConfig config)
+        => ReadSasTokenExpiry(config).ExpiresAt;
+
+    /// <summary>Full expiry state, so callers can tell "no expiry" from "unreadable" (#21).</summary>
+    public SasExpiryInfo ReadSasTokenExpiry(BlobContainerConfig config)
     {
         var sasToken = GetSasToken(config);
-        return sasToken != null ? config.GetSasExpiry(sasToken) : null;
+        return sasToken != null ? config.ReadSasExpiry(sasToken) : SasExpiryInfo.None;
     }
 
     #endregion
@@ -182,38 +197,98 @@ public class CredentialStore
 
     #region Config Persistence (non-secret data)
 
+    /// <summary>
+    /// Reads config.json. Never throws, so startup cannot be bricked by a bad file - but a file
+    /// that exists and could not be read comes back carrying <see cref="AppConfig.LoadError"/>,
+    /// and <see cref="SaveConfig"/> refuses to overwrite anything in that state.
+    ///
+    /// The distinction matters. "No file" means a fresh install, where empty defaults are exactly
+    /// right. "File is there but I could not read it" used to produce the same empty defaults,
+    /// which is how a transient lock - antivirus, a backup agent, a sync client mid-upload -
+    /// turned into permanent data loss: the UI showed no containers, the user re-added one, and
+    /// the save wrote that single entry over everything they had.
+    /// </summary>
     public AppConfig LoadConfig()
     {
+        if (!File.Exists(_configPath))
+            return new AppConfig();
+
         try
         {
-            if (File.Exists(ConfigPath))
+            var json = File.ReadAllText(_configPath);
+            var config = JsonSerializer.Deserialize<AppConfig>(json);
+            if (config != null)
+                return config;
+
+            return new AppConfig
             {
-                var json = File.ReadAllText(ConfigPath);
-                return JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
-            }
+                LoadError = $"{_configPath} does not contain valid configuration."
+            };
         }
-        catch
+        catch (Exception ex)
         {
-            // Config corrupted, return defaults
+            return new AppConfig
+            {
+                LoadError = $"{_configPath} could not be read: {ex.Message}"
+            };
         }
-        return new AppConfig();
     }
 
+    /// <summary>
+    /// Writes config.json, or throws. Callers must report the failure rather than telling the
+    /// user their work was saved - the old version swallowed everything and the UI said
+    /// "saved successfully" regardless.
+    /// </summary>
+    /// <exception cref="ConfigSaveRefusedException">
+    /// The config being saved came from a failed load, so writing it would destroy whatever is
+    /// still on disk.
+    /// </exception>
     public void SaveConfig(AppConfig config)
     {
-        try
+        if (config.LoadError != null)
+            throw new ConfigSaveRefusedException(config.LoadError);
+
+        Directory.CreateDirectory(_configDir);
+        var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+
+        // Write beside the real file and swap it in, so a crash or a full disk part-way through
+        // cannot leave a truncated config.json where a complete one used to be. File.Replace is
+        // atomic and keeps the previous contents as .bak, which is a free undo for the case
+        // where something else has gone wrong.
+        var tempPath = _configPath + ".tmp";
+        File.WriteAllText(tempPath, json);
+
+        if (File.Exists(_configPath))
         {
-            Directory.CreateDirectory(ConfigDir);
-            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(ConfigPath, json);
+            try
+            {
+                File.Replace(tempPath, _configPath, _configPath + ".bak", ignoreMetadataErrors: true);
+                return;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // Some filesystems (a few network shares) cannot do the atomic swap. Fall through
+                // to the plain move, which is still better than writing over the file in place.
+            }
+            File.Delete(_configPath);
         }
-        catch
-        {
-            // Silently fail config save
-        }
+
+        File.Move(tempPath, _configPath);
     }
 
     #endregion
+}
+
+/// <summary>
+/// Thrown when a save is refused because the configuration in hand was never successfully loaded.
+/// Writing it would replace real saved servers and containers with an empty list.
+/// </summary>
+public class ConfigSaveRefusedException(string loadError)
+    : InvalidOperationException(
+        $"Configuration was not saved, because it could not be read in the first place and " +
+        $"saving now would overwrite the copy on disk. {loadError}")
+{
+    public string LoadError { get; } = loadError;
 }
 
 public class AppConfig
@@ -228,4 +303,13 @@ public class AppConfig
 
     /// <summary>Last release tag the user was told about, so the banner does not nag.</summary>
     public string? LastNotifiedReleaseTag { get; set; }
+
+    /// <summary>
+    /// Set when config.json existed but could not be read or parsed. Not persisted - it describes
+    /// this load attempt, not the configuration. While it is set, this object holds empty defaults
+    /// that do NOT reflect what is on disk, so <see cref="CredentialStore.SaveConfig"/> will
+    /// refuse to write it.
+    /// </summary>
+    [JsonIgnore]
+    public string? LoadError { get; set; }
 }

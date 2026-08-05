@@ -18,6 +18,7 @@ namespace Blackcat.NineLives.Tests;
 /// below is deliberately harmless: if the injection were still open it would create a second,
 /// clearly-named credential rather than change any permissions.
 /// </summary>
+[Collection("CredentialManager")]
 public class CredentialInjectionTests
 {
     private static string? TestServerName =>
@@ -98,7 +99,7 @@ public class CredentialInjectionTests
     [RequiresSqlFact]
     public async Task EnsureCredentialExists_IsIdempotentForAwkwardNames()
     {
-        // Second call takes the DROP-then-CREATE path, which is the other interpolation site.
+        // Second call takes the ALTER path, which is the other interpolation site.
         const string name = "ninelives-test]awkward]name";
         try
         {

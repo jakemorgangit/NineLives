@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Blackcat.NineLives.ViewModels;
@@ -51,5 +52,33 @@ public abstract partial class ViewModelBase : ObservableObject
         StatusMessage = string.Empty;
         HasError = false;
         ErrorMessage = string.Empty;
+    }
+
+    /// <summary>
+    /// Puts text on the clipboard, reporting failure through the status surface instead of
+    /// throwing out of a synchronous command and taking the process with it (#13).
+    ///
+    /// Clipboard.SetText throwing is an ordinary Windows condition, not an exceptional one -
+    /// another process holding the clipboard lock is routine with remote desktop sessions and
+    /// clipboard managers, and it was reproduced while the issue was being written. A failed copy
+    /// deserves a line in the status bar, not a crash.
+    /// </summary>
+    protected bool TryCopyToClipboard(string? text, string successMessage)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+
+        try
+        {
+            Clipboard.SetText(text);
+            SetStatus(successMessage);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetError(
+                $"Could not copy to the clipboard: {ex.Message}. " +
+                "Another application may be holding it - try again in a moment.");
+            return false;
+        }
     }
 }

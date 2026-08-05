@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -10,6 +11,11 @@ public partial class BlobConfigViewModel : ViewModelBase
 {
     private readonly CredentialStore _credentialStore;
     private readonly BlobStorageService _blobService;
+    private readonly OperationCancellation _testCancellation = new();
+
+    /// <summary>True while a connection test is running and has not been asked to stop (#25).</summary>
+    [ObservableProperty]
+    private bool _canCancelTest;
 
     [ObservableProperty]
     private ObservableCollection<BlobContainerConfig> _containers = [];
@@ -122,11 +128,25 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
     }
 
-    private void SaveContainers()
+    /// <summary>
+    /// Persists the container list. Returns false and sets the error when the write failed, so
+    /// callers do not go on to report success - the config save used to swallow everything and
+    /// the UI said "saved successfully" whether or not anything reached the disk.
+    /// </summary>
+    private bool SaveContainers()
     {
-        var config = _credentialStore.LoadConfig();
-        config.BlobContainers = [.. Containers];
-        _credentialStore.SaveConfig(config);
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            config.BlobContainers = [.. Containers];
+            _credentialStore.SaveConfig(config);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not save configuration: {ex.Message}");
+            return false;
+        }
     }
 
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
@@ -175,18 +195,28 @@ public partial class BlobConfigViewModel : ViewModelBase
 
     private void UpdateSasExpiryStatus(BlobContainerConfig container)
     {
-        var expiry = _credentialStore.GetSasTokenExpiry(container);
-        if (expiry.HasValue)
+        var expiry = _credentialStore.ReadSasTokenExpiry(container);
+
+        if (expiry.CouldNotParse)
         {
-            IsSasExpired = expiry.Value < DateTime.UtcNow;
-            var remaining = expiry.Value - DateTime.UtcNow;
+            // The token states an expiry we cannot read, so we cannot say it is still valid.
+            // Showing this as "unknown" alongside everything else that is fine would be a lie of
+            // omission - the restore is the wrong place to discover it (#21).
+            SasExpiryText = "SAS token expiry could not be read - treat this token as expired and replace it";
+            IsSasExpired = true;
+        }
+        else if (expiry.ExpiresAt is { } expiresAt)
+        {
+            IsSasExpired = expiresAt < DateTime.UtcNow;
+            var remaining = expiresAt - DateTime.UtcNow;
             SasExpiryText = IsSasExpired
                 ? $"SAS token expired {-remaining.TotalHours:F0}h ago"
-                : $"SAS token expires in {remaining.TotalHours:F0}h ({expiry.Value:yyyy-MM-dd HH:mm} UTC)";
+                : $"SAS token expires in {remaining.TotalHours:F0}h ({expiresAt:yyyy-MM-dd HH:mm} UTC)";
         }
         else
         {
-            SasExpiryText = "SAS token expiry unknown";
+            // No se= at all, which is legitimate for a SAS built on a stored access policy.
+            SasExpiryText = "SAS token states no expiry";
             IsSasExpired = false;
         }
     }
@@ -392,6 +422,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
             container = new BlobContainerConfig
             {
+                // Assigned here rather than defaulted on the model - see the note on Id.
+                Id = BlobContainerConfig.NewId(),
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
                 PathPattern = EditPathPattern,
@@ -417,7 +449,14 @@ public partial class BlobConfigViewModel : ViewModelBase
         if (haveTokenToSave)
             _credentialStore.SaveSasToken(container, EditSasToken);
         // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
-        SaveContainers();
+        if (!SaveContainers())
+        {
+            // Nothing reached the disk, so do not leave the list showing a container that is not
+            // really there. Stay in the edit form so the save can be retried once whatever was
+            // holding the file has let go.
+            if (IsNew) Containers.Remove(container);
+            return;
+        }
 
         SelectedContainer = container;
         IsEditing = false;
@@ -430,9 +469,32 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void Delete()
     {
         if (SelectedContainer == null) return;
-        _credentialStore.DeleteSecret(SelectedContainer.CredentialKey);
-        Containers.Remove(SelectedContainer);
-        SaveContainers();
+
+        // Deleting takes the SAS token out of Credential Manager, and the token is never displayed
+        // anywhere in the app - so if it was the only copy, it is gone for good. That deserves a
+        // question rather than a single click (#42).
+        var confirm = MessageBox.Show(
+            $"Remove the container \"{SelectedContainer.Name}\"?\n\n" +
+            "Its stored SAS token will be deleted from Windows Credential Manager. The app never " +
+            "displays stored tokens, so if this is the only copy you will need to obtain a new one.\n\n" +
+            "Nothing in Azure is affected - no backups are deleted.",
+            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+        if (confirm != MessageBoxResult.Yes) return;
+
+        // Remove from the config first and only destroy the secret once that write has actually
+        // landed. The other order threw the SAS token away and then, if the save failed, left the
+        // container in config.json pointing at a credential that no longer exists.
+        var removed = SelectedContainer;
+        Containers.Remove(removed);
+        if (!SaveContainers())
+        {
+            Containers.Add(removed);
+            SelectedContainer = removed;
+            return;
+        }
+
+        _credentialStore.DeleteSecret(removed.CredentialKey);
         SelectedContainer = Containers.FirstOrDefault();
         SetStatus("Container removed.");
     }
@@ -466,9 +528,16 @@ public partial class BlobConfigViewModel : ViewModelBase
                 config = SelectedContainer; // Use stored token for test
             else
             {
-                config = new BlobContainerConfig { Name = EditName, ContainerUrl = EditContainerUrl };
-                if (!string.IsNullOrWhiteSpace(EditSasToken))
-                    _credentialStore.SaveSasToken(config, EditSasToken);
+                // In memory only. This used to call SaveSasToken, which is a durable write to
+                // Credential Manager - so pasting a typo'd or expired token, testing it, and
+                // clicking Cancel destroyed the working token that was there before, with no way
+                // to get it back because the form never displays stored tokens (#12).
+                config = new BlobContainerConfig
+                {
+                    Name = EditName,
+                    ContainerUrl = EditContainerUrl,
+                    UnsavedSasToken = string.IsNullOrWhiteSpace(EditSasToken) ? null : EditSasToken
+                };
             }
         }
         else
@@ -476,16 +545,26 @@ public partial class BlobConfigViewModel : ViewModelBase
 
         if (config == null) return;
 
+        // Test Connection sounds quick, but it enumerates the whole container to build the summary
+        // - 4000+ blobs on a real one - so it needs the same escape as the other listings (#25).
+        var ct = _testCancellation.Begin();
         IsBusy = true;
+        CanCancelTest = true;
         TestResult = string.Empty;
         try
         {
-            await _blobService.VerifyConnectionAsync(config);
-            var files = await _blobService.ListBackupFilesAsync(config);
+            await _blobService.VerifyConnectionAsync(config, ct);
+            var files = await _blobService.ListBackupFilesAsync(config, ct);
             var summary = _blobService.GetContainerSummary(files);
             ContainerSummary = summary;
             TestSuccess = true;
             TestResult = $"Connected! {summary.TotalFiles} files found ({summary.TotalSizeDisplay})";
+        }
+        catch (OperationCanceledException)
+        {
+            TestSuccess = false;
+            TestResult = "Cancelled.";
+            ContainerSummary = null;
         }
         catch (Exception ex)
         {
@@ -495,7 +574,18 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
         finally
         {
+            _testCancellation.End();
             IsBusy = false;
+            CanCancelTest = false;
         }
+    }
+
+    /// <summary>Stops an in-progress connection test.</summary>
+    [RelayCommand]
+    private void CancelTest()
+    {
+        _testCancellation.Cancel();
+        CanCancelTest = false;
+        TestResult = "Cancelling...";
     }
 }

@@ -1,4 +1,6 @@
 using System.Data;
+using System.Security;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Blackcat.NineLives.Models;
 
@@ -30,30 +32,118 @@ public class SqlServerService
             MultipleActiveResultSets = false
         };
 
-        if (server.AuthMode == AuthMode.WindowsAuth)
-        {
-            builder.IntegratedSecurity = true;
-        }
-        else
-        {
-            builder.IntegratedSecurity = false;
-            builder.UserID = server.Username;
-            builder.Password = _credentialStore.GetSqlPassword(server);
-        }
+        builder.IntegratedSecurity = server.AuthMode == AuthMode.WindowsAuth;
 
+        // No UserID or Password here - SQL auth credentials go on the SqlConnection as a
+        // SqlCredential instead (#20). A connection string is a long-lived managed string that
+        // cannot be zeroed and turns up in crash dumps and memory captures; SqlCredential holds
+        // the password in a SecureString the driver disposes. It also means anything that logs or
+        // displays a connection string cannot leak the password by accident.
+        //
+        // SqlCredential refuses to attach to a connection string that already carries either, so
+        // leaving them out is required rather than merely tidy.
         return builder.ConnectionString;
+    }
+
+    /// <summary>
+    /// Opens nothing; builds the connection with the password attached out-of-band.
+    /// Every SQL operation in this class goes through here.
+    /// </summary>
+    public SqlConnection CreateConnection(ServerConnection server)
+    {
+        var conn = new SqlConnection(BuildConnectionString(server));
+
+        if (server.AuthMode != AuthMode.SqlAuth)
+            return conn;
+
+        // Unsaved wins, so Test Connection can try a password without persisting it first (#12).
+        var password = server.UnsavedPassword ?? _credentialStore.GetSqlPassword(server);
+        if (string.IsNullOrEmpty(server.Username) || password == null)
+            return conn;
+
+        var secure = new SecureString();
+        foreach (var c in password) secure.AppendChar(c);
+        secure.MakeReadOnly();
+
+        conn.Credential = new SqlCredential(server.Username, secure);
+        return conn;
     }
 
     public async Task<bool> TestConnectionAsync(ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         return conn.State == ConnectionState.Open;
     }
 
+    /// <summary>
+    /// Would this server connect with certificate validation switched on?
+    ///
+    /// TrustServerCertificate defaults to true, which is the pragmatic default for a DBA tool -
+    /// self-signed certificates are what a stock SQL Server install has, and a tool that refuses
+    /// to connect out of the box gets uninstalled. But it means the app accepts any certificate
+    /// without validation, and it sends the SQL password and the SAS token over that connection
+    /// (#17).
+    ///
+    /// Rather than nag about it, this answers the question that actually matters: is the setting
+    /// doing anything? A great many instances have a properly issued certificate and are trusting
+    /// blindly for no reason at all. When that is the case the UI can say so and the user can turn
+    /// it off with real information rather than a warning they will learn to ignore.
+    ///
+    /// Returns null when the answer is not knowable - the probe failed for some reason other than
+    /// the certificate.
+    /// </summary>
+    public async Task<bool?> WouldConnectWithCertificateValidationAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (!server.TrustServerCertificate)
+            return true;   // already validating
+
+        var validated = new ServerConnection
+        {
+            Id = server.Id,
+            Name = server.Name,
+            ServerName = server.ServerName,
+            AuthMode = server.AuthMode,
+            Username = server.Username,
+            ConnectionTimeoutSeconds = server.ConnectionTimeoutSeconds,
+            Encrypt = server.Encrypt,
+            TrustServerCertificate = false,
+            UnsavedPassword = server.UnsavedPassword
+        };
+
+        try
+        {
+            await using var conn = CreateConnection(validated);
+            await conn.OpenAsync(ct);
+            return true;
+        }
+        catch (SqlException ex) when (IsCertificateFailure(ex))
+        {
+            return false;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// SQL Server surfaces a rejected certificate as a generic SSL provider error, so this matches
+    /// on the message. Getting it wrong only costs a "could not determine" instead of a definite
+    /// answer, which is why the caller treats null as "say nothing".
+    /// </summary>
+    private static bool IsCertificateFailure(SqlException ex)
+    {
+        var message = ex.ToString();
+        return message.Contains("certificate", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("trust relationship", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("SSL", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<string> GetServerVersionAsync(ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT @@VERSION";
@@ -61,9 +151,52 @@ public class SqlServerService
         return result?.ToString() ?? "Unknown";
     }
 
+    /// <summary>
+    /// Reads what state a database is in, so a failed restore can say what it left behind (#14).
+    /// Parameterised - the name comes from a text box.
+    /// </summary>
+    public async Task<DatabaseRecoveryState> GetDatabaseRecoveryStateAsync(
+        ServerConnection server, string databaseName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(databaseName))
+            return DatabaseRecoveryState.Missing;
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT state_desc, user_access_desc FROM sys.databases WHERE name = @name";
+        cmd.Parameters.AddWithValue("@name", databaseName);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return DatabaseRecoveryState.Missing;
+
+        return new DatabaseRecoveryState(
+            true,
+            reader["state_desc"]?.ToString(),
+            reader["user_access_desc"]?.ToString());
+    }
+
+    /// <summary>
+    /// Runs a single remediation statement chosen by the user from
+    /// <see cref="DatabaseRecoveryState.SuggestedActions"/>. Deliberately takes the whole statement
+    /// rather than building one - the user has already been shown exactly what will run.
+    /// </summary>
+    public async Task ExecuteRecoveryActionAsync(
+        ServerConnection server, string sql, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT name FROM sys.databases ORDER BY name";
@@ -74,64 +207,41 @@ public class SqlServerService
         return databases;
     }
 
-    public async Task<List<BackupFileInfo>> RestoreHeaderOnlyAsync(
-        ServerConnection server, string blobUrl, string credentialName, CancellationToken ct = default)
-    {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
-        await conn.OpenAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
-        cmd.CommandText = $"RESTORE HEADERONLY FROM URL = N'{TSql.EscapeLiteral(blobUrl)}' WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'";
+    // These two read backup metadata off blob URLs, and neither takes a credential name any more.
+    //
+    // They used to, and passing one could never work. SQL Server rejects WITH CREDENTIAL against a
+    // SAS-backed credential outright:
+    //
+    //     Msg 3225: Use of WITH CREDENTIAL syntax is not valid for credentials containing a
+    //     Shared Access Signature.
+    //
+    // A SAS credential is the only kind this app ever creates - EnsureCredentialExistsAsync
+    // hardcodes WITH IDENTITY = 'SHARED ACCESS SIGNATURE' - so the branch could not succeed in any
+    // configuration the app produces. Both production callers already passed null, which is why
+    // the shipping app worked, but the parameter was positional and required: a new caller had to
+    // pass something, and the obvious something failed with an error about syntax rather than
+    // about the real cause. Removing it makes the wrong call unrepresentable rather than merely
+    // unused (#60).
+    //
+    // The server-side credential still does the authenticating. It is matched by URL prefix, which
+    // is exactly how the generated restore script has always worked.
+    //
+    // If a non-SAS credential is ever supported (managed identity, #29), bring the option back
+    // keyed off the identity type that CredentialExistsAsync already reports - not off a flag.
 
-        var results = new List<BackupFileInfo>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            int? backupTypeCode = GetIntFromReader(reader, "BackupType");
-            results.Add(new BackupFileInfo
-            {
-                DatabaseName = GetStringFromReader(reader, "DatabaseName"),
-                BackupStartDate = GetDateTimeFromReader(reader, "BackupStartDate"),
-                BackupFinishDate = GetDateTimeFromReader(reader, "BackupFinishDate"),
-                BackupTypeCode = backupTypeCode,
-                Type = (backupTypeCode ?? 0) switch
-                {
-                    1 => BackupType.Full,
-                    5 => BackupType.Differential,
-                    2 => BackupType.TransactionLog,
-                    _ => BackupType.Unknown
-                },
-                FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
-                LastLsn = GetDecimalFromReader(reader, "LastLSN"),
-                DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
-            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
-            });
-        }
-        return results;
-    }
-
+    /// <summary>RESTORE FILELISTONLY across the files of one backup set, striped or not.</summary>
     public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
-        ServerConnection server, string blobUrl, string credentialName, CancellationToken ct = default)
-    {
-        return await RestoreFileListOnlyAsync(server, [blobUrl], credentialName, urlsContainSas: false, ct);
-    }
-
-    /// <summary>RESTORE FILELISTONLY for striped backup. When urlsContainSas is true, omit WITH CREDENTIAL (SQL Server does not allow WITH CREDENTIAL for SAS credentials).</summary>
-    public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
-        ServerConnection server, IReadOnlyList<string> blobUrls, string? credentialName, bool urlsContainSas = false, CancellationToken ct = default)
+        ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
         if (blobUrls.Count == 0) return [];
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        var withCredential = !urlsContainSas && !string.IsNullOrEmpty(credentialName)
-            ? $" WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'"
-            : "";
-        cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}{withCredential}";
+        cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}";
 
         var files = new List<FileMoveOption>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -148,22 +258,19 @@ public class SqlServerService
         return files;
     }
 
-    /// <summary>RESTORE HEADERONLY for striped backup. When urlsContainSas is true, omit WITH CREDENTIAL (SQL Server does not allow WITH CREDENTIAL for SAS credentials).</summary>
+    /// <summary>RESTORE HEADERONLY across the files of one backup set, striped or not.</summary>
     public async Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
-        ServerConnection server, IReadOnlyList<string> blobUrls, string? credentialName, bool urlsContainSas = false, CancellationToken ct = default)
+        ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
         if (blobUrls.Count == 0) return null;
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        var withCredential = !urlsContainSas && !string.IsNullOrEmpty(credentialName)
-            ? $" WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'"
-            : "";
-        cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}{withCredential}";
+        cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}";
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
@@ -261,7 +368,7 @@ public class SqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         if (messageCallback != null)
         {
             conn.InfoMessage += (_, e) => messageCallback(e.Message);
@@ -278,7 +385,7 @@ public class SqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         if (messageCallback != null)
         {
             conn.InfoMessage += (_, e) => messageCallback(e.Message);
@@ -304,6 +411,20 @@ public class SqlServerService
             {
                 await cmd.ExecuteNonQueryAsync(ct);
             }
+            catch (SqlException) when (ct.IsCancellationRequested)
+            {
+                // SqlClient reports a command cancelled mid-flight as a SqlException - "A severe
+                // error occurred on the current command. The results, if any, should be discarded.
+                // Operation cancelled by user." - and NOT as an OperationCanceledException. Left
+                // alone, a caller who catches OperationCanceledException to show "cancelled"
+                // misses it entirely and tells the user their own Stop was a severe error.
+                //
+                // Only when the token was actually signalled, so a genuine severe error still
+                // propagates as the failure it is.
+                messageCallback?.Invoke(
+                    $"Cancelled during statement {i + 1} of {executable.Count}: {Summarize(statement)}");
+                throw new OperationCanceledException("The restore was cancelled.", ct);
+            }
             catch (SqlException)
             {
                 // Say WHICH step of the chain failed before it propagates. Without this the
@@ -316,8 +437,20 @@ public class SqlServerService
         }
     }
 
+    /// <summary>
+    /// A one-line preview of a statement for the console.
+    ///
+    /// Whitespace is collapsed FIRST. Taking the first 80 characters raw pulled in the newlines
+    /// and blank lines of the script's comment banner, so a single "Executing statement 1 of 22"
+    /// message arrived as several lines with gaps between them.
+    /// </summary>
     private static string Summarize(string statement)
-        => statement[..Math.Min(80, statement.Length)].Trim();
+    {
+        var flattened = WhitespaceRun.Replace(statement, " ").Trim();
+        return flattened.Length <= 80 ? flattened : flattened[..80] + "...";
+    }
+
+    private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>Checks if a credential with the given name exists on the server and has identity SHARED ACCESS SIGNATURE (for blob URL restores).</summary>
     public async Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(
@@ -326,7 +459,7 @@ public class SqlServerService
         if (string.IsNullOrWhiteSpace(credentialName))
             return (false, false);
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
 
         await using var cmd = conn.CreateCommand();
@@ -356,14 +489,20 @@ public class SqlServerService
     //
     // It also broke benignly: an IPv6-literal endpoint such as https://[fe80::1]:10000/... is a
     // legal URL containing ']' and failed with an opaque syntax error.
-    public async Task EnsureCredentialExistsAsync(
+    //
+    // An existing credential is now ALTERed rather than dropped and recreated. A credential is
+    // server-scoped shared state: dropping it, even for the moment between two statements,
+    // breaks anything else relying on it at that instant - a backup job writing to the same
+    // container, most obviously. ALTER updates the secret in place with no such window, and
+    // leaves create_date intact, which is how the tests tell the two apart.
+    public async Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
         CancellationToken ct = default)
     {
         TSql.ValidateIdentifier(credentialName, nameof(credentialName));
         var quotedName = TSql.QuoteName(credentialName);
 
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
 
         await using var checkCmd = conn.CreateCommand();
@@ -371,26 +510,23 @@ public class SqlServerService
         checkCmd.Parameters.AddWithValue("@name", credentialName);
         var exists = (int)(await checkCmd.ExecuteScalarAsync(ct))! > 0;
 
-        if (exists)
-        {
-            await using var dropCmd = conn.CreateCommand();
-            dropCmd.CommandText = $"DROP CREDENTIAL {quotedName}";
-            await dropCmd.ExecuteNonQueryAsync(ct);
-        }
-
+        // ALTER also resets IDENTITY, so a credential that exists under some other identity is
+        // converted rather than left in place to fail the restore later.
         var cleanSas = sasToken.TrimStart('?');
-        await using var createCmd = conn.CreateCommand();
-        createCmd.CommandText = $@"
-            CREATE CREDENTIAL {quotedName}
+        await using var writeCmd = conn.CreateCommand();
+        writeCmd.CommandText = $@"
+            {(exists ? "ALTER" : "CREATE")} CREDENTIAL {quotedName}
             WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
             SECRET = '{TSql.EscapeLiteral(cleanSas)}'";
-        await createCmd.ExecuteNonQueryAsync(ct);
+        await writeCmd.ExecuteNonQueryAsync(ct);
+
+        return exists ? CredentialChange.Updated : CredentialChange.Created;
     }
 
     public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(
         ServerConnection server, CancellationToken ct = default)
     {
-        await using var conn = new SqlConnection(BuildConnectionString(server));
+        await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT

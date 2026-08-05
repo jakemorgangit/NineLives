@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
@@ -22,6 +23,11 @@ public partial class RestoreViewModel : ViewModelBase
     private List<BackupFileInfo> _allBackups = [];
     private List<BackupSet> _allSets = [];
     private List<BackupSet> _dbSets = [];
+
+    // Two separate operations, two separate sources: browsing a container and running a restore
+    // can both be in flight, and cancelling one must not touch the other (#25).
+    private readonly OperationCancellation _loadCancellation = new();
+    private readonly OperationCancellation _executeCancellation = new();
 
     #region Observable Properties
 
@@ -61,6 +67,14 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _restoreWindowText = string.Empty;
+
+    /// <summary>
+    /// Left-hand label under the timeline. A plain property rather than the old
+    /// {Binding RestorePoints[0].Timestamp}, which threw an index error into WPF's binding trace
+    /// on every layout while the collection was empty.
+    /// </summary>
+    [ObservableProperty]
+    private string _timelineStartText = string.Empty;
 
     [ObservableProperty]
     private ObservableCollection<TimelineTick> _timelineTicks = [];
@@ -154,6 +168,83 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _chainIssueSummary = string.Empty;
+
+    /// <summary>
+    /// Findings about the discovered backups as a whole rather than the selected chain - backups
+    /// that exist but can never be offered as a restore point. Kept apart from ChainIssues because
+    /// they do not change when the selection does, and because they explain a gap between what the
+    /// browse list shows and what the timeline offers.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ChainIssue> _inventoryIssues = [];
+
+    [ObservableProperty]
+    private bool _hasInventoryIssues;
+
+    // ── Aftermath of a failed restore (#14) ─────────────────────────────────────
+    // A chain that stops part-way leaves the target in RESTORING, and in SINGLE_USER too if
+    // Disconnect sessions was on, because the closing SET MULTI_USER never ran. Both block other
+    // connections, at the worst possible moment.
+
+    [ObservableProperty]
+    private string _recoveryStateMessage = string.Empty;
+
+    [ObservableProperty]
+    private ObservableCollection<RecoveryAction> _recoveryActions = [];
+
+    [ObservableProperty]
+    private bool _hasRecoveryActions;
+
+    // ── Cancellation (#25) ──────────────────────────────────────────────────────
+
+    /// <summary>True while a backup listing is running and has not been asked to stop.</summary>
+    [ObservableProperty]
+    private bool _canCancelLoad;
+
+    /// <summary>True while a restore is running and has not been asked to stop.</summary>
+    [ObservableProperty]
+    private bool _canCancelExecute;
+
+    /// <summary>True between asking to stop and the operation actually unwinding.</summary>
+    [ObservableProperty]
+    private bool _isCancelling;
+
+    /// <summary>
+    /// Running count during a listing. A container of any size takes long enough that "Loading..."
+    /// on its own gives no sense of whether it is progressing or hung (#28).
+    /// </summary>
+    [ObservableProperty]
+    private string _loadProgressText = string.Empty;
+
+    // ── Execution console ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The console, one line per entry. A collection rather than one growing string so appending
+    /// costs the same on the thousandth line as on the first.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ConsoleLine> _consoleLines = [];
+
+    [ObservableProperty]
+    private bool _hasConsoleOutput;
+
+    /// <summary>
+    /// True while the console is showing in its own window.
+    ///
+    /// The inline console hides itself for the duration, so the output is only ever in one place.
+    /// It comes back when the window closes, so the record of what happened is still reachable
+    /// from the main view afterwards.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isConsoleDetached;
+
+    /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
+    private void RefreshCancelState()
+    {
+        CanCancelLoad = _loadCancellation.CanCancel;
+        CanCancelExecute = _executeCancellation.CanCancel;
+        IsCancelling = _loadCancellation.IsCancelling || _executeCancellation.IsCancelling;
+    }
 
     /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
     [ObservableProperty]
@@ -318,9 +409,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isExecuting;
-
-    [ObservableProperty]
-    private string _executionLog = string.Empty;
 
     [ObservableProperty]
     private bool _executionComplete;
@@ -494,11 +582,24 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
+        var ct = _loadCancellation.Begin();
         IsBusy = true;
+        LoadProgressText = "Scanning container...";
+        RefreshCancelState();
         ClearStatus();
         try
         {
-            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer);
+            // If a database is already chosen - a reload after taking a fresh backup, say - push
+            // that down to Azure as a prefix instead of walking the whole container and discarding
+            // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
+            // about 233 ms for one database (#28).
+            //
+            // The FIRST load has no selection yet and stays a full scan, which it has to be: the
+            // server and database lists are built from what it finds.
+            var scope = BuildListingScope();
+            var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
+
+            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer, scope, progress, ct);
             _allSets = _blobService.GroupIntoBackupSets(_allBackups);
 
             var servers = _blobService.GetDiscoveredServers(_allBackups);
@@ -528,6 +629,13 @@ public partial class RestoreViewModel : ViewModelBase
 
             SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
+        catch (OperationCanceledException)
+        {
+            // Asked for, not a failure. Nothing was written anywhere - listing is read-only - so
+            // there is nothing to explain beyond saying it stopped.
+            SetStatus("Loading cancelled.");
+            BackupsLoaded = false;
+        }
         catch (Exception ex)
         {
             SetError($"Failed to load backups: {ex.Message}");
@@ -535,13 +643,56 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
+            _loadCancellation.End();
             IsBusy = false;
+            LoadProgressText = string.Empty;
+            RefreshCancelState();
         }
+    }
+
+    /// <summary>
+    /// The scope to push down to Azure, or null to scan everything.
+    ///
+    /// Only offered when a database is chosen. A server on its own narrows far less and the
+    /// database list is built from the previous scan anyway, so scoping to a server alone would
+    /// mostly re-fetch what is already in memory.
+    /// </summary>
+    private BlobListingScope? BuildListingScope()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabaseName)) return null;
+
+        // ServerName here is the identity used in the PATH, which for an instance is the host
+        // part - "SRV01\PROD" lives under "SRV01". ServerIdentity knows how to split it.
+        var pathServer = string.IsNullOrWhiteSpace(SelectedServerName)
+            ? null
+            : SelectedServerName.Split('\\')[0];
+
+        return new BlobListingScope(pathServer, SelectedDatabaseName);
+    }
+
+    /// <summary>Stops an in-progress backup listing.</summary>
+    [RelayCommand]
+    private void CancelLoad()
+    {
+        _loadCancellation.Cancel();
+        RefreshCancelState();
+        SetStatus("Cancelling...");
     }
 
     private void ComputeAndDisplayRestorePoints()
     {
         var points = _chainBuilder.ComputeRestorePoints(_dbSets);
+
+        // Inventory-level findings: backups that exist but can never be offered. These belong to
+        // the discovered set rather than to any one chain, so they are held separately and survive
+        // changing the selected restore point.
+        //
+        // ValidateInventory was written for #62 and then never called, so orphaned differentials,
+        // orphaned logs and "no full backup at all" were being computed nowhere and shown nowhere.
+        InventoryIssues = new ObservableCollection<ChainIssue>(
+            _chainValidator.ValidateInventory(_dbSets)
+                .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
+        HasInventoryIssues = InventoryIssues.Count > 0;
 
         // Compute timeline positions (0-1)
         if (points.Count > 1)
@@ -568,6 +719,7 @@ public partial class RestoreViewModel : ViewModelBase
             var first = points.First().Timestamp;
             var last = points.Last().Timestamp;
             RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
+            TimelineStartText = $"{first:yyyy-MM-dd HH:mm}";
 
             // Compute time-interval tick marks
             TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
@@ -741,6 +893,12 @@ public partial class RestoreViewModel : ViewModelBase
 
     private void UpdateRestoreSummary()
     {
+        // Every option change already funnels through here, so it is also where the script is kept
+        // in step. It used to be built only when Generate Script was pressed, which meant the
+        // script on screen could quietly disagree with the settings above it - and the script is
+        // the thing people read before running a restore against production.
+        RegenerateScript();
+
         if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
         {
             RestoreSummaryText = string.Empty;
@@ -835,10 +993,7 @@ public partial class RestoreViewModel : ViewModelBase
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 try
                 {
-                    // credentialName is null on purpose: WITH CREDENTIAL is invalid for a SAS
-                    // credential, which is the only kind this app creates.
-                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(
-                        ConnectedServer, urls, credentialName: null);
+                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
                     headers.Add(new ChainHeader(set, header));
                 }
                 catch (Exception)
@@ -997,6 +1152,10 @@ public partial class RestoreViewModel : ViewModelBase
         CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>
+    /// Explicit Generate. Same work as the live rebuild, but it says why nothing was produced -
+    /// the live path stays silent because reporting an error on every keystroke would be noise.
+    /// </summary>
     [RelayCommand]
     private void GenerateScript()
     {
@@ -1017,6 +1176,35 @@ public partial class RestoreViewModel : ViewModelBase
         if (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
         {
             SetError($"Point-in-time target is not valid. {PointInTimeMessage}");
+            return;
+        }
+
+        RegenerateScript();
+        if (HasScript) SetStatus("Script generated successfully.");
+    }
+
+    /// <summary>
+    /// Rebuilds the script from the current settings, silently.
+    ///
+    /// Called from UpdateRestoreSummary, so every option change keeps the script in step. It used
+    /// to be built only when Generate Script was pressed, which meant the script on screen could
+    /// quietly disagree with the settings above it - and that script is what people read before
+    /// running a restore against production.
+    ///
+    /// When the settings cannot produce a valid script the script is cleared rather than left
+    /// stale. A stale script is worse than none: it looks authoritative and is not.
+    /// </summary>
+    private void RegenerateScript()
+    {
+        // Leave the script alone mid-restore - it is the record of what is actually running.
+        if (IsExecuting) return;
+
+        if (RestoreChain == null
+            || string.IsNullOrWhiteSpace(TargetDatabaseName)
+            || (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null))
+        {
+            GeneratedScript = string.Empty;
+            HasScript = false;
             return;
         }
 
@@ -1063,7 +1251,6 @@ public partial class RestoreViewModel : ViewModelBase
 
         GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
         HasScript = true;
-        SetStatus("Script generated successfully.");
     }
 
     /// <summary>Create or update the blob credential on the connected server (optional; not included in generated script).</summary>
@@ -1081,10 +1268,12 @@ public partial class RestoreViewModel : ViewModelBase
 
         try
         {
-            await _sqlService.EnsureCredentialExistsAsync(
+            var change = await _sqlService.EnsureCredentialExistsAsync(
                 ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
             await RefreshCredentialStatusAsync();
-            SetStatus("Credential created or updated on server.");
+            SetStatus(change == CredentialChange.Created
+                ? "Credential created on server."
+                : "Credential updated on server with the stored SAS token.");
         }
         catch (Exception ex)
         {
@@ -1092,51 +1281,32 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
-    private bool CanCreateCredential() =>
-        IsConnectedToServer && SelectedContainer != null &&
-        (CredentialExistsOnServer != true || !CredentialIsValidSas);
+    // Deliberately available even when the credential is present and valid. SQL Server will not
+    // hand back a credential's secret, so "present and SAS" says nothing about whether the token
+    // inside it still works - a SAS that was rotated or has expired looks identical from here.
+    // Since Execute no longer rewrites the credential on every run, this button is the only way
+    // to push a fresh token, and hiding it left users with no route at all.
+    private bool CanCreateCredential() => IsConnectedToServer && SelectedContainer != null;
 
     [RelayCommand]
     private void CopyScript()
-    {
-        if (!string.IsNullOrEmpty(GeneratedScript))
-        {
-            Clipboard.SetText(GeneratedScript);
-            SetStatus("Script copied to clipboard.");
-        }
-    }
+        => TryCopyToClipboard(GeneratedScript, "Script copied to clipboard.");
 
     [RelayCommand]
     private void CopyPathHttps(BackupFileInfo? file)
     {
         if (file == null || SelectedContainer == null) return;
-        try
-        {
-            var url = _blobService.BuildBlobUrlWithSas(SelectedContainer, file.BlobName);
-            Clipboard.SetText(url);
-            SetStatus("HTTPS path copied to clipboard.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(
+            BlobStorageService.BuildBlobUrl(SelectedContainer, file.BlobName),
+            "HTTPS path copied to clipboard (no SAS token).");
     }
 
     [RelayCommand]
     private void CopyPathContainer(BackupFileInfo? file)
     {
         if (file == null || SelectedContainer == null) return;
-        try
-        {
-            var containerName = SelectedContainer.ContainerName ?? "container";
-            var path = $"{containerName}/{file.BlobName}";
-            Clipboard.SetText(path);
-            SetStatus("Container path copied to clipboard.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        var containerName = SelectedContainer.ContainerName ?? "container";
+        TryCopyToClipboard($"{containerName}/{file.BlobName}", "Container path copied to clipboard.");
     }
 
     [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
@@ -1150,7 +1320,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
             var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls, credentialName: null, urlsContainSas: false);
+            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls);
 
             var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? @"C:\SQL\Data";
             var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
@@ -1198,7 +1368,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
             var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, credentialName: null, urlsContainSas: false);
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
 
             if (header == null)
             {
@@ -1242,15 +1412,7 @@ public partial class RestoreViewModel : ViewModelBase
         var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE FILELISTONLY FROM {urlClauses}";
-        try
-        {
-            Clipboard.SetText(sql);
-            SetStatus("RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(sql, "RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
     }
 
     /// <summary>Builds the exact T-SQL for RESTORE HEADERONLY (encoded URLs, no WITH CREDENTIAL) for pasting into SSMS.</summary>
@@ -1261,15 +1423,7 @@ public partial class RestoreViewModel : ViewModelBase
         var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE HEADERONLY FROM {urlClauses}";
-        try
-        {
-            Clipboard.SetText(sql);
-            SetStatus("RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(sql, "RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
     }
 
     [RelayCommand]
@@ -1284,10 +1438,18 @@ public partial class RestoreViewModel : ViewModelBase
             FileName = $"restore_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.sql"
         };
 
-        if (dialog.ShowDialog() == true)
+        if (dialog.ShowDialog() != true) return;
+
+        try
         {
             File.WriteAllText(dialog.FileName, GeneratedScript);
             SetStatus($"Script saved to {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            // Read-only location, full disk, or a path the database name made invalid. Any of
+            // those used to take the whole app down from inside a synchronous command (#13).
+            SetError($"Could not save the script: {ex.Message}");
         }
     }
 
@@ -1325,17 +1487,27 @@ public partial class RestoreViewModel : ViewModelBase
         IsExecuteArmed = false;
         ExecuteButtonText = "Execute on Server";
 
+        var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
         ExecutionComplete = false;
-        ExecutionLog = string.Empty;
+        ConsoleLines.Clear();
+        HasConsoleOutput = false;
+        RecoveryActions = [];
+        HasRecoveryActions = false;
+        RefreshCancelState();
 
         try
         {
-            var config = _credentialStore.LoadConfig();
-            var server = config.Servers.FirstOrDefault(s => s.ServerName == ConnectedServerName);
+            // Execute against the server we are actually connected to, not one looked up by name.
+            // This used to re-read config.json and take the first entry whose ServerName matched,
+            // which is a different object whenever two entries share a host and differ in auth,
+            // port or encryption - a Windows-auth and a SQL-auth entry for the same box, say. The
+            // restore would then run under credentials the user never connected with or tested.
+            // Every other server call on this screen already uses ConnectedServer.
+            var server = ConnectedServer;
             if (server == null)
             {
-                SetError("Connected server not found in config.");
+                SetError("Not connected to a server.");
                 return;
             }
 
@@ -1344,41 +1516,287 @@ public partial class RestoreViewModel : ViewModelBase
                 var sasToken = _credentialStore.GetSasToken(SelectedContainer);
                 if (!string.IsNullOrEmpty(sasToken))
                 {
-                    AppendLog("Creating SQL Server credential for blob access...");
-                    await _sqlService.EnsureCredentialExistsAsync(
-                        server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
-                    AppendLog("Credential created successfully.");
+                    // Only write to the server when the credential is genuinely missing or is not
+                    // a SAS credential. This used to drop and recreate on every single execute,
+                    // regardless of the status the panel above was displaying, which contradicted
+                    // the UI's own "creating it is optional" wording and briefly removed a
+                    // credential that other sessions may have been using.
+                    //
+                    // A credential that exists and is SAS is left alone. Its secret could still be
+                    // a rotated SAS that no longer works - that is unknowable from here, since the
+                    // secret cannot be read back - so the fix for that case is the explicit
+                    // refresh button, not silently rewriting server state on every run.
+                    var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
+                    if (exists && isSas)
+                    {
+                        AppendLog($"Using the existing SQL credential [{SqlCredentialName}]. Server state not modified.");
+                    }
+                    else
+                    {
+                        AppendLog(exists
+                            ? $"Credential [{SqlCredentialName}] exists but is not a SAS credential - updating it..."
+                            : $"Credential [{SqlCredentialName}] is missing - creating it...");
+
+                        // This statement carries the SAS token to the server. It is the one moment
+                        // in a restore where a secret crosses the wire, so if the connection is
+                        // encrypted but unverified, say so here rather than only in settings (#17).
+                        if (server.TrustServerCertificate)
+                            AppendLog(
+                                "  Note: this connection trusts the server certificate without validating it, " +
+                                "and the SAS token is sent over it.");
+
+                        var change = await _sqlService.EnsureCredentialExistsAsync(
+                            server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
+
+                        AppendLog(change == CredentialChange.Created
+                            ? "Credential created on the server."
+                            : "Credential updated on the server.");
+
+                        // Changing a credential is a change to shared state on someone's instance.
+                        // It belongs in the file, not only in a console that closes with the app.
+                        App.Log.ServerChange(server.ServerName,
+                            $"credential [{SqlCredentialName}] {change.ToString().ToLowerInvariant()}");
+                    }
                 }
             }
+
+            App.Log.ServerChange(server.ServerName,
+                $"restore starting: target [{TargetDatabaseName}], " +
+                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
+                $"recovery={RecoveryMode}, stopAt={EffectiveStopAt?.ToString("s") ?? "none"}");
 
             AppendLog("Beginning restore execution...\n");
 
             await _sqlService.ExecuteRestoreWithProgressAsync(
                 server,
                 GeneratedScript,
-                msg => Application.Current.Dispatcher.Invoke(() => AppendLog(msg)));
+                // InvokeAsync, not Invoke. This callback runs on the connection's thread when SQL
+                // Server sends an info message, and a synchronous Invoke BLOCKS that thread until
+                // the UI has finished handling it. With the UI busy re-rendering, progress backed
+                // up and then arrived in bursts - which is precisely what "not live" looked like.
+                // Posting instead lets the restore keep streaming while the UI catches up.
+                msg => Application.Current.Dispatcher.InvokeAsync(() => AppendLog(msg)),
+                executeToken);
 
             ExecutionSuccess = true;
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
+            // the client waiting and SQL Server rolls back the statement that was in flight, but
+            // the target stays mid-restore - so this must be as loud as a failure, and it goes
+            // through the same recovery guidance (#14, #25).
+            ExecutionSuccess = false;
+            AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
+                      "restore stopped part-way through the chain.");
+
+            App.Log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
+                $"restore CANCELLED by user, target [{TargetDatabaseName}]");
+
+            SetError("Restore cancelled. The target database has been left mid-restore - see below.");
+
+            if (ConnectedServer != null)
+                await ReportRecoveryStateAsync(ConnectedServer);
         }
         catch (Exception ex)
         {
             ExecutionSuccess = false;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
+
+            // The restore has stopped part-way and the target is almost certainly not usable.
+            // Find out exactly how, and say so, while the connection is still open (#14).
+            if (ConnectedServer != null)
+                await ReportRecoveryStateAsync(ConnectedServer);
         }
         finally
         {
+            _executeCancellation.End();
             IsExecuting = false;
             ExecutionComplete = true;
+            FlushConsole();   // nothing buffered may outlive the run
+            RefreshCancelState();
         }
     }
 
+    /// <summary>
+    /// Stops a running restore.
+    ///
+    /// Deliberately worded as a warning rather than a neutral action: stopping a restore part-way
+    /// leaves the target database in RESTORING, which is not a state anyone wants to discover by
+    /// accident. The recovery panel that appears afterwards explains how to get out of it.
+    /// </summary>
+    [RelayCommand]
+    private void CancelExecute()
+    {
+        if (!_executeCancellation.CanCancel) return;
+
+        _executeCancellation.Cancel();
+        RefreshCancelState();
+        AppendLog("\nCancellation requested - waiting for SQL Server to roll back the current statement...");
+    }
+
+    /// <summary>
+    /// After a failed restore, works out what state the target database was left in and offers the
+    /// statements that put it right.
+    ///
+    /// This is the moment of maximum stress - a restore has failed mid-incident and the database is
+    /// now in a state that blocks other connections. Leaving someone to work that out from a raw
+    /// SQL error, when the app is still holding the connection that could tell them, is the wrong
+    /// place to stop.
+    /// </summary>
+    private async Task ReportRecoveryStateAsync(ServerConnection server)
+    {
+        RecoveryActions = [];
+        HasRecoveryActions = false;
+        RecoveryStateMessage = string.Empty;
+
+        try
+        {
+            var state = await _sqlService.GetDatabaseRecoveryStateAsync(server, TargetDatabaseName);
+            if (!state.NeedsAttention)
+            {
+                if (!state.Exists)
+                    AppendLog($"\n[{TargetDatabaseName}] is not on the server - nothing was left behind.");
+                return;
+            }
+
+            RecoveryStateMessage = state.Explain(TargetDatabaseName);
+            RecoveryActions = new ObservableCollection<RecoveryAction>(
+                state.SuggestedActions(TargetDatabaseName));
+            HasRecoveryActions = RecoveryActions.Count > 0;
+
+            AppendLog($"\n{RecoveryStateMessage}");
+            foreach (var action in RecoveryActions)
+                AppendLog($"\n  {action.Title}:  {action.Sql}");
+        }
+        catch (Exception ex)
+        {
+            // Best effort. The restore failure is the news; failing to describe the aftermath must
+            // not replace the error the user actually needs to read.
+            AppendLog($"\nCould not check the state of [{TargetDatabaseName}]: {ex.Message}");
+        }
+    }
+
+    /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
+    [RelayCommand]
+    private async Task RunRecoveryActionAsync(RecoveryAction? action)
+    {
+        if (action == null || ConnectedServer == null) return;
+
+        try
+        {
+            AppendLog($"\nRunning: {action.Sql}");
+            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql);
+            AppendLog("Completed.");
+            await ReportRecoveryStateAsync(ConnectedServer);
+
+            if (!HasRecoveryActions)
+                SetStatus($"[{TargetDatabaseName}] is back to a usable state.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"\nERROR: {ex.Message}");
+            SetError($"Recovery step failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void CopyRecoveryAction(RecoveryAction? action)
+    {
+        if (action != null)
+            TryCopyToClipboard(action.Sql, "Recovery statement copied to clipboard.");
+    }
+
+    /// <summary>
+    /// Appends to the on-screen console and to the log file at the same time.
+    ///
+    /// One call rather than two so the file cannot drift from what the user was shown - and so a
+    /// restore that ends with the window being closed still leaves a record of how far it got.
+    /// Redaction happens inside the log, not here (#40).
+    /// </summary>
+    /// <summary>
+    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
+    /// drift from what the user was shown.
+    ///
+    /// Writes to a COLLECTION rather than concatenating a bound string. Appending to a bound string
+    /// rebuilds it and re-renders the whole TextBox on every message - O(n^2) - which was a large
+    /// part of why a restore reporting progress every few percent looked like it arrived in bursts
+    /// rather than live.
+    /// </summary>
     private void AppendLog(string message)
     {
-        ExecutionLog += message + "\n";
+        foreach (var raw in message.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+
+            // Messages routinely arrive with a leading or trailing newline for spacing, and SQL
+            // Server's own output has its own blank lines. Left alone that produced a gap between
+            // almost every line. One blank line is allowed as a separator; runs of them are not.
+            if (line.Trim().Length == 0)
+            {
+                if (_pending.Count > 0 && _pending[^1].Text.Length == 0) continue;
+                if (_pending.Count == 0 && (ConsoleLines.Count == 0 || ConsoleLines[^1].Text.Length == 0)) continue;
+                _pending.Add(new ConsoleLine(string.Empty));
+                continue;
+            }
+
+            _pending.Add(ConsoleLine.From(line));
+        }
+
+        App.Log.Info($"[execute] {message.Trim()}");
+        ScheduleConsoleFlush();
     }
+
+    /// <summary>
+    /// Moves buffered lines onto the bound collection on a timer rather than as they arrive.
+    ///
+    /// SQL Server emits progress in clusters - several messages within a millisecond, then nothing
+    /// for a second. Adding each one individually meant a layout pass and a scroll per message, in
+    /// bursts, which is what made the console judder. Flushing on a fixed tick turns any arrival
+    /// pattern into a steady redraw, and a whole cluster costs one layout pass instead of ten.
+    /// </summary>
+    private void ScheduleConsoleFlush()
+    {
+        if (_consoleFlushTimer != null) return;
+
+        _consoleFlushTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(60)
+        };
+        _consoleFlushTimer.Tick += (_, _) => FlushConsole();
+        _consoleFlushTimer.Start();
+    }
+
+    private void FlushConsole()
+    {
+        if (_pending.Count == 0)
+        {
+            // Nothing arriving and nothing running - stop ticking rather than spin forever.
+            if (!IsExecuting)
+            {
+                _consoleFlushTimer?.Stop();
+                _consoleFlushTimer = null;
+            }
+            return;
+        }
+
+        foreach (var line in _pending) ConsoleLines.Add(line);
+        _pending.Clear();
+        HasConsoleOutput = true;
+    }
+
+    private readonly List<ConsoleLine> _pending = [];
+    private DispatcherTimer? _consoleFlushTimer;
+
+    /// <summary>The console as plain text, for copying into a bug report.</summary>
+    public string ConsoleText => string.Join(Environment.NewLine, ConsoleLines.Select(l => l.Text));
+
+    [RelayCommand]
+    private void CopyConsole()
+        => TryCopyToClipboard(ConsoleText, "Execution log copied to clipboard.");
 
     private async Task RunArmCountdownAsync(CancellationToken ct)
     {

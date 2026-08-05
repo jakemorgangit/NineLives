@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -85,11 +86,25 @@ public partial class ServerManagerViewModel : ViewModelBase
         Servers = new ObservableCollection<ServerConnection>(config.Servers);
     }
 
-    private void SaveServers()
+    /// <summary>
+    /// Persists the server list. Returns false and sets the error when the write failed, so
+    /// callers do not go on to report success - the config save used to swallow everything and
+    /// the UI said "saved successfully" whether or not anything reached the disk.
+    /// </summary>
+    private bool SaveServers()
     {
-        var config = _credentialStore.LoadConfig();
-        config.Servers = [.. Servers];
-        _credentialStore.SaveConfig(config);
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            config.Servers = [.. Servers];
+            _credentialStore.SaveConfig(config);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not save configuration: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
@@ -196,7 +211,8 @@ public partial class ServerManagerViewModel : ViewModelBase
                 SetError("A server with this name already exists.");
                 return;
             }
-            server = new ServerConnection();
+            // Id assigned here rather than defaulted on the model - see the note on it.
+            server = new ServerConnection { Id = ServerConnection.NewId() };
             Servers.Add(server);
         }
         else
@@ -220,7 +236,14 @@ public partial class ServerManagerViewModel : ViewModelBase
             _credentialStore.SaveSqlPassword(server, EditPassword);
         }
 
-        SaveServers();
+        if (!SaveServers())
+        {
+            // Nothing reached the disk, so do not leave the list showing a server that is not
+            // really there. Stay in the edit form so the save can be retried.
+            if (IsNew) Servers.Remove(server);
+            return;
+        }
+
         SelectedServer = server;
         IsEditing = false;
         SetStatus("Server saved successfully.");
@@ -231,10 +254,36 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         if (SelectedServer == null) return;
 
-        if (SelectedServer.AuthMode == AuthMode.SqlAuth)
-            _credentialStore.DeleteSecret(SelectedServer.CredentialKey);
+        // Same reasoning as deleting a container: a stored SQL password is removed from Credential
+        // Manager and the app never displays it, so a single click should not be enough (#42).
+        var secretNote = SelectedServer.AuthMode == AuthMode.SqlAuth
+            ? "\n\nIts stored SQL password will be deleted from Windows Credential Manager."
+            : string.Empty;
 
-        if (IsConnected && ConnectedServerDisplay == SelectedServer.DisplayText)
+        var confirm = MessageBox.Show(
+            $"Remove the server \"{SelectedServer.Name}\"?{secretNote}\n\n" +
+            "Nothing on the SQL Server itself is affected.",
+            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+        if (confirm != MessageBoxResult.Yes) return;
+
+        // Take the server out of the config first and only destroy its stored password once that
+        // write has landed. The other order threw the password away and then, if the save failed,
+        // left the server in config.json with no credential behind it.
+        var removed = SelectedServer;
+        var index = Servers.IndexOf(removed);
+        Servers.Remove(removed);
+        if (!SaveServers())
+        {
+            Servers.Insert(Math.Clamp(index, 0, Servers.Count), removed);
+            SelectedServer = removed;
+            return;
+        }
+
+        if (removed.AuthMode == AuthMode.SqlAuth)
+            _credentialStore.DeleteSecret(removed.CredentialKey);
+
+        if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
         {
             IsConnected = false;
             ConnectedServerDisplay = string.Empty;
@@ -245,8 +294,6 @@ public partial class ServerManagerViewModel : ViewModelBase
             });
         }
 
-        Servers.Remove(SelectedServer);
-        SaveServers();
         SelectedServer = Servers.FirstOrDefault();
         SetStatus("Server removed.");
     }
@@ -267,6 +314,25 @@ public partial class ServerManagerViewModel : ViewModelBase
             ServerVersion = firstLine;
             TestSuccess = true;
             TestResult = $"Connected successfully!\n{firstLine}";
+
+            // While we are here, find out whether trusting the certificate is actually needed.
+            // See WouldConnectWithCertificateValidationAsync - the point is to replace a warning
+            // people learn to ignore with a fact they can act on (#17).
+            if (server.TrustServerCertificate)
+            {
+                var wouldValidate = await _sqlService.WouldConnectWithCertificateValidationAsync(server);
+                TestResult += wouldValidate switch
+                {
+                    true => "\n\nThis server's certificate validates. You can untick "
+                          + "\"Trust server certificate\" - nothing will break, and the password "
+                          + "and SAS token will no longer be sent over an unverified connection.",
+                    false => "\n\nNote: the certificate does not validate, so \"Trust server "
+                           + "certificate\" is doing real work here. The connection is still "
+                           + "encrypted, but it is not verified - a machine-in-the-middle on the "
+                           + "network path could read the password and SAS token.",
+                    null => string.Empty
+                };
+            }
 
             // Test Connection already proves the server and reads the banner, so record the
             // version tag from it too. BuildCurrentServer returns a throwaway object built from
@@ -354,8 +420,15 @@ public partial class ServerManagerViewModel : ViewModelBase
                 TrustServerCertificate = EditTrustServerCert,
                 Encrypt = EditEncrypt
             };
+            // In memory only. This used to call SaveSqlPassword, which is a durable write to
+            // Credential Manager - so testing a mistyped password overwrote the working one
+            // before the user had agreed to anything, and Cancel could not undo it (#12).
             if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
-                _credentialStore.SaveSqlPassword(server, EditPassword);
+                server.UnsavedPassword = EditPassword;
+            else if (EditAuthMode == AuthMode.SqlAuth && !IsNew)
+                // No new password typed: test against the one already saved for this entry.
+                server.Id = SelectedServer?.Id;
+
             return server;
         }
         return SelectedServer;

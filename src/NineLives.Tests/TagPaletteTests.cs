@@ -109,7 +109,7 @@ public class TagPaletteTests
 
     [Fact]
     public void ParseTags_SplitsTrimsAndDropsBlanks()
-        => Assert.Equal(["prod", "eu-west", "critical"],
+        => Assert.Equal(["critical", "eu-west", "prod"],
             TagPalette.ParseTags("  prod ,, eu-west ,  critical  "));
 
     [Fact]
@@ -120,9 +120,31 @@ public class TagPaletteTests
     public void ParseTags_RemovesDuplicatesKeepingTheFirstSpelling()
         => Assert.Equal(["Prod"], TagPalette.ParseTags("Prod, prod, PROD"));
 
+    // Tags used to be stored in the order they were typed, so the same two tags on two servers
+    // rendered in different orders depending on how each was created. Sorted on save, and sorted
+    // again on display so entries saved before this still read correctly.
+
     [Fact]
-    public void ParseTags_PreservesOrder()
-        => Assert.Equal(["zebra", "apple"], TagPalette.ParseTags("zebra, apple"));
+    public void ParseTags_SortsAlphabetically()
+        => Assert.Equal(["apple", "zebra"], TagPalette.ParseTags("zebra, apple"));
+
+    [Fact]
+    public void ParseTags_SortsIgnoringCase()
+        => Assert.Equal(["Apple", "banana", "Cherry"], TagPalette.ParseTags("Cherry, banana, Apple"));
+
+    [Fact]
+    public void ParseTags_KeepsTheSpellingTheUserTyped()
+    {
+        // Sorting must not normalise case - a tag typed "Prod" stays "Prod".
+        Assert.Equal(["Prod", "uat"], TagPalette.ParseTags("uat, Prod"));
+    }
+
+    [Fact]
+    public void Sort_HandlesNullAndEmpty()
+    {
+        Assert.Empty(TagPalette.Sort(null));
+        Assert.Empty(TagPalette.Sort([]));
+    }
 
     [Fact]
     public void ParseTags_TruncatesOverlongTags()
@@ -141,8 +163,18 @@ public class TagPaletteTests
     [Fact]
     public void FormatTags_RoundTripsThroughParse()
     {
-        var original = new[] { "prod", "eu-west", "critical" };
+        // Already sorted, so the round trip is an identity. That is the point: once a list has
+        // been through ParseTags, formatting and reparsing it must not shuffle it again.
+        var original = new[] { "critical", "eu-west", "prod" };
         Assert.Equal(original, TagPalette.ParseTags(TagPalette.FormatTags(original)));
+    }
+
+    [Fact]
+    public void FormatTags_RoundTripSortsAnUnsortedList()
+    {
+        var original = new[] { "prod", "eu-west", "critical" };
+        Assert.Equal(["critical", "eu-west", "prod"],
+            TagPalette.ParseTags(TagPalette.FormatTags(original)));
     }
 
     [Fact]

@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Web;
+
+using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Models;
 
@@ -24,6 +27,22 @@ public enum BackupSourceType
 /// </summary>
 public class BlobContainerConfig : INotifyPropertyChanged
 {
+    /// <summary>
+    /// Stable identity for the stored SAS token, assigned once and never changed.
+    ///
+    /// The credential key used to derive from Name, so renaming a container pointed it at a key
+    /// that did not exist and the working token was stranded under the old one with no way to get
+    /// it back (#8).
+    ///
+    /// Null on entries written before this existed. It is deliberately NOT defaulted to a new Guid:
+    /// an absent value in JSON leaves the property at its initialiser, so defaulting would hand
+    /// every legacy entry a fresh id on load and lose its secret immediately. ConfigMigrator
+    /// assigns ids and moves the secrets; NewId() is what callers creating a container use.
+    /// </summary>
+    public string? Id { get; set; }
+
+    public static string NewId() => Guid.NewGuid().ToString("n");
+
     public string Name { get; set; } = string.Empty;
     public string ContainerUrl { get; set; } = string.Empty;
 
@@ -76,9 +95,12 @@ public class BlobContainerConfig : INotifyPropertyChanged
     /// <summary>
     /// Tags as chips, matching the server list. Containers have no automatic tags yet, but going
     /// through the same shape keeps one rendering path.
+    ///
+    /// Alphabetical. Sorted here as well as in ParseTags so containers saved before this change
+    /// display in order straight away, rather than waiting to be edited and re-saved.
     /// </summary>
     [JsonIgnore]
-    public IEnumerable<TagChip> TagChips => Tags.Select(TagChip.Manual);
+    public IEnumerable<TagChip> TagChips => TagPalette.Sort(Tags).Select(TagChip.Manual);
 
     private void OnTagsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         => RaiseTagMembersChanged();
@@ -95,11 +117,31 @@ public class BlobContainerConfig : INotifyPropertyChanged
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     /// <summary>
-    /// Key used to look up SAS token in Windows Credential Manager.
+    /// Key used to look up the SAS token in Windows Credential Manager. Keyed on the immutable
+    /// <see cref="Id"/> so renaming the container does not strand its token; falls back to the
+    /// old name-derived key only for entries that have not been migrated yet.
     /// </summary>
-    public string CredentialKey => $"NineLives:Blob:{Name}";
+    [JsonIgnore]
+    public string CredentialKey =>
+        string.IsNullOrEmpty(Id) ? LegacyCredentialKey : $"NineLives:Blob:{Id}";
 
-    public bool IsExpired => GetSasExpiry() is DateTime expiry && expiry < DateTime.UtcNow;
+    /// <summary>The pre-#8 name-derived key. Only ConfigMigrator should need this.</summary>
+    [JsonIgnore]
+    public string LegacyCredentialKey => $"NineLives:Blob:{Name}";
+
+    /// <summary>
+    /// A SAS token held in memory for this object only, never written anywhere. When set, the
+    /// blob service uses it in place of the stored one.
+    ///
+    /// This exists for Test Connection (#12). Testing a newly typed token used to persist it to
+    /// Credential Manager first - so pasting a typo'd or expired token, testing it, watching it
+    /// fail and clicking Cancel destroyed the working token that was there before, with no way
+    /// to get it back because the form never displays stored tokens.
+    /// </summary>
+    [JsonIgnore]
+    public string? UnsavedSasToken { get; set; }
+
+    public bool IsExpired => ReadSasExpiry().IsExpired;
 
     public DateTime? SasExpiry => GetSasExpiry();
 
@@ -136,26 +178,55 @@ public class BlobContainerConfig : INotifyPropertyChanged
 
     private string? _cachedSasTokenValue;
 
-    public DateTime? GetSasExpiry(string? sasToken = null)
+    public DateTime? GetSasExpiry(string? sasToken = null) => ReadSasExpiry(sasToken).ExpiresAt;
+
+    /// <summary>
+    /// Reads the SAS <c>se=</c> expiry, distinguishing "there isn't one" from "there is one and it
+    /// is not readable" (#21).
+    ///
+    /// That distinction is the point. The old version parsed with the ambient culture and returned
+    /// null on any failure, and every caller reads null as "not expired" - so on a non-invariant
+    /// locale an expired token could be presented as perfectly fine, and the user found out when
+    /// the restore failed. An se= that will not parse now counts as expired, because the honest
+    /// answer is "this token cannot be trusted to be valid".
+    ///
+    /// A token with no se= at all is a different case and stays "unknown, not expired": a SAS
+    /// built on a stored access policy legitimately has no expiry of its own.
+    /// </summary>
+    public SasExpiryInfo ReadSasExpiry(string? sasToken = null)
     {
         var token = sasToken ?? _cachedSasTokenValue;
         if (string.IsNullOrEmpty(token))
-            return null;
+            return SasExpiryInfo.None;
 
+        string? se;
         try
         {
             var query = token.StartsWith("?") ? token : "?" + token;
-            var parsed = HttpUtility.ParseQueryString(query);
-            var se = parsed["se"];
-            if (se != null && DateTime.TryParse(se, out var expiry))
-                return expiry.ToUniversalTime();
+            se = HttpUtility.ParseQueryString(query)["se"];
         }
         catch
         {
-            // Malformed token
+            return SasExpiryInfo.Unreadable;
         }
 
-        return null;
+        // No se= at all is "this token does not state an expiry". An se= that is present but empty
+        // is a different thing: it claims one and supplies nothing, which is unreadable, not absent.
+        if (se == null)
+            return SasExpiryInfo.None;
+
+        if (string.IsNullOrWhiteSpace(se))
+            return SasExpiryInfo.Unreadable;
+
+        // Invariant, and treating the value as UTC whether or not it carries a zone. Azure writes
+        // ISO-8601 here; the ambient culture has no business interpreting it.
+        var parsed = DateTime.TryParse(
+            se,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out var expiry);
+
+        return parsed ? new SasExpiryInfo(expiry, false) : SasExpiryInfo.Unreadable;
     }
 
     public void CacheSasToken(string sasToken)
@@ -164,6 +235,29 @@ public class BlobContainerConfig : INotifyPropertyChanged
     }
 
     public override string ToString() => DisplayText;
+}
+
+/// <summary>
+/// What a SAS token says about its own expiry. Three states rather than a nullable DateTime,
+/// because "no expiry stated" and "expiry stated but unreadable" mean opposite things and both
+/// used to come back as null (#21).
+/// </summary>
+/// <param name="ExpiresAt">When the token expires, in UTC. Null if it does not say.</param>
+/// <param name="CouldNotParse">The token carries an se= value that could not be read.</param>
+public readonly record struct SasExpiryInfo(DateTime? ExpiresAt, bool CouldNotParse)
+{
+    /// <summary>No se= parameter. Legitimate for a SAS built on a stored access policy.</summary>
+    public static SasExpiryInfo None => new(null, false);
+
+    /// <summary>There is an se=, and it is not readable. Treated as expired.</summary>
+    public static SasExpiryInfo Unreadable => new(null, true);
+
+    /// <summary>
+    /// Unreadable counts as expired. The alternative is presenting a token we cannot vouch for as
+    /// valid, and finding out mid-restore.
+    /// </summary>
+    public bool IsExpired =>
+        CouldNotParse || (ExpiresAt.HasValue && ExpiresAt.Value < DateTime.UtcNow);
 }
 
 /// <summary>

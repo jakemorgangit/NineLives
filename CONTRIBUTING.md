@@ -31,7 +31,7 @@ dotnet build
 dotnet test
 ```
 
-Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and Windows (it is a
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and Windows (it is a
 WPF app).
 
 ### Live SQL Server tests
@@ -48,13 +48,39 @@ dotnet test
 They create and drop only their own objects and clean up after themselves. CI starts LocalDB on
 a best-effort basis, so they run there too.
 
+## Dependencies
+
+Package versions are pinned exactly, and `packages.lock.json` in each project records the whole
+resolved graph — direct and transitive — with content hashes. CI restores with `--locked-mode`,
+so a dependency cannot change without a commit that says so.
+
+**Changing a package version means committing the new lock file:**
+
+```bash
+# edit the <PackageReference Version="..."> in the csproj, then
+dotnet restore --force-evaluate
+git add src/*/packages.lock.json
+```
+
+Skip that and CI fails with `NU1004`, telling you exactly which reference drifted.
+
+Dependabot raises minor and patch bumps as one grouped weekly PR. **Major bumps come as their own
+PR** and want a real look — `Microsoft.Data.SqlClient` once went from 5.x to 7.x on a wildcard
+with green CI, because no test in the suite opened a `SqlConnection`. Dependabot does not always
+refresh the lock file, so a red `NU1004` on its PR usually just means running the command above.
+
+Restore also audits the full graph against the GitHub Advisory Database and warns on anything
+known-vulnerable. That is the trade for pinning: patches no longer arrive on their own, so the
+warning is what tells you one is needed.
+
 ## What CI checks
 
 Every PR runs on `windows-latest`:
 
-1. `dotnet build -warnaserror` — **the build is warning-free and must stay that way**
-2. the full test suite
-3. a self-contained single-file publish, proving the shipping artifact still builds
+1. `dotnet restore --locked-mode` — **dependencies match the committed lock file exactly**
+2. `dotnet build -warnaserror` — **the build is warning-free and must stay that way**
+3. the full test suite
+4. a self-contained single-file publish, proving the shipping artifact still builds
 
 ## Expectations for a change
 

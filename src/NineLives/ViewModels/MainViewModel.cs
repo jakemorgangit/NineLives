@@ -38,6 +38,12 @@ public partial class MainViewModel : ViewModelBase
     private string _updateUrl = UpdateChecker.ReleasesPage;
     private string? _updateTag;
 
+    /// <summary>
+    /// Shown in the status bar. Read from the assembly so it cannot go stale.
+    /// Not named AppVersion - that would shadow the class of the same name inside this type.
+    /// </summary>
+    public string VersionText => Services.AppVersion.Display;
+
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
@@ -47,6 +53,12 @@ public partial class MainViewModel : ViewModelBase
     public MainViewModel()
     {
         _credentialStore = new CredentialStore();
+
+        // Before anything reads the config: move secrets from name-derived keys onto stable ids
+        // (#8). Must happen ahead of the child viewmodels, which load containers and servers in
+        // their constructors and would otherwise look up keys the migration is about to change.
+        MigrateSecretKeys();
+
         _blobService = new BlobStorageService(_credentialStore);
         _sqlService = new SqlServerService(_credentialStore);
         _chainBuilder = new BackupChainBuilder();
@@ -64,6 +76,29 @@ public partial class MainViewModel : ViewModelBase
 
         // Fire and forget - startup must not wait on the network.
         _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>
+    /// One-off relocation of stored secrets onto stable ids. A no-op on every launch after the
+    /// first, and never fatal - if it cannot complete, the old keys are untouched and everything
+    /// still works, so the app starts normally and tries again next time.
+    /// </summary>
+    private void MigrateSecretKeys()
+    {
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            var result = new ConfigMigrator(_credentialStore).Migrate(config);
+
+            if (result.Error != null)
+                GlobalStatus = $"Stored credentials could not be updated: {result.Error}";
+            else if (result.DidWork)
+                GlobalStatus = "Ready";
+        }
+        catch
+        {
+            // Startup must not depend on this.
+        }
     }
 
     private async Task CheckForUpdatesAsync()

@@ -125,14 +125,86 @@ public class BackupChainValidator
                 "restored and are not offered as restore points. Usually means the full they belong to has " +
                 "been removed by retention."));
 
+        // Strictly before, not at. A log sharing the earliest full's exact timestamp has not
+        // "predated" anything - it is the same-timestamp collision, which ValidateReachability
+        // describes accurately instead of filing it under retention.
         var orphanedLogs = sets
-            .Where(s => s.Type == BackupType.TransactionLog && s.Timestamp <= earliestFull)
+            .Where(s => s.Type == BackupType.TransactionLog && s.Timestamp < earliestFull)
             .ToList();
         if (orphanedLogs.Count > 0)
             issues.Add(new ChainIssue(ChainIssueSeverity.Warning,
                 $"{orphanedLogs.Count} log backup(s) predate the earliest full",
                 $"Log backups at or before {earliestFull:yyyy-MM-dd HH:mm} have nothing to roll forward from " +
                 "and are not offered as restore points."));
+
+        return issues;
+    }
+
+    /// <summary>
+    /// Reports log backups that were discovered but reach no chain at all - present in the browse
+    /// list, counted in the header, and absent from every restore point (#46).
+    ///
+    /// The known cause is a log whose timestamp exactly equals a full's. The chain builder bounds
+    /// each full's log range with strict inequalities at both ends, so such a log falls outside the
+    /// earlier full's range and outside the colliding full's own, and belongs to neither.
+    ///
+    /// Timestamps come from filenames, and the seconds group is optional - so under HHMM naming
+    /// any full and log starting in the same minute collide, which a nightly full plus
+    /// quarter-hourly logs manages every single day.
+    ///
+    /// This reports rather than repairs, deliberately. Simply widening the bound to include the
+    /// log would force it to restore after the full always, and that is wrong whenever the log job
+    /// fired first and completed before the full's checkpoint - SQL Server rejects a log whose
+    /// range ends before the restore point. A filename timestamp cannot tell those two apart; only
+    /// the LSNs can, which needs RESTORE HEADERONLY. Until then the honest move is to stop the
+    /// omission being silent, so the header count and the timeline cannot disagree without saying
+    /// why.
+    /// </summary>
+    public List<ChainIssue> ValidateReachability(
+        IReadOnlyList<BackupSet> sets, IReadOnlyList<RestorePoint> restorePoints)
+    {
+        var issues = new List<ChainIssue>();
+
+        var logs = sets.Where(s => s.Type == BackupType.TransactionLog).ToList();
+        if (logs.Count == 0 || restorePoints.Count == 0) return issues;
+
+        var reachable = new HashSet<BackupSet>();
+        foreach (var point in restorePoints)
+        {
+            if (point.PrimarySet != null) reachable.Add(point.PrimarySet);
+            foreach (var log in point.RequiredLogSets) reachable.Add(log);
+        }
+
+        // Logs strictly before the first full are already explained by ValidateInventory; saying it
+        // twice in different words would just make both messages easier to ignore. A log AT the
+        // earliest full is this check's business, not that one's - it is the collision.
+        var fulls = sets.Where(s => s.Type == BackupType.Full).OrderBy(s => s.Timestamp).ToList();
+        var earliestFull = fulls.Count > 0 ? fulls[0].Timestamp : DateTime.MaxValue;
+
+        var unreachable = logs
+            .Where(l => !reachable.Contains(l) && l.Timestamp >= earliestFull)
+            .OrderBy(l => l.Timestamp)
+            .ToList();
+
+        if (unreachable.Count == 0) return issues;
+
+        var collisions = unreachable
+            .Where(l => fulls.Any(f => f.Timestamp == l.Timestamp))
+            .ToList();
+
+        var detail =
+            $"These log backups were found but appear in no restore point, so the timeline offers " +
+            $"fewer recovery points than the backup count suggests. Earliest: " +
+            $"{unreachable[0].Timestamp:yyyy-MM-dd HH:mm:ss}.";
+
+        if (collisions.Count > 0)
+            detail +=
+                $" {collisions.Count} of them share an exact timestamp with a full backup, which is " +
+                "usually a log job and a full job starting in the same minute. Verify Chain will " +
+                "read the LSNs and tell you whether the log is genuinely needed.";
+
+        issues.Add(new ChainIssue(ChainIssueSeverity.Warning,
+            $"{unreachable.Count} log backup(s) are not reachable by any restore point", detail));
 
         return issues;
     }

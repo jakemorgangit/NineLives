@@ -11,6 +11,11 @@ public partial class BlobBrowserViewModel : ViewModelBase
 {
     private readonly BlobStorageService _blobService;
     private readonly CredentialStore _credentialStore;
+    private readonly OperationCancellation _loadCancellation = new();
+
+    /// <summary>True while a listing is running and has not been asked to stop (#25).</summary>
+    [ObservableProperty]
+    private bool _canCancelLoad;
 
     private List<BackupFileInfo> _allFiles = [];
     private List<BackupSet> _allSets = [];
@@ -135,11 +140,13 @@ public partial class BlobBrowserViewModel : ViewModelBase
             return;
         }
 
+        var ct = _loadCancellation.Begin();
         IsBusy = true;
+        CanCancelLoad = true;
         ClearStatus();
         try
         {
-            _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer);
+            _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer, ct);
             _allSets = _blobService.GroupIntoBackupSets(_allFiles);
             HasFiles = _allFiles.Count > 0;
 
@@ -158,6 +165,12 @@ public partial class BlobBrowserViewModel : ViewModelBase
             UpdateFilteredSummary();
             SetStatus($"Loaded {_allFiles.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
+        catch (OperationCanceledException)
+        {
+            // Listing is read-only, so there is nothing to undo or explain - just say it stopped.
+            SetStatus("Loading cancelled.");
+            HasFiles = false;
+        }
         catch (Exception ex)
         {
             SetError($"Failed to load backups: {ex.Message}");
@@ -165,8 +178,22 @@ public partial class BlobBrowserViewModel : ViewModelBase
         }
         finally
         {
+            _loadCancellation.End();
             IsBusy = false;
+            CanCancelLoad = false;
         }
+    }
+
+    /// <summary>
+    /// Stops an in-progress listing. A container with a large number of blobs is enumerated a page
+    /// at a time with no natural end, and until now there was no way out of it (#25).
+    /// </summary>
+    [RelayCommand]
+    private void CancelLoad()
+    {
+        _loadCancellation.Cancel();
+        CanCancelLoad = false;
+        SetStatus("Cancelling...");
     }
 
     private void RefreshDatabasesForServer()
@@ -256,16 +283,9 @@ public partial class BlobBrowserViewModel : ViewModelBase
     {
         var target = file ?? SelectedFile;
         if (target == null || SelectedContainer == null) return;
-        try
-        {
-            var url = _blobService.BuildBlobUrlWithSas(SelectedContainer, target.BlobName);
-            Clipboard.SetText(url);
-            SetStatus("HTTPS path copied to clipboard.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        TryCopyToClipboard(
+            BlobStorageService.BuildBlobUrl(SelectedContainer, target.BlobName),
+            "HTTPS path copied to clipboard (no SAS token).");
     }
 
     [RelayCommand]
@@ -273,16 +293,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     {
         var target = file ?? SelectedFile;
         if (target == null || SelectedContainer == null) return;
-        try
-        {
-            var containerName = SelectedContainer.ContainerName ?? "container";
-            var path = $"{containerName}/{target.BlobName}";
-            Clipboard.SetText(path);
-            SetStatus("Container path copied to clipboard.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to copy: {ex.Message}");
-        }
+        var containerName = SelectedContainer.ContainerName ?? "container";
+        TryCopyToClipboard($"{containerName}/{target.BlobName}", "Container path copied to clipboard.");
     }
 }

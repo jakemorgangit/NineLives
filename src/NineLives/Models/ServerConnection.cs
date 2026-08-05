@@ -3,6 +3,8 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 
+using Blackcat.NineLives.Services;
+
 namespace Blackcat.NineLives.Models;
 
 public enum AuthMode
@@ -30,6 +32,15 @@ public enum EncryptMode
 /// </summary>
 public class ServerConnection : INotifyPropertyChanged
 {
+    /// <summary>
+    /// Stable identity for the stored password, assigned once and never changed. See the note on
+    /// <see cref="BlobContainerConfig.Id"/> - same bug (#8), same reason it is not defaulted to a
+    /// new Guid, same migration.
+    /// </summary>
+    public string? Id { get; set; }
+
+    public static string NewId() => Guid.NewGuid().ToString("n");
+
     public string Name { get; set; } = string.Empty;
     public string ServerName { get; set; } = string.Empty;
     public AuthMode AuthMode { get; set; } = AuthMode.WindowsAuth;
@@ -116,10 +127,16 @@ public class ServerConnection : INotifyPropertyChanged
     /// Manual and automatic tags as one sequence, so the UI can render them from a SINGLE
     /// wrapping panel. Two adjacent ItemsControls inside a WrapPanel cannot wrap - each is
     /// measured with infinite width - and their pills get clipped by the row instead.
+    ///
+    /// Each group is alphabetical, and manual tags come before automatic ones. Sorting here as
+    /// well as in ParseTags means entries saved before this change display in order straight away,
+    /// without waiting to be edited and re-saved. Automatic tags stay in their own group at the
+    /// end so a derived fact is not shuffled in among the user's own labels.
     /// </summary>
     [JsonIgnore]
     public IEnumerable<TagChip> TagChips =>
-        Tags.Select(TagChip.Manual).Concat(AutoTags.Select(TagChip.Automatic));
+        TagPalette.Sort(Tags).Select(TagChip.Manual)
+            .Concat(TagPalette.Sort(AutoTags).Select(TagChip.Automatic));
 
     /// <summary>True when any tag marks this as a production-like environment.</summary>
     [JsonIgnore]
@@ -129,7 +146,21 @@ public class ServerConnection : INotifyPropertyChanged
     /// Key used to look up password in Windows Credential Manager.
     /// Only used when AuthMode is SqlAuth.
     /// </summary>
-    public string CredentialKey => $"NineLives:SQL:{Name}";
+    [JsonIgnore]
+    public string CredentialKey =>
+        string.IsNullOrEmpty(Id) ? LegacyCredentialKey : $"NineLives:SQL:{Id}";
+
+    /// <summary>The pre-#8 name-derived key. Only ConfigMigrator should need this.</summary>
+    [JsonIgnore]
+    public string LegacyCredentialKey => $"NineLives:SQL:{Name}";
+
+    /// <summary>
+    /// A password held in memory for this object only, never written anywhere. When set, the
+    /// connection string uses it in place of the stored one. Same purpose as
+    /// <see cref="BlobContainerConfig.UnsavedSasToken"/> - see the note there (#12).
+    /// </summary>
+    [JsonIgnore]
+    public string? UnsavedPassword { get; set; }
 
     public string DisplayText => AuthMode == AuthMode.WindowsAuth
         ? $"{ServerName} (Windows Auth)"

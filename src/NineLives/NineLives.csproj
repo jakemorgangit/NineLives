@@ -2,14 +2,14 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <AssemblyName>NineLives</AssemblyName>
     <RootNamespace>Blackcat.NineLives</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>Nine Lives</Product>
     <Authors>Jake Morgan</Authors>
     <Company>Blackcat Data Solutions Ltd</Company>
@@ -18,13 +18,20 @@
     <!-- Publish-time settings (single-file, self-contained, win-x64) live in
          Properties/PublishProfiles/SingleFileExe.pubxml and the publish commands in
          build_standalone.cmd / README - not here, so NineLives.Tests can reference
-         this project and plain builds stay RID-agnostic. -->
+         this project and plain builds stay RID-agnostic.
+
+         RuntimeIdentifiers (plural) is the exception. It does not make a plain build
+         RID-specific; it tells restore to resolve the win-x64 graph too, so
+         packages.lock.json covers what "dotnet publish -r win-x64" needs. Without it the
+         publish restore finds packages the lock file has never seen and rewrites it,
+         which quietly defeats locked mode for the one build that actually ships. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.*" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.*" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
   </ItemGroup>
 
   <ItemGroup>
