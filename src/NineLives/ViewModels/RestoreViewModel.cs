@@ -1393,9 +1393,19 @@ public partial class RestoreViewModel : ViewModelBase
                         AppendLog(change == CredentialChange.Created
                             ? "Credential created on the server."
                             : "Credential updated on the server.");
+
+                        // Changing a credential is a change to shared state on someone's instance.
+                        // It belongs in the file, not only in a console that closes with the app.
+                        App.Log.ServerChange(server.ServerName,
+                            $"credential [{SqlCredentialName}] {change.ToString().ToLowerInvariant()}");
                     }
                 }
             }
+
+            App.Log.ServerChange(server.ServerName,
+                $"restore starting: target [{TargetDatabaseName}], " +
+                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
+                $"recovery={RecoveryMode}, stopAt={EffectiveStopAt?.ToString("s") ?? "none"}");
 
             AppendLog("Beginning restore execution...\n");
 
@@ -1498,9 +1508,17 @@ public partial class RestoreViewModel : ViewModelBase
             TryCopyToClipboard(action.Sql, "Recovery statement copied to clipboard.");
     }
 
+    /// <summary>
+    /// Appends to the on-screen console and to the log file at the same time.
+    ///
+    /// One call rather than two so the file cannot drift from what the user was shown - and so a
+    /// restore that ends with the window being closed still leaves a record of how far it got.
+    /// Redaction happens inside the log, not here (#40).
+    /// </summary>
     private void AppendLog(string message)
     {
         ExecutionLog += message + "\n";
+        App.Log.Info($"[execute] {message.Trim()}");
     }
 
     private async Task RunArmCountdownAsync(CancellationToken ct)
