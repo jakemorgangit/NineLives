@@ -10,10 +10,15 @@ namespace Blackcat.NineLives.Services;
 /// </summary>
 public static class OlaAgFileNameParser
 {
-    // Matches: clustername$AgName_DatabaseName_FULL|DIFF|LOG_YYYYMMDD_HHMMSS_N.ext
+    // Matches: clustername$AgName_DatabaseName_FULL|DIFF|LOG[_COPY_ONLY]_YYYYMMDD_HHMMSS_N.ext
     // DatabaseName is [^_]+ so no underscores in DB name; AG name can have hyphens (e.g. My-AG1).
+    //
+    // The optional _COPY_ONLY group matters: without it a copy-only backup does not match at all,
+    // falls through to path parsing, and in a flat container ends up with no inferred database -
+    // so it silently vanishes from the model instead of being offered as a restore point.
+    // Named groups, because an optional group would otherwise shift every positional index.
     private static readonly Regex AgDefaultRegex = new(
-        @"^(.+?)\$(.+)_([^_]+)_(FULL|DIFF|LOG)_(\d{8}_\d{6})_(\d+)\.(bak|trn|diff|log)$",
+        @"^(?<cluster>.+?)\$(?<ag>.+)_(?<db>[^_]+)_(?<type>FULL|DIFF|LOG)(?<copyonly>_COPY_ONLY)?_(?<setid>\d{8}_\d{6})_(?<file>\d+)\.(?<ext>bak|trn|diff|log)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
@@ -29,7 +34,7 @@ public static class OlaAgFileNameParser
         if (!match.Success)
             return null;
 
-        var backupTypeStr = match.Groups[4].Value.ToUpperInvariant();
+        var backupTypeStr = match.Groups["type"].Value.ToUpperInvariant();
         var backupType = backupTypeStr switch
         {
             "FULL" => BackupType.Full,
@@ -40,13 +45,14 @@ public static class OlaAgFileNameParser
 
         return new OlaAgParsedName
         {
-            ClusterName = match.Groups[1].Value,
-            AgName = match.Groups[2].Value,
-            DatabaseName = match.Groups[3].Value,
+            ClusterName = match.Groups["cluster"].Value,
+            AgName = match.Groups["ag"].Value,
+            DatabaseName = match.Groups["db"].Value,
             BackupType = backupType,
-            SetId = match.Groups[5].Value, // YYYYMMDD_HHMMSS
-            FileNumber = int.TryParse(match.Groups[6].Value, out var n) ? n : 0,
-            FileExtension = match.Groups[7].Value
+            IsCopyOnly = match.Groups["copyonly"].Success,
+            SetId = match.Groups["setid"].Value, // YYYYMMDD_HHMMSS
+            FileNumber = int.TryParse(match.Groups["file"].Value, out var n) ? n : 0,
+            FileExtension = match.Groups["ext"].Value
         };
     }
 
@@ -66,6 +72,10 @@ public class OlaAgParsedName
     public string AgName { get; set; } = string.Empty;
     public string DatabaseName { get; set; } = string.Empty;
     public BackupType BackupType { get; set; }
+
+    /// <summary>True when the filename carries Ola's COPY_ONLY marker.</summary>
+    public bool IsCopyOnly { get; set; }
+
     public string SetId { get; set; } = string.Empty;
     public int FileNumber { get; set; }
     public string FileExtension { get; set; } = string.Empty;

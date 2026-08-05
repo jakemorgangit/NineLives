@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -28,6 +29,15 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerName = "Not connected";
 
+    [ObservableProperty]
+    private bool _updateAvailable;
+
+    [ObservableProperty]
+    private string _updateMessage = string.Empty;
+
+    private string _updateUrl = UpdateChecker.ReleasesPage;
+    private string? _updateTag;
+
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
@@ -51,6 +61,68 @@ public partial class MainViewModel : ViewModelBase
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
         CurrentView = BlobConfig;
+
+        // Fire and forget - startup must not wait on the network.
+        _ = CheckForUpdatesAsync();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            if (!config.CheckForUpdates) return;
+
+            var latest = await new UpdateChecker().FetchLatestAsync();
+            if (!UpdateChecker.ShouldNotify(
+                    AppVersion.Current, latest, config.LastNotifiedReleaseTag, config.CheckForUpdates))
+                return;
+
+            _updateUrl = latest!.Url;
+            _updateTag = latest.Tag;
+            UpdateMessage = $"Nine Lives {latest.Tag} is available. You have {AppVersion.Display}.";
+            UpdateAvailable = true;
+        }
+        catch
+        {
+            // Never surface an update-check failure. The app works fine without it.
+        }
+    }
+
+    /// <summary>Opens the releases page. The app downloads nothing itself.</summary>
+    [RelayCommand]
+    private void OpenReleasesPage()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(_updateUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            GlobalStatus = $"Could not open browser: {ex.Message}";
+        }
+
+        DismissUpdate();
+    }
+
+    /// <summary>Hides the banner and remembers the tag so it is not shown again.</summary>
+    [RelayCommand]
+    private void DismissUpdate()
+    {
+        UpdateAvailable = false;
+
+        if (string.IsNullOrWhiteSpace(_updateTag)) return;
+
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            config.LastNotifiedReleaseTag = _updateTag;
+            _credentialStore.SaveConfig(config);
+        }
+        catch
+        {
+            // Worst case the banner shows again next launch.
+        }
     }
 
     private void OnSqlConnectionChanged(object? sender, ServerConnectionChangedEventArgs e)

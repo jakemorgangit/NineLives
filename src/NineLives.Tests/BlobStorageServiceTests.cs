@@ -22,10 +22,12 @@ public class BlobStorageServiceTests
         string? instance = null,
         long size = 100,
         DateTime? lastModified = null,
-        string? agSetId = null)
+        string? agSetId = null,
+        bool copyOnly = false)
     {
         return new BackupFileInfo
         {
+            IsCopyOnly = copyOnly,
             BlobName = blobName,
             BlobUrl = $"https://acct.blob.core.windows.net/backups/{blobName}",
             Type = type,
@@ -194,6 +196,157 @@ public class BlobStorageServiceTests
         Assert.Equal(210, summary.TotalSizeBytes);
         Assert.Equal(new DateTime(2026, 1, 10, 22, 0, 0), summary.EarliestBackup!.Value.DateTime);
         Assert.Equal(new DateTime(2026, 1, 10, 23, 0, 0), summary.LatestBackup!.Value.DateTime);
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_SameDatabaseAndTimestampOnDifferentServers_StaySeparate()
+    {
+        // The defect: the key was Type|Database|SetId, so two servers backing up a same-named
+        // database to one container in the same second collapsed into ONE "striped" set - which
+        // would generate a single RESTORE ... FROM URL = a, URL = b spanning both servers, and
+        // silently drop the second server's backup from its own timeline.
+        var files = new List<BackupFileInfo>
+        {
+            File("FULL/SRV01/Sales/20260201_020000.bak", db: "Sales", server: "SRV01"),
+            File("FULL/SRV02/Sales/20260201_020000.bak", db: "Sales", server: "SRV02"),
+        };
+
+        var sets = _service.GroupIntoBackupSets(files);
+
+        Assert.Equal(2, sets.Count);
+        Assert.All(sets, s => Assert.False(s.IsStriped));
+        Assert.Contains(sets, s => s.ServerName == "SRV01");
+        Assert.Contains(sets, s => s.ServerName == "SRV02");
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_LogBackupsCollidingAcrossServers_StaySeparate()
+    {
+        // Logs are the realistic trigger: every 5-15 minutes across two servers is hundreds of
+        // chances a day for a same-second collision.
+        var files = new List<BackupFileInfo>
+        {
+            File("LOG/SRV01/Sales/20260805_121500.trn", BackupType.TransactionLog, db: "Sales", server: "SRV01"),
+            File("LOG/SRV02/Sales/20260805_121500.trn", BackupType.TransactionLog, db: "Sales", server: "SRV02"),
+        };
+
+        var sets = _service.GroupIntoBackupSets(files);
+
+        Assert.Equal(2, sets.Count);
+        Assert.All(sets, s => Assert.Equal(1, s.FileCount));
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_DifferentInstancesOnOneHost_StaySeparate()
+    {
+        var files = new List<BackupFileInfo>
+        {
+            File("FULL/SQLHOST/PROD/Sales/20260201_020000.bak", db: "Sales", server: "SQLHOST", instance: "PROD"),
+            File("FULL/SQLHOST/TEST/Sales/20260201_020000.bak", db: "Sales", server: "SQLHOST", instance: "TEST"),
+        };
+
+        var sets = _service.GroupIntoBackupSets(files);
+
+        Assert.Equal(2, sets.Count);
+        Assert.Contains(sets, s => s.InstanceName == "PROD");
+        Assert.Contains(sets, s => s.InstanceName == "TEST");
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_SeparatesByDirectoryEvenWithNoInferredServer()
+    {
+        // With an unconfigured or partial path pattern the server is null on both sides, so
+        // server/instance alone would not separate them - the parent directory still does.
+        var files = new List<BackupFileInfo>
+        {
+            File("SRV01/Sales/20260201_020000.bak"),
+            File("SRV02/Sales/20260201_020000.bak"),
+        };
+
+        var sets = _service.GroupIntoBackupSets(files);
+
+        Assert.Equal(2, sets.Count);
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_StripesOfOneBackup_StillGroupTogether()
+    {
+        // The stricter key must not break the case it exists to serve: every stripe of one
+        // backup shares server, instance, database and directory.
+        var files = new List<BackupFileInfo>
+        {
+            File("FULL/SQLHOST/PROD/Sales/20260201_020000_1.bak", db: "Sales", server: "SQLHOST", instance: "PROD"),
+            File("FULL/SQLHOST/PROD/Sales/20260201_020000_2.bak", db: "Sales", server: "SQLHOST", instance: "PROD"),
+            File("FULL/SQLHOST/PROD/Sales/20260201_020000_3.bak", db: "Sales", server: "SQLHOST", instance: "PROD"),
+        };
+
+        var set = Assert.Single(_service.GroupIntoBackupSets(files));
+
+        Assert.Equal(3, set.FileCount);
+        Assert.True(set.IsStriped);
+        Assert.Equal("PROD", set.InstanceName);
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_CarriesInstanceOntoTheSet()
+    {
+        var files = new List<BackupFileInfo>
+        {
+            File("FULL/SQLHOST/PROD/Sales/20260201_020000.bak", db: "Sales", server: "SQLHOST", instance: "PROD")
+        };
+
+        var set = Assert.Single(_service.GroupIntoBackupSets(files));
+
+        Assert.Equal("SQLHOST", set.ServerName);
+        Assert.Equal("PROD", set.InstanceName);
+        Assert.Equal(@"SQLHOST\PROD", set.ServerDisplay);
+        Assert.True(set.MatchesServer(@"SQLHOST\PROD"));
+        Assert.False(set.MatchesServer(@"SQLHOST\TEST"));
+    }
+
+    [Theory]
+    // Ola's shape, and common hand-rolled variants.
+    [InlineData("Sales_FULL_COPY_ONLY_20260804_120000_1.bak", true)]
+    [InlineData("Sales_FULL_COPY_ONLY_20260804_120000.bak", true)]
+    [InlineData("Sales-full-copy-only-20260804.bak", true)]
+    [InlineData("Sales_copyonly_20260804_120000.bak", true)]
+    [InlineData("Sales_FULL_20260804_120000_1.bak", false)]
+    // The false-positive trap that bit ContainsDiffIndicator, where a bare "diff" substring
+    // classified DiffusionDb's full backups as differentials. A database whose NAME contains
+    // the words must not be treated as copy-only.
+    [InlineData("CopyOnlyArchive_FULL_20260804_120000_1.bak", false)]
+    [InlineData("Copy_Only_Archive_FULL_20260804_120000_1.bak", false)]
+    public void IsCopyOnlyFileName_DetectsDelimitedMarkerOnly(string fileName, bool expectedCopyOnly)
+        => Assert.Equal(expectedCopyOnly, BlobStorageService.IsCopyOnlyFileName(fileName));
+
+    [Fact]
+    public void GroupIntoBackupSets_CarriesCopyOnlyOntoTheSet()
+    {
+        var files = new List<BackupFileInfo>
+        {
+            File("FULL/SRV01/Sales/Sales_FULL_COPY_ONLY_20260804_120000_1.bak",
+                 db: "Sales", server: "SRV01", copyOnly: true)
+        };
+
+        Assert.True(Assert.Single(_service.GroupIntoBackupSets(files)).IsCopyOnly);
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_CopyOnlyAndRegularAtSameTimestamp_StaySeparate()
+    {
+        // AG naming derives the setId from the timestamp alone, so without the copy-only
+        // component in the key these would merge into one mixed set.
+        var files = new List<BackupFileInfo>
+        {
+            File("Sales_FULL_20260804_120000_1.bak", db: "Sales", server: "SRV01", agSetId: "20260804_120000"),
+            File("Sales_FULL_COPY_ONLY_20260804_120000_1.bak", db: "Sales", server: "SRV01", agSetId: "20260804_120000", copyOnly: true),
+        };
+
+        var sets = _service.GroupIntoBackupSets(files);
+
+        Assert.Equal(2, sets.Count);
+        Assert.Contains(sets, s => s.IsCopyOnly);
+        Assert.Contains(sets, s => !s.IsCopyOnly);
     }
 
     [Fact]

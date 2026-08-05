@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Blackcat.NineLives.Models;
@@ -74,6 +75,7 @@ public class BlobStorageService
                     file.Type = agParsed.BackupType;
                     file.InferredSetId = agParsed.SetId;
                     file.IsAgDefaultNaming = true;
+                    file.IsCopyOnly = agParsed.IsCopyOnly;
                 }
             }
 
@@ -103,6 +105,9 @@ public class BlobStorageService
 
             if (file.Type == BackupType.Unknown)
                 file.Type = InferBackupTypeFromExtension(blob.Name);
+
+            if (!file.IsCopyOnly)
+                file.IsCopyOnly = IsCopyOnlyFileName(file.FileName);
 
             files.Add(file);
         }
@@ -137,14 +142,10 @@ public class BlobStorageService
 
     public List<string> GetDiscoveredServers(List<BackupFileInfo> files)
     {
+        // Same formatter the filters match against, so the values offered in the dropdown and
+        // the values compared against a set can never drift apart.
         return files
-            .Select(f =>
-            {
-                var parts = new List<string>();
-                if (!string.IsNullOrEmpty(f.InferredServerName)) parts.Add(f.InferredServerName);
-                if (!string.IsNullOrEmpty(f.InferredInstanceName)) parts.Add(f.InferredInstanceName);
-                return parts.Count > 0 ? string.Join("\\", parts) : null;
-            })
+            .Select(f => f.ServerDisplay)
             .Where(s => s != null)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
@@ -179,7 +180,28 @@ public class BlobStorageService
             var (setId, _) = file.IsAgDefaultNaming && !string.IsNullOrEmpty(file.InferredSetId)
                 ? (file.InferredSetId!, 0)
                 : BackupSet.ParseFileName(file.FileName);
-            var key = $"{file.Type}|{file.InferredDatabaseName ?? ""}|{setId}";
+
+            // The key must identify ONE backup operation on ONE server. Type + database + setId
+            // alone does not: two servers writing a same-named database to one container in the
+            // same second collapse into a single "striped" set, which would generate one
+            // RESTORE ... FROM URL = a, URL = b spanning both - and silently drop the second
+            // server's backup from its own timeline. Log backups make this realistic: every
+            // 5-15 minutes across two servers is hundreds of chances a day.
+            //
+            // The parent directory is included as well as server/instance because it survives an
+            // unconfigured or partial path pattern: with no pattern InferredServerName is null on
+            // both sides and would not separate them, whereas FULL/SRV01/Sales and
+            // FULL/SRV02/Sales still differ. Every stripe of one backup shares both.
+            var key = string.Join("|",
+                file.Type,
+                file.InferredServerName ?? "",
+                file.InferredInstanceName ?? "",
+                file.InferredDatabaseName ?? "",
+                BlobDirectory(file.BlobName),
+                // AG naming derives setId from the timestamp alone, so a copy-only and a regular
+                // full taken in the same second would otherwise merge into one mixed set.
+                file.IsCopyOnly ? "copyonly" : "",
+                setId);
 
             if (!groups.TryGetValue(key, out var list))
             {
@@ -203,11 +225,36 @@ public class BlobStorageService
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
                 Timestamp = timestamp,
                 DatabaseName = first.InferredDatabaseName,
-                ServerName = first.InferredServerName
+                ServerName = first.InferredServerName,
+                InstanceName = first.InferredInstanceName,
+                IsCopyOnly = first.IsCopyOnly
             });
         }
 
         return sets.OrderBy(s => s.Timestamp).ToList();
+    }
+
+    // A COPY_ONLY marker delimited by _ - . and preceded by a delimiter, so a database whose
+    // name merely CONTAINS the words is not caught. Requiring a leading delimiter (rather than
+    // allowing start-of-string) keeps a database literally named "Copy_Only_Archive" safe.
+    // Deliberately not a bare substring match - see the ContainsDiffIndicator defect, where
+    // "diff" matched DiffusionDb and classified its full backups as differentials.
+    private static readonly Regex CopyOnlyRegex = new(
+        @"[_\-.]copy[_\-]?only(?:$|[_\-.])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// True when a backup filename carries a COPY_ONLY marker. Public because it is pure logic
+    /// worth testing directly - the caller sits behind Azure IO.
+    /// </summary>
+    public static bool IsCopyOnlyFileName(string fileName)
+        => !string.IsNullOrEmpty(fileName) && CopyOnlyRegex.IsMatch(fileName);
+
+    /// <summary>Parent folder of a blob name, or empty for a flat name. Scopes set grouping.</summary>
+    private static string BlobDirectory(string blobName)
+    {
+        var idx = blobName.LastIndexOf('/');
+        return idx >= 0 ? blobName[..idx] : string.Empty;
     }
 
     public string BuildBlobUrlWithSas(BlobContainerConfig config, string blobName)

@@ -3,7 +3,7 @@ namespace Blackcat.NineLives.ViewModels;
 public partial class AboutViewModel : ViewModelBase
 {
     public string AppName => "Nine Lives";
-    public string Version => "v1.0.0";
+    public string Version => Services.AppVersion.Display;
     public string Year => "2026";
     public string Author => "Jake Morgan";
     public string Company => "Blackcat Data Solutions Ltd";

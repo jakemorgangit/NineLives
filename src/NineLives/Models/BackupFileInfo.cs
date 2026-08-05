@@ -27,6 +27,12 @@ public class BackupFileInfo
     /// True when this file was identified using Ola Hallengren default AG naming (flat filename).
     /// </summary>
     public bool IsAgDefaultNaming { get; set; }
+
+    /// <summary>
+    /// True when this is a COPY_ONLY backup. Copy-only fulls do not reset the differential base,
+    /// so they can never serve as the base for a differential restore.
+    /// </summary>
+    public bool IsCopyOnly { get; set; }
     /// <summary>
     /// When IsAgDefaultNaming, the backup set id (e.g. 20260226_200032) used for grouping stripes.
     /// </summary>
@@ -40,9 +46,28 @@ public class BackupFileInfo
     public int? BackupTypeCode { get; set; }
     public decimal? FirstLsn { get; set; }
     public decimal? LastLsn { get; set; }
+
+    /// <summary>
+    /// For a differential, the CheckpointLSN of the full backup it is based on. Comparing this
+    /// against a candidate full's CheckpointLSN is the authoritative test of whether the pair
+    /// actually belongs together - timestamps only suggest it.
+    /// </summary>
     public decimal? DatabaseBackupLsn { get; set; }
 
+    /// <summary>
+    /// LSN of the checkpoint taken during this backup. A differential's DatabaseBackupLSN must
+    /// equal its base full's CheckpointLSN.
+    /// </summary>
+    public decimal? CheckpointLsn { get; set; }
+
     public bool HasDetailedMetadata => BackupStartDate.HasValue;
+
+    /// <summary>Server as the filter dropdowns present it: <c>HOST\INSTANCE</c> or <c>HOST</c>.</summary>
+    public string? ServerDisplay => ServerIdentity.Format(InferredServerName, InferredInstanceName);
+
+    /// <summary>True when this file belongs to the given server filter (empty filter matches all).</summary>
+    public bool MatchesServer(string? serverFilter)
+        => ServerIdentity.Matches(InferredServerName, InferredInstanceName, serverFilter);
 
     public DateTime EffectiveDate => BackupStartDate ?? LastModified.DateTime;
 
@@ -86,6 +111,27 @@ public class BackupSet
     public DateTime Timestamp { get; set; }
     public string? DatabaseName { get; set; }
     public string? ServerName { get; set; }
+
+    /// <summary>
+    /// Named instance this set came from, when the path pattern supplies one. Without it, two
+    /// instances of the same host are indistinguishable once files are grouped into sets, and
+    /// their backups interleave into a single restore timeline.
+    /// </summary>
+    public string? InstanceName { get; set; }
+
+    /// <summary>
+    /// True when this is a COPY_ONLY backup set. A copy-only full is a perfectly good restore
+    /// point on its own and a valid anchor for a log chain, but it does NOT reset the
+    /// differential base - so it can never be the base for a differential restore.
+    /// </summary>
+    public bool IsCopyOnly { get; set; }
+
+    /// <summary>Server as the filter dropdowns present it: <c>HOST\INSTANCE</c> or <c>HOST</c>.</summary>
+    public string? ServerDisplay => ServerIdentity.Format(ServerName, InstanceName);
+
+    /// <summary>True when this set belongs to the given server filter (empty filter matches all).</summary>
+    public bool MatchesServer(string? serverFilter)
+        => ServerIdentity.Matches(ServerName, InstanceName, serverFilter);
 
     public long TotalSizeBytes => Files.Sum(f => f.SizeBytes);
     public int FileCount => Files.Count;

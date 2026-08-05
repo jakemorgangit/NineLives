@@ -46,10 +46,15 @@
                                 HorizontalAlignment="Stretch" />
                     </StackPanel>
 
+                    <!-- Stretch + no horizontal scrolling: without both, each row is measured
+                         with unbounded width and the tag WrapPanel never learns where to break,
+                         so pills run off the edge and are clipped. -->
                     <ListBox ItemsSource="{Binding Servers}"
                              SelectedItem="{Binding SelectedServer}"
                              Background="Transparent"
                              BorderThickness="0"
+                             HorizontalContentAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              Foreground="{StaticResource PrimaryTextBrush}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
@@ -62,9 +67,16 @@
                                                    FontWeight="SemiBold"
                                                    Foreground="{StaticResource PrimaryTextBrush}" />
                                     </StackPanel>
+                                    <!-- Now that the row is width-constrained (no horizontal
+                                         scrolling), a long name would be cut mid-character
+                                         rather than scrolled - so trim it explicitly. -->
                                     <TextBlock Text="{Binding DisplayText}"
                                                Style="{StaticResource SecondaryText}"
+                                               TextTrimming="CharacterEllipsis"
                                                Margin="22,2,0,0" />
+                                    <ItemsControl ItemsSource="{Binding TagChips}"
+                                                  Style="{StaticResource TagChipList}"
+                                                  Margin="22,2,0,0" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -197,6 +209,17 @@
                             <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,16" />
+
+                            <TextBlock Text="TAGS" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Comma separated. prod, test, dev, uat and dr get environment colours."
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding EditTags, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Margin="0,0,0,8" />
+                            <ItemsControl ItemsSource="{Binding EditTags, Converter={StaticResource TagPreview}}"
+                                          Style="{StaticResource TagPillList}"
+                                          Margin="0,0,0,16" />
 
                             <TextBlock Text="SERVER NAME / IP" Style="{StaticResource LabelText}" />
                             <TextBlock Text="e.g. myserver.database.windows.net or 10.0.0.1\SQLEXPRESS"

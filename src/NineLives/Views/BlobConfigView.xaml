@@ -52,6 +52,7 @@
                              Background="Transparent"
                              BorderThickness="0"
                              Foreground="{StaticResource PrimaryTextBrush}"
+                             HorizontalContentAlignment="Stretch"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto"
                              FocusVisualStyle="{x:Null}">
@@ -72,6 +73,9 @@
                                                TextTrimming="CharacterEllipsis"
                                                Margin="16,2,0,0"
                                                MaxWidth="220" />
+                                    <ItemsControl ItemsSource="{Binding TagChips}"
+                                                  Style="{StaticResource TagChipList}"
+                                                  Margin="16,2,0,0" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -286,6 +290,17 @@
                             <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,16" />
+
+                            <TextBlock Text="TAGS" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Comma separated. prod, test, dev, uat and dr get environment colours."
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding EditTags, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Margin="0,0,0,8" />
+                            <ItemsControl ItemsSource="{Binding EditTags, Converter={StaticResource TagPreview}}"
+                                          Style="{StaticResource TagPillList}"
+                                          Margin="0,0,0,16" />
 
                             <TextBlock Text="CONTAINER URL" Style="{StaticResource LabelText}" />
                             <TextBlock Text="e.g. https://myaccount.blob.core.windows.net/backups"

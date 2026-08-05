@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
 
     <!-- Color Palette -->
     <Color x:Key="WindowBackgroundColor">#1B1E2B</Color>
@@ -648,5 +649,87 @@
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="FontSize" Value="13" />
     </Style>
+
+    <!-- ==================== Tag Pills ====================
+         GitHub's label palette, rendered the way GitHub renders labels in ITS dark theme: a
+         low-alpha fill, a coloured border, and lightened text - rather than the solid swatch it
+         uses on a light background, which is punishing against this window. Defined once so
+         every surface showing a tag (lists, connection status, execute confirmation) matches. -->
+    <converters:TagBrushConverter x:Key="TagBrush" />
+    <converters:TagPreviewConverter x:Key="TagPreview" />
+
+    <!-- Plain-string pill, for the live preview beside the edit field. -->
+    <DataTemplate x:Key="TagPillTemplate">
+        <Border CornerRadius="9"
+                Padding="7,1"
+                Margin="0,2,4,0"
+                BorderThickness="1"
+                Background="{Binding Converter={StaticResource TagBrush}, ConverterParameter=fill}"
+                BorderBrush="{Binding Converter={StaticResource TagBrush}, ConverterParameter=border}">
+            <TextBlock Text="{Binding}"
+                       FontFamily="Segoe UI"
+                       FontSize="10.5"
+                       FontWeight="SemiBold"
+                       Foreground="{Binding Converter={StaticResource TagBrush}}" />
+        </Border>
+    </DataTemplate>
+
+    <!-- TagChip pill: one template covering manual and automatic, switching on IsAutomatic.
+         Both kinds MUST come from a single ItemsControl - two adjacent ones inside a WrapPanel
+         are each measured with infinite width, so neither wraps and the row clips them. -->
+    <DataTemplate x:Key="TagChipTemplate">
+        <Border x:Name="chip"
+                CornerRadius="9"
+                Padding="7,1"
+                Margin="0,2,4,0"
+                BorderThickness="1"
+                Background="{Binding Text, Converter={StaticResource TagBrush}, ConverterParameter=fill}"
+                BorderBrush="{Binding Text, Converter={StaticResource TagBrush}, ConverterParameter=border}">
+            <TextBlock x:Name="chipText"
+                       Text="{Binding Text}"
+                       FontFamily="Segoe UI"
+                       FontSize="10.5"
+                       FontWeight="SemiBold"
+                       Foreground="{Binding Text, Converter={StaticResource TagBrush}}" />
+        </Border>
+        <DataTemplate.Triggers>
+            <!-- Automatic tags: neutral outline, so a derived fact never competes with a red
+                 PROD pill or reads as something a human asserted. -->
+            <DataTrigger Binding="{Binding IsAutomatic}" Value="True">
+                <Setter TargetName="chip" Property="Background" Value="Transparent" />
+                <Setter TargetName="chip" Property="BorderBrush" Value="{StaticResource InputBorderBrush}" />
+                <Setter TargetName="chipText" Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                <Setter TargetName="chipText" Property="FontWeight" Value="Normal" />
+            </DataTrigger>
+        </DataTemplate.Triggers>
+    </DataTemplate>
+
+    <!-- Drop-in list of chips. HorizontalAlignment=Left keeps the panel from stretching past
+         its content, and the parent must constrain width for the WrapPanel to know where to
+         break - see HorizontalContentAlignment on the lists that use this. -->
+    <Style x:Key="TagChipList" TargetType="ItemsControl">
+        <Setter Property="ItemTemplate" Value="{StaticResource TagChipTemplate}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Drop-in list of pills: set ItemsSource to a collection of tag names. -->
+    <Style x:Key="TagPillList" TargetType="ItemsControl">
+        <Setter Property="ItemTemplate" Value="{StaticResource TagPillTemplate}" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 
 </ResourceDictionary>

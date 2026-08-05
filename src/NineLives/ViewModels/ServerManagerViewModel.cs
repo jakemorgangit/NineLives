@@ -22,6 +22,10 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private string _editName = string.Empty;
 
+    /// <summary>Comma-separated tag list as typed by the user; parsed on save.</summary>
+    [ObservableProperty]
+    private string _editTags = string.Empty;
+
     [ObservableProperty]
     private string _editServerName = string.Empty;
 
@@ -88,10 +92,50 @@ public partial class ServerManagerViewModel : ViewModelBase
         _credentialStore.SaveConfig(config);
     }
 
+    /// <summary>
+    /// Records the product version parsed from a @@VERSION banner against a saved server, and
+    /// refreshes its row so the automatic tag appears at once.
+    ///
+    /// Populated only when the user actually connects or tests - the app never probes saved
+    /// servers on its own. Reaching out to every configured instance at startup, some of which
+    /// are production, is not something a restore tool should do unasked.
+    /// </summary>
+    private void RecordDetectedVersion(ServerConnection? server, string? banner)
+    {
+        if (server == null) return;
+
+        var detected = SqlVersionName.FromVersionBanner(banner);
+        if (detected == null || detected == server.DetectedVersion) return;
+
+        server.DetectedVersion = detected;
+        SaveServers();
+        RefreshServerRow(server);
+    }
+
+    /// <summary>
+    /// Forces one row to re-render after a non-observable property changed on it.
+    ///
+    /// DetectedVersion is a plain property on a serialised model, so setting it raises nothing a
+    /// binding can see. Tags avoid this by being an ObservableCollection mutated in place, but a
+    /// scalar has no such escape - so the item is re-seated in the collection, which re-renders
+    /// just that row. Selection is preserved because the instance is unchanged.
+    /// </summary>
+    private void RefreshServerRow(ServerConnection server)
+    {
+        var index = Servers.IndexOf(server);
+        if (index < 0) return;
+
+        var wasSelected = ReferenceEquals(SelectedServer, server);
+        Servers.RemoveAt(index);
+        Servers.Insert(index, server);
+        if (wasSelected) SelectedServer = server;
+    }
+
     [RelayCommand]
     private void AddNew()
     {
         EditName = string.Empty;
+        EditTags = string.Empty;
         EditServerName = string.Empty;
         EditAuthMode = AuthMode.WindowsAuth;
         EditUsername = string.Empty;
@@ -109,6 +153,7 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         if (SelectedServer == null) return;
         EditName = SelectedServer.Name;
+        EditTags = TagPalette.FormatTags(SelectedServer.Tags);
         EditServerName = SelectedServer.ServerName;
         EditAuthMode = SelectedServer.AuthMode;
         EditUsername = SelectedServer.Username ?? string.Empty;
@@ -160,6 +205,9 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
 
         server.Name = EditName;
+        // Mutate in place - assigning a new collection raises no notification on a POCO, so the
+        // pills would not appear until the user navigated away and back.
+        ReplaceTags(server.Tags, TagPalette.ParseTags(EditTags));
         server.ServerName = EditServerName;
         server.AuthMode = EditAuthMode;
         server.Username = EditAuthMode == AuthMode.SqlAuth ? EditUsername : null;
@@ -219,6 +267,12 @@ public partial class ServerManagerViewModel : ViewModelBase
             ServerVersion = firstLine;
             TestSuccess = true;
             TestResult = $"Connected successfully!\n{firstLine}";
+
+            // Test Connection already proves the server and reads the banner, so record the
+            // version tag from it too. BuildCurrentServer returns a throwaway object built from
+            // the edit form, so the value has to be written back to the SAVED entry - otherwise
+            // testing an existing server tells us the version and then discards it.
+            RecordDetectedVersion(IsNew ? null : SelectedServer, version);
         }
         catch (Exception ex)
         {
@@ -241,6 +295,18 @@ public partial class ServerManagerViewModel : ViewModelBase
         try
         {
             await _sqlService.TestConnectionAsync(SelectedServer);
+
+            // Derive the product-version tag from the connection we just proved works. Best
+            // effort: a server that connects but will not answer @@VERSION should still connect.
+            try
+            {
+                RecordDetectedVersion(SelectedServer, await _sqlService.GetServerVersionAsync(SelectedServer));
+            }
+            catch
+            {
+                // Leave any previously detected value alone rather than clearing it.
+            }
+
             IsConnected = true;
             ConnectedServerDisplay = SelectedServer.DisplayText;
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs

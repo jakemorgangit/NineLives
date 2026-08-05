@@ -16,6 +16,7 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly SqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
+    private readonly BackupChainValidator _chainValidator = new();
     private readonly CredentialStore _credentialStore;
 
     private List<BackupFileInfo> _allBackups = [];
@@ -136,6 +137,31 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasPointInTimeError;
 
+    // ── Chain gap detection ──────────────────────────────────────────────────────
+    // Structural validation of the selected chain, run at selection time. The app otherwise
+    // assumes every discovered backup is present and intact, so a missing stripe or a hole in
+    // the log sequence only surfaces mid-restore - after WITH REPLACE has dropped the target.
+
+    [ObservableProperty]
+    private ObservableCollection<ChainIssue> _chainIssues = [];
+
+    [ObservableProperty]
+    private bool _hasChainIssues;
+
+    /// <summary>True when at least one issue makes the restore impossible as generated.</summary>
+    [ObservableProperty]
+    private bool _hasChainErrors;
+
+    [ObservableProperty]
+    private string _chainIssueSummary = string.Empty;
+
+    /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
+    [ObservableProperty]
+    private bool _chainLsnVerified;
+
+    [ObservableProperty]
+    private bool _isValidatingChain;
+
     [ObservableProperty]
     private bool _disconnectSessions = true;
 
@@ -157,6 +183,17 @@ public partial class RestoreViewModel : ViewModelBase
     public bool ShowMoveOptions => UseWithMove;
 
     public ServerConnection? ConnectedServer { get; set; }
+
+    /// <summary>
+    /// Tags of the connected server, shown on the execute confirmation. Chips rather than plain
+    /// strings so the detected version appears alongside the environment labels, and so this
+    /// renders through the same single wrapping template as the lists.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<TagChip> _connectedServerTags = [];
+
+    [ObservableProperty]
+    private bool _hasConnectedServerTags;
 
     partial void OnUseWithMoveChanged(bool value)
     {
@@ -352,13 +389,10 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (_allSets.Count == 0) return;
 
-        var filtered = _allSets.AsEnumerable();
-        if (!string.IsNullOrEmpty(value))
-            filtered = filtered.Where(s =>
-            {
-                var parts = value.Split('\\', 2);
-                return string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
-            });
+        // Compare the FULL server identity. Matching on the host alone made selecting
+        // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that
+        // only exist on the other instance.
+        var filtered = _allSets.Where(s => s.MatchesServer(value));
 
         var dbs = filtered
             .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
@@ -380,12 +414,11 @@ public partial class RestoreViewModel : ViewModelBase
             .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        // Full server identity again - this is the filter that decides which sets reach
+        // BackupChainBuilder, so a host-only match let one instance's full pair with another
+        // instance's differentials and logs.
         if (!string.IsNullOrEmpty(SelectedServerName))
-        {
-            var parts = SelectedServerName.Split('\\', 2);
-            _dbSets = _dbSets.Where(s =>
-                string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase)).ToList();
-        }
+            _dbSets = _dbSets.Where(s => s.MatchesServer(SelectedServerName)).ToList();
 
         FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
         DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
@@ -422,6 +455,7 @@ public partial class RestoreViewModel : ViewModelBase
             ChainSets.Clear();
             ChainSummary = string.Empty;
             UpdatePointInTimeWindow(null);
+            UpdateChainIssues(null);
             FetchedFileMoves = [];
             HasFetchedFileMoves = false;
             BackupMetadataSummary = null;
@@ -439,6 +473,11 @@ public partial class RestoreViewModel : ViewModelBase
         ChainSets = new ObservableCollection<BackupSet>(chain.AllSets);
         ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {value.Timestamp:yyyy-MM-dd HH:mm:ss}";
         UpdatePointInTimeWindow(value);
+        // Structural only at selection time; LSN verification is on demand since it costs a
+        // round trip per chain member.
+        ChainLsnVerified = false;
+        UpdateChainIssues(chain);
+        ValidateChainCommand.NotifyCanExecuteChanged();
         UpdateRestoreSummary();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
@@ -776,6 +815,86 @@ public partial class RestoreViewModel : ViewModelBase
         ValidatePointInTime();
     }
 
+    /// <summary>
+    /// Reads RESTORE HEADERONLY for every member of the selected chain and validates the LSN
+    /// relationships - the authoritative check that the chain actually restores, as opposed to
+    /// merely looking plausible by filename and timestamp.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanValidateChain))]
+    private async Task ValidateChainAsync()
+    {
+        if (RestoreChain == null || ConnectedServer == null) return;
+
+        IsValidatingChain = true;
+        ClearStatus();
+        try
+        {
+            var headers = new List<ChainHeader>();
+            foreach (var set in RestoreChain.AllSets)
+            {
+                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+                try
+                {
+                    // credentialName is null on purpose: WITH CREDENTIAL is invalid for a SAS
+                    // credential, which is the only kind this app creates.
+                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(
+                        ConnectedServer, urls, credentialName: null);
+                    headers.Add(new ChainHeader(set, header));
+                }
+                catch (Exception)
+                {
+                    // One unreadable member must not abort the whole validation - the validator
+                    // reports it and carries on checking everything else.
+                    headers.Add(new ChainHeader(set, null));
+                }
+            }
+
+            UpdateChainIssues(RestoreChain, headers);
+            ChainLsnVerified = true;
+
+            SetStatus(HasChainIssues
+                ? $"Chain validation found problems - see the panel above."
+                : $"Chain validated: {headers.Count} backup(s) read, LSN chain is intact.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Chain validation failed: {ex.Message}");
+        }
+        finally
+        {
+            IsValidatingChain = false;
+        }
+    }
+
+    private bool CanValidateChain() =>
+        IsConnectedToServer && RestoreChain != null && !IsValidatingChain;
+
+    private void UpdateChainIssues(BackupChain? chain, IReadOnlyList<ChainHeader>? headers = null)
+    {
+        var issues = _chainValidator.Validate(chain);
+        if (headers != null)
+            issues.AddRange(_chainValidator.ValidateLsnChain(chain, headers));
+
+        ChainIssues = new ObservableCollection<ChainIssue>(issues);
+        HasChainIssues = issues.Count > 0;
+        HasChainErrors = issues.Any(i => i.IsError);
+
+        if (issues.Count == 0)
+        {
+            ChainIssueSummary = string.Empty;
+            return;
+        }
+
+        var errors = issues.Count(i => i.IsError);
+        var warnings = issues.Count - errors;
+
+        ChainIssueSummary = errors > 0 && warnings > 0
+            ? $"{errors} problem(s) will prevent this restore, and {warnings} warning(s)"
+            : errors > 0
+                ? $"{errors} problem(s) will prevent this restore"
+                : $"{warnings} warning(s) about this chain";
+    }
+
     private const string StopAtFormat = "yyyy-MM-dd HH:mm:ss";
 
     private static readonly string[] StopAtAcceptedFormats =
@@ -865,6 +984,13 @@ public partial class RestoreViewModel : ViewModelBase
 
     partial void OnIsConnectedToServerChanged(bool value)
     {
+        var chips = value && ConnectedServer != null
+            ? ConnectedServer.TagChips
+            : [];
+        ConnectedServerTags = new ObservableCollection<TagChip>(chips);
+        HasConnectedServerTags = ConnectedServerTags.Count > 0;
+
+        ValidateChainCommand.NotifyCanExecuteChanged();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
         CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
@@ -1170,6 +1296,17 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (string.IsNullOrEmpty(GeneratedScript) || !IsConnectedToServer)
             return;
+
+        // Refuse to arm when the chain cannot possibly restore. This is the last safe moment:
+        // once execution starts, WITH REPLACE drops the target database, and a chain that fails
+        // partway leaves nothing usable behind. Failing here costs the user a few seconds;
+        // failing mid-restore costs them the database they were restoring over.
+        if (HasChainErrors && !IsExecuteArmed)
+        {
+            var first = ChainIssues.First(i => i.IsError);
+            SetError($"Cannot execute: {first.Title}. {first.Detail}");
+            return;
+        }
 
         if (!IsExecuteArmed)
         {

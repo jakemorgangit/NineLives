@@ -310,6 +310,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
@@ -320,7 +321,37 @@
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{StaticResource SecondaryTextBrush}" />
                         </TextBlock>
 
+                        <!-- On-demand LSN verification: one RESTORE HEADERONLY per chain member,
+                             so it is a deliberate action rather than automatic on selection. -->
                         <Button Grid.Column="1"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding ValidateChainCommand}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                ToolTip="Read each backup's header and verify the LSN chain is unbroken. Requires a connected server.">
+                            <Button.Content>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Validate Chain" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsValidatingChain}" Value="True">
+                                                    <Setter Property="Text" Value="Validating..." />
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding ChainLsnVerified}" Value="True" />
+                                                        <Condition Binding="{Binding HasChainIssues}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Text" Value="Chain Verified" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+
+                        <Button Grid.Column="2"
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">
@@ -340,6 +371,50 @@
                             </Button.Content>
                         </Button>
                     </Grid>
+
+                    <!-- Chain gap detection: always visible when something is wrong, so a missing
+                         stripe or a hole in the log sequence is seen BEFORE the script is run,
+                         not after WITH REPLACE has already dropped the target database. -->
+                    <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                            Visibility="{Binding HasChainIssues, Converter={StaticResource BoolToVis}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#332B1A" />
+                                <Setter Property="BorderBrush" Value="#8A6D2F" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasChainErrors}" Value="True">
+                                        <Setter Property="Background" Value="#3A1E1E" />
+                                        <Setter Property="BorderBrush" Value="#A33F3F" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{Binding ChainIssueSummary}"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8" />
+                            <ItemsControl ItemsSource="{Binding ChainIssues}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold">
+                                                <Run Text="{Binding SeverityDisplay, Mode=OneWay}" />
+                                                <Run Text="  " />
+                                                <Run Text="{Binding Title, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Detail}"
+                                                       Style="{StaticResource SecondaryText}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
 
                     <!-- Restore Chain Detail (togglable) -->
                     <Border Background="{StaticResource InputBackgroundBrush}"
@@ -755,19 +830,28 @@
                                 MinWidth="140" />
                     </StackPanel>
 
-                    <!-- Execute armed warning -->
+                    <!-- Execute armed warning. The server's tags appear here deliberately: this is
+                         the last thing between the user and an irreversible overwrite, and a
+                         hostname alone is a weak signal - blackcatsvr01 and blackcatsvr02 differ
+                         by one character. A red PROD pill is read before the sentence is. -->
                     <Border Background="#30E74C3C" CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
                             Visibility="{Binding IsExecuteArmed, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
-                            <Run Text="&#x26A0;" Foreground="{StaticResource ErrorBrush}" FontSize="14" />
-                            <Run Text=" Click again to execute restore against" />
-                            <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource ErrorBrush}" />
-                            <Run Text=". Target:" />
-                            <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
-                            <Run Text="(" />
-                            <Run Text="{Binding ChainSummary, Mode=OneWay}" />
-                            <Run Text="). This operation cannot be undone." Foreground="{StaticResource ErrorBrush}" />
-                        </TextBlock>
+                        <StackPanel>
+                            <ItemsControl ItemsSource="{Binding ConnectedServerTags}"
+                                          Style="{StaticResource TagChipList}"
+                                          Margin="0,0,0,6"
+                                          Visibility="{Binding HasConnectedServerTags, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                                <Run Text="&#x26A0;" Foreground="{StaticResource ErrorBrush}" FontSize="14" />
+                                <Run Text=" Click again to execute restore against" />
+                                <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource ErrorBrush}" />
+                                <Run Text=". Target:" />
+                                <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="(" />
+                                <Run Text="{Binding ChainSummary, Mode=OneWay}" />
+                                <Run Text="). This operation cannot be undone." Foreground="{StaticResource ErrorBrush}" />
+                            </TextBlock>
+                        </StackPanel>
                     </Border>
 
                     <!-- Not connected warning -->
