@@ -92,6 +92,25 @@ public partial class ServerManagerViewModel : ViewModelBase
         _credentialStore.SaveConfig(config);
     }
 
+    /// <summary>
+    /// Forces one row to re-render after a non-observable property changed on it.
+    ///
+    /// DetectedVersion is a plain property on a serialised model, so setting it raises nothing a
+    /// binding can see. Tags avoid this by being an ObservableCollection mutated in place, but a
+    /// scalar has no such escape - so the item is re-seated in the collection, which re-renders
+    /// just that row. Selection is preserved because the instance is unchanged.
+    /// </summary>
+    private void RefreshServerRow(ServerConnection server)
+    {
+        var index = Servers.IndexOf(server);
+        if (index < 0) return;
+
+        var wasSelected = ReferenceEquals(SelectedServer, server);
+        Servers.RemoveAt(index);
+        Servers.Insert(index, server);
+        if (wasSelected) SelectedServer = server;
+    }
+
     [RelayCommand]
     private void AddNew()
     {
@@ -166,7 +185,9 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
 
         server.Name = EditName;
-        server.Tags = TagPalette.ParseTags(EditTags);
+        // Mutate in place - assigning a new collection raises no notification on a POCO, so the
+        // pills would not appear until the user navigated away and back.
+        ReplaceTags(server.Tags, TagPalette.ParseTags(EditTags));
         server.ServerName = EditServerName;
         server.AuthMode = EditAuthMode;
         server.Username = EditAuthMode == AuthMode.SqlAuth ? EditUsername : null;
@@ -248,6 +269,25 @@ public partial class ServerManagerViewModel : ViewModelBase
         try
         {
             await _sqlService.TestConnectionAsync(SelectedServer);
+
+            // Derive the product-version tag from the connection we just proved works. Best
+            // effort: a server that connects but will not answer @@VERSION should still connect.
+            try
+            {
+                var banner = await _sqlService.GetServerVersionAsync(SelectedServer);
+                var detected = SqlVersionName.FromVersionBanner(banner);
+                if (detected != null && detected != SelectedServer.DetectedVersion)
+                {
+                    SelectedServer.DetectedVersion = detected;
+                    SaveServers();
+                    RefreshServerRow(SelectedServer);
+                }
+            }
+            catch
+            {
+                // Leave any previously detected value alone rather than clearing it.
+            }
+
             IsConnected = true;
             ConnectedServerDisplay = SelectedServer.DisplayText;
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
