@@ -1,0 +1,81 @@
+# Security policy
+
+Nine Lives holds Azure SAS tokens and SQL Server passwords, and it generates and runs T-SQL against
+instances you point it at — usually with rights to drop and replace databases. Security reports are
+taken seriously here.
+
+## Reporting a vulnerability
+
+**Please don't open a public issue.** Use either:
+
+- **[Private vulnerability reporting](https://github.com/jakemorgangit/NineLives/security/advisories/new)**
+  — the Report a vulnerability button under the Security tab. Preferred, because the discussion and
+  the fix stay in one place until there's something to release.
+- **jake@blackcat.wales** if you'd rather use email.
+
+Useful things to include: the version (Help → About), what an attacker would gain, and the smallest
+set of steps that shows it. A proof of concept helps but is not required — a clear description of
+the flaw is enough.
+
+### What to expect
+
+This is maintained by one person alongside client work, so:
+
+- **Acknowledgement within 3 working days.** If you haven't heard back by then, please chase — it
+  means the message went astray.
+- An assessment, and either a fix or an explanation of why it isn't one, within 30 days.
+- Credit in the release notes if you'd like it, or none if you'd rather not.
+
+Please give a fix a reasonable chance to ship before disclosing publicly. If something is being
+actively exploited, say so and it'll jump the queue.
+
+## Supported versions
+
+Only the **latest release** is supported. There are no maintenance branches — fixes go into the
+next release. If you're running something older, upgrading is the fix.
+
+## What the tool assumes
+
+Worth stating plainly, because it determines whether a given finding is a bug or the design:
+
+- **It runs locally as you.** It has whatever access your Windows account has, and no privilege
+  boundary of its own.
+- **Secrets live in Windows Credential Manager**, per-user, under `NineLives:Blob:*` and
+  `NineLives:SQL:*`. They are never written to `config.json`, never included in generated scripts,
+  and never sent anywhere except the SQL Server you connect to.
+- **`config.json` is trusted input.** It sits in `%LOCALAPPDATA%\NineLives`, is plain text, and has
+  no integrity checking. Anything able to write it is already running as you. That said, values
+  read from it still get escaped properly before reaching T-SQL — someone who can write that file
+  should not thereby get a cleaner path to running arbitrary SQL as sysadmin.
+- **You choose the server.** The tool connects where you tell it to and runs the script you can
+  read before you run it.
+
+So: anything an attacker who is *already you, on your machine* can do is generally not a
+vulnerability. Anything that leaks a secret somewhere it shouldn't go, sends it somewhere
+unexpected, or turns untrusted data into executed T-SQL, is.
+
+### Particularly interested in
+
+- SAS tokens or SQL passwords ending up anywhere other than Credential Manager — logs, the
+  generated script, `config.json`, the clipboard, an error message, a crash dump.
+- Anything that reaches T-SQL without going through `Services/TSql.cs`, or a way past its quoting.
+- A restore being aimed at a server or database other than the one shown in the confirmation.
+- Credentials being sent over a connection that isn't validated the way the settings claim.
+
+### Known and already tracked
+
+Not vulnerabilities to report — they're on the list:
+
+- The released binary is **unsigned**, so SmartScreen warns on download
+  ([#33](https://github.com/jakemorgangit/NineLives/issues/33)). Releases carry a
+  [build provenance attestation](https://github.com/jakemorgangit/NineLives#windows-protected-your-pc)
+  you can verify in the meantime.
+- `TrustServerCertificate` defaults to true
+  ([#17](https://github.com/jakemorgangit/NineLives/issues/17)).
+- Entra ID / Managed Identity is not supported yet; SAS tokens only
+  ([#29](https://github.com/jakemorgangit/NineLives/issues/29)).
+
+## Thank you
+
+Genuinely — a private report is a favour, and it's the difference between fixing something quietly
+and finding out about it the hard way.
