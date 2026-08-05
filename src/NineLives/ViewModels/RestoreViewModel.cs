@@ -62,6 +62,14 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _restoreWindowText = string.Empty;
 
+    /// <summary>
+    /// Left-hand label under the timeline. A plain property rather than the old
+    /// {Binding RestorePoints[0].Timestamp}, which threw an index error into WPF's binding trace
+    /// on every layout while the collection was empty.
+    /// </summary>
+    [ObservableProperty]
+    private string _timelineStartText = string.Empty;
+
     [ObservableProperty]
     private ObservableCollection<TimelineTick> _timelineTicks = [];
 
@@ -605,6 +613,7 @@ public partial class RestoreViewModel : ViewModelBase
             var first = points.First().Timestamp;
             var last = points.Last().Timestamp;
             RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
+            TimelineStartText = $"{first:yyyy-MM-dd HH:mm}";
 
             // Compute time-interval tick marks
             TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));

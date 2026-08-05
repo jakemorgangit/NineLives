@@ -2,6 +2,12 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
 
+    <!-- Declared here rather than per-view. It was repeated in five views, and AboutView - the one
+         that did not have it - threw a XamlParseException the moment a {StaticResource BoolToVis}
+         was added to it. Views that still declare their own simply shadow this with an identical
+         instance, so both work. -->
+    <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+
     <!-- Color Palette -->
     <Color x:Key="WindowBackgroundColor">#1B1E2B</Color>
     <Color x:Key="SidebarBackgroundColor">#141722</Color>

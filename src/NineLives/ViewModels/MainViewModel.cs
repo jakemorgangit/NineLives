@@ -38,6 +38,12 @@ public partial class MainViewModel : ViewModelBase
     private string _updateUrl = UpdateChecker.ReleasesPage;
     private string? _updateTag;
 
+    /// <summary>
+    /// Shown in the status bar. Read from the assembly so it cannot go stale.
+    /// Not named AppVersion - that would shadow the class of the same name inside this type.
+    /// </summary>
+    public string VersionText => Services.AppVersion.Display;
+
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
