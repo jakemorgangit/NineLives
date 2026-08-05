@@ -1,3 +1,5 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace Blackcat.NineLives.Models;
 
 public enum RecoveryMode
@@ -51,10 +53,19 @@ public class RestoreOptions
     // ViewModel, which is what talks to the server about it.
 }
 
-public class FileMoveOption
+/// <summary>
+/// One logical file and where it should land.
+///
+/// Observable because <see cref="NewPhysicalName"/> is edited directly in a grid. As a plain POCO
+/// nothing knew the target path had changed, so the generated script kept the path that was
+/// fetched from the server rather than the one on screen - and the script is what gets executed.
+/// </summary>
+public partial class FileMoveOption : ObservableObject
 {
     public string LogicalName { get; set; } = string.Empty;
     public string PhysicalName { get; set; } = string.Empty;
-    public string NewPhysicalName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    private string _newPhysicalName = string.Empty;
 }
