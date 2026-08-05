@@ -301,6 +301,25 @@ public partial class ServerManagerViewModel : ViewModelBase
             TestSuccess = true;
             TestResult = $"Connected successfully!\n{firstLine}";
 
+            // While we are here, find out whether trusting the certificate is actually needed.
+            // See WouldConnectWithCertificateValidationAsync - the point is to replace a warning
+            // people learn to ignore with a fact they can act on (#17).
+            if (server.TrustServerCertificate)
+            {
+                var wouldValidate = await _sqlService.WouldConnectWithCertificateValidationAsync(server);
+                TestResult += wouldValidate switch
+                {
+                    true => "\n\nThis server's certificate validates. You can untick "
+                          + "\"Trust server certificate\" - nothing will break, and the password "
+                          + "and SAS token will no longer be sent over an unverified connection.",
+                    false => "\n\nNote: the certificate does not validate, so \"Trust server "
+                           + "certificate\" is doing real work here. The connection is still "
+                           + "encrypted, but it is not verified - a machine-in-the-middle on the "
+                           + "network path could read the password and SAS token.",
+                    null => string.Empty
+                };
+            }
+
             // Test Connection already proves the server and reads the banner, so record the
             // version tag from it too. BuildCurrentServer returns a throwaway object built from
             // the edit form, so the value has to be written back to the SAVED entry - otherwise
