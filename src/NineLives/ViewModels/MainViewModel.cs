@@ -68,6 +68,11 @@ public partial class MainViewModel : ViewModelBase
     {
         _credentialStore = credentialStore;
 
+        // Before the child viewmodels build any views: applying a palette afterwards works, since
+        // every colour is a DynamicResource, but doing it first means the first frame drawn is
+        // already the right colour rather than a flash of dark on the way to light.
+        ApplySavedTheme();
+
         // Before anything reads the config: move secrets from name-derived keys onto stable ids
         // (#8). Must happen ahead of the child viewmodels, which load containers and servers in
         // their constructors and would otherwise look up keys the migration is about to change.
@@ -89,7 +94,7 @@ public partial class MainViewModel : ViewModelBase
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
         History = new HistoryViewModel(_historyStore);
-        About = new AboutViewModel();
+        About = new AboutViewModel(_credentialStore);
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
@@ -97,6 +102,22 @@ public partial class MainViewModel : ViewModelBase
 
         // Fire and forget - startup must not wait on the network.
         _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>
+    /// Puts the remembered colour scheme back. Never fatal: a theme that will not load leaves the
+    /// default in place, which is a cosmetic problem rather than one worth refusing to start over.
+    /// </summary>
+    private void ApplySavedTheme()
+    {
+        try
+        {
+            ThemeManager.Apply(_credentialStore.LoadConfig().Theme);
+        }
+        catch
+        {
+            // Dark it is.
+        }
     }
 
     /// <summary>

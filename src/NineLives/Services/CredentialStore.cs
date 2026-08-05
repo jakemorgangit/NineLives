@@ -305,6 +305,13 @@ public class AppConfig
     public string? LastNotifiedReleaseTag { get; set; }
 
     /// <summary>
+    /// Colour scheme. Stored by name so the file stays readable and an unknown value degrades to
+    /// Dark rather than throwing - someone hand-editing this should not be able to stop the app
+    /// starting.
+    /// </summary>
+    public AppTheme Theme { get; set; } = AppTheme.Dark;
+
+    /// <summary>
     /// Set when config.json existed but could not be read or parsed. Not persisted - it describes
     /// this load attempt, not the configuration. While it is set, this object holds empty defaults
     /// that do NOT reflect what is on disk, so <see cref="CredentialStore.SaveConfig"/> will

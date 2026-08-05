@@ -1,4 +1,4 @@
-<UserControl x:Class="Blackcat.NineLives.Views.RestoreView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.RestoreView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:Blackcat.NineLives.Converters"
@@ -86,19 +86,19 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal">
-                            <Border Background="{StaticResource AccentBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
+                            <Border Background="{DynamicResource AccentBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
                                 <TextBlock Text="{Binding FullCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Full Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
-                            <Border Background="{StaticResource WarningBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
+                            <Border Background="{DynamicResource WarningBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
                                 <TextBlock Text="{Binding DiffCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Diff Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Horizontal">
-                            <Border Background="{StaticResource SuccessBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
+                            <Border Background="{DynamicResource SuccessBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
                                 <TextBlock Text="{Binding LogCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Log Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
@@ -123,12 +123,12 @@
                  the case where there are no restore points, so the user got an empty screen and no
                  explanation. A XAML load test caught that. -->
             <Border CornerRadius="4" Padding="12" Margin="0,0,0,16"
-                    Background="#332B1A" BorderBrush="#8A6D2F" BorderThickness="1"
+                    Background="{DynamicResource WarningPanelBackgroundBrush}" BorderBrush="{DynamicResource WarningPanelBorderBrush}" BorderThickness="1"
                     Visibility="{Binding HasInventoryIssues, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <TextBlock Text="About the backups found in this container"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource PrimaryTextBrush}"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,8" />
                     <ItemsControl ItemsSource="{Binding InventoryIssues}">
@@ -165,7 +165,7 @@
                     <!-- Narrowing controls. A week of 15-minute logs is roughly 670 points, which
                          no timeline can draw legibly - so the range and the type toggles are the
                          way to get from "everything" down to something you can click (#27). -->
-                    <Border Background="{StaticResource InputBackgroundBrush}"
+                    <Border Background="{DynamicResource InputBackgroundBrush}"
                             CornerRadius="6" Padding="12,10" Margin="0,0,0,12">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -220,13 +220,13 @@
 
                     <TextBlock Text="No restore point matches these filters. Widen the range or switch a type back on."
                                Style="{StaticResource SecondaryText}"
-                               Foreground="{StaticResource WarningBrush}"
+                               Foreground="{DynamicResource WarningBrush}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,12"
                                Visibility="{Binding HasVisiblePoints, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
 
                     <!-- ========== VISUAL TIMELINE ========== -->
-                    <Border Background="{StaticResource InputBackgroundBrush}"
+                    <Border Background="{DynamicResource InputBackgroundBrush}"
                             CornerRadius="6" Padding="16,12" Margin="0,0,0,12">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -238,11 +238,11 @@
 
                             <!-- Legend -->
                             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                                <Ellipse Width="10" Height="10" Fill="{StaticResource AccentBrush}" Margin="0,0,4,0" />
+                                <Ellipse Width="10" Height="10" Fill="{DynamicResource AccentBrush}" Margin="0,0,4,0" />
                                 <TextBlock Text="Full" Style="{StaticResource SecondaryText}" Margin="0,0,16,0" VerticalAlignment="Center" />
-                                <Ellipse Width="10" Height="10" Fill="{StaticResource WarningBrush}" Margin="0,0,4,0" />
+                                <Ellipse Width="10" Height="10" Fill="{DynamicResource WarningBrush}" Margin="0,0,4,0" />
                                 <TextBlock Text="Diff" Style="{StaticResource SecondaryText}" Margin="0,0,16,0" VerticalAlignment="Center" />
-                                <Ellipse Width="10" Height="10" Fill="{StaticResource SuccessBrush}" Margin="0,0,4,0" />
+                                <Ellipse Width="10" Height="10" Fill="{DynamicResource SuccessBrush}" Margin="0,0,4,0" />
                                 <TextBlock Text="Log" Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
                             </StackPanel>
 
@@ -258,7 +258,7 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <Border HorizontalAlignment="Left" VerticalAlignment="Stretch"
-                                                    Width="1" Background="{StaticResource CardBorderBrush}" Opacity="0.25">
+                                                    Width="1" Background="{DynamicResource CardBorderBrush}" Opacity="0.25">
                                                 <Border.Margin>
                                                     <MultiBinding Converter="{StaticResource TickPos}">
                                                         <Binding Path="Position" />
@@ -314,9 +314,9 @@
                                                             <Run Text="{Binding TimestampDisplay, Mode=OneWay}" />
                                                         </TextBlock>
                                                         <TextBlock Text="{Binding ChainDescription}"
-                                                                   Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
                                                         <TextBlock Text="{Binding TimestampNote}"
-                                                                   Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"
+                                                                   Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"
                                                                    Margin="0,4,0,0"
                                                                    Visibility="{Binding IsTimestampApproximate, Converter={StaticResource BoolToVis}}" />
                                                     </StackPanel>
@@ -330,7 +330,7 @@
                             <!-- Track line + tick marks (time scale axis) -->
                             <Grid Grid.Row="2" Height="32" Margin="7,0">
                                 <!-- Track line -->
-                                <Border Height="3" Background="{StaticResource CardBorderBrush}"
+                                <Border Height="3" Background="{DynamicResource CardBorderBrush}"
                                         VerticalAlignment="Top" CornerRadius="1.5" />
 
                                 <!-- Tick marks with labels -->
@@ -350,9 +350,9 @@
                                                     </MultiBinding>
                                                 </StackPanel.Margin>
                                                 <Border Width="1" Height="12"
-                                                        Background="{StaticResource SecondaryTextBrush}" Opacity="0.6" />
+                                                        Background="{DynamicResource SecondaryTextBrush}" Opacity="0.6" />
                                                 <TextBlock Text="{Binding Label}" FontSize="10"
-                                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
                                                            Margin="-16,2,0,0" />
                                             </StackPanel>
                                         </DataTemplate>
@@ -402,7 +402,7 @@
                                         <Setter Property="ToolTip" Value="{Binding TimestampNote}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsTimestampApproximate}" Value="True">
-                                                <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -462,7 +462,7 @@
                                         <Setter Property="ToolTip" Value="{Binding TimestampNote}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsTimestampApproximate}" Value="True">
-                                                <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -488,11 +488,11 @@
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
-                            <Run Text="Selected: " Foreground="{StaticResource SecondaryTextBrush}" />
+                            <Run Text="Selected: " Foreground="{DynamicResource SecondaryTextBrush}" />
                             <Run Text="{Binding SelectedRestorePoint.TimestampDisplay, Mode=OneWay}"
-                                 FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
-                            <Run Text="  |  " Foreground="{StaticResource SecondaryTextBrush}" />
-                            <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{StaticResource SecondaryTextBrush}" />
+                                 FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                            <Run Text="  |  " Foreground="{DynamicResource SecondaryTextBrush}" />
+                            <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         </TextBlock>
 
                         <!-- On-demand LSN verification: one RESTORE HEADERONLY per chain member,
@@ -585,13 +585,13 @@
                             Visibility="{Binding HasVerifyResults, Converter={StaticResource BoolToVis}}">
                         <Border.Style>
                             <Style TargetType="Border">
-                                <Setter Property="Background" Value="#1A2A1E" />
-                                <Setter Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                <Setter Property="Background" Value="{DynamicResource SuccessPanelBackgroundBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
                                 <Setter Property="BorderThickness" Value="1" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding HasVerifyFailures}" Value="True">
-                                        <Setter Property="Background" Value="#3A1E1E" />
-                                        <Setter Property="BorderBrush" Value="#A33F3F" />
+                                        <Setter Property="Background" Value="{DynamicResource DangerPanelBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource DangerPanelBorderBrush}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -610,10 +610,10 @@
                                                 <Run Text="{Binding StatusDisplay, Mode=OneWay}">
                                                     <Run.Style>
                                                         <Style TargetType="Run">
-                                                            <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+                                                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsValid}" Value="False">
-                                                                    <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -638,13 +638,13 @@
                             Visibility="{Binding HasChainIssues, Converter={StaticResource BoolToVis}}">
                         <Border.Style>
                             <Style TargetType="Border">
-                                <Setter Property="Background" Value="#332B1A" />
-                                <Setter Property="BorderBrush" Value="#8A6D2F" />
+                                <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource WarningPanelBorderBrush}" />
                                 <Setter Property="BorderThickness" Value="1" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding HasChainErrors}" Value="True">
-                                        <Setter Property="Background" Value="#3A1E1E" />
-                                        <Setter Property="BorderBrush" Value="#A33F3F" />
+                                        <Setter Property="Background" Value="{DynamicResource DangerPanelBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource DangerPanelBorderBrush}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -652,7 +652,7 @@
                         <StackPanel>
                             <TextBlock Text="{Binding ChainIssueSummary}"
                                        FontWeight="SemiBold"
-                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       Foreground="{DynamicResource PrimaryTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,8" />
                             <ItemsControl ItemsSource="{Binding ChainIssues}">
@@ -680,7 +680,7 @@
                          point. Shown whether or not a point is selected, because they explain why
                          the timeline has fewer entries than the browse list has files (#46). -->
                     <!-- Restore Chain Detail (togglable) -->
-                    <Border Background="{StaticResource InputBackgroundBrush}"
+                    <Border Background="{DynamicResource InputBackgroundBrush}"
                             CornerRadius="4" Padding="12" Margin="0,12,0,0"
                             Visibility="{Binding ShowChainDetails, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
@@ -796,7 +796,7 @@
 
                             <TextBlock Style="{StaticResource SecondaryText}"
                                        FontSize="10" TextWrapping="Wrap"
-                                       Foreground="{StaticResource WarningBrush}"
+                                       Foreground="{DynamicResource WarningBrush}"
                                        Margin="0,0,0,12"
                                        Visibility="{Binding ContinueAfterError, Converter={StaticResource BoolToVis}}"
                                        Text="A restore that finishes despite errors can leave a corrupt database. Run DBCC CHECKDB on the result before trusting it." />
@@ -814,10 +814,10 @@
                                 <Border CornerRadius="4" Padding="10,6" Margin="0,0,0,10">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="#30F39C12" />
+                                            <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding PathsFromServer}" Value="True">
-                                                    <Setter Property="Background" Value="#1A27AE60" />
+                                                    <Setter Property="Background" Value="{DynamicResource SuccessPanelBackgroundBrush}" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -831,10 +831,10 @@
                                         <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,8,0">
                                             <Ellipse.Style>
                                                 <Style TargetType="Ellipse">
-                                                    <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                                                    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding PathsFromServer}" Value="True">
-                                                            <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                                                            <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -900,7 +900,7 @@
                                 </StackPanel>
 
                                 <Border Visibility="{Binding HasFetchedFileMoves, Converter={StaticResource BoolToVis}}"
-                                        Background="{StaticResource InputBackgroundBrush}"
+                                        Background="{DynamicResource InputBackgroundBrush}"
                                         CornerRadius="4" Padding="8" Margin="0,0,0,8">
                                     <StackPanel>
                                         <TextBlock Text="Logical files (from RESTORE FILELISTONLY)" Style="{StaticResource LabelText}" Margin="0,0,0,6" />
@@ -920,7 +920,7 @@
                                 </Border>
 
                                 <Border Visibility="{Binding BackupMetadataSummary, Converter={StaticResource NullToVis}}"
-                                        Background="{StaticResource InputBackgroundBrush}"
+                                        Background="{DynamicResource InputBackgroundBrush}"
                                         CornerRadius="4" Padding="10" Margin="0,0,0,8">
                                     <StackPanel>
                                         <TextBlock Text="Backup metadata (RESTORE HEADERONLY)" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
@@ -995,7 +995,7 @@
                                      ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
 
                             <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
-                            <Border Background="{StaticResource InputBackgroundBrush}"
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
                                     CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
                                     Visibility="{Binding CredentialSectionVisible, Converter={StaticResource BoolToVis}}">
                                 <StackPanel>
@@ -1012,19 +1012,19 @@
                                         <Border Padding="0,0,0,8">
                                             <Border.Style>
                                                 <Style TargetType="Border">
-                                                    <Setter Property="Background" Value="{StaticResource InputBackgroundBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
                                                     <Setter Property="BorderThickness" Value="0" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding CredentialIsValidSas}" Value="True">
-                                                            <Setter Property="Background" Value="#1A27AE60" />
-                                                            <Setter Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                                            <Setter Property="Background" Value="{DynamicResource SuccessPanelBackgroundBrush}" />
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
                                                             <Setter Property="BorderThickness" Value="1" />
                                                             <Setter Property="CornerRadius" Value="4" />
                                                             <Setter Property="Padding" Value="8,6,8,6" />
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding CredentialExistsOnServer}" Value="False">
-                                                            <Setter Property="Background" Value="#30E74C3C" />
-                                                            <Setter Property="BorderBrush" Value="{StaticResource ErrorBrush}" />
+                                                            <Setter Property="Background" Value="{DynamicResource DangerPanelBackgroundBrush}" />
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource ErrorBrush}" />
                                                             <Setter Property="BorderThickness" Value="1" />
                                                             <Setter Property="CornerRadius" Value="4" />
                                                             <Setter Property="Padding" Value="8,6,8,6" />
@@ -1034,8 +1034,8 @@
                                                                 <Condition Binding="{Binding CredentialExistsOnServer}" Value="True" />
                                                                 <Condition Binding="{Binding CredentialIsValidSas}" Value="False" />
                                                             </MultiDataTrigger.Conditions>
-                                                            <Setter Property="Background" Value="#30E67E22" />
-                                                            <Setter Property="BorderBrush" Value="{StaticResource WarningBrush}" />
+                                                            <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
                                                             <Setter Property="BorderThickness" Value="1" />
                                                             <Setter Property="CornerRadius" Value="4" />
                                                             <Setter Property="Padding" Value="8,6,8,6" />
@@ -1089,7 +1089,7 @@
                     <TextBlock Text="RESTORE SUMMARY"
                                Style="{StaticResource SubHeaderText}"
                                Margin="0,0,0,8" />
-                    <Border Background="{StaticResource InputBackgroundBrush}"
+                    <Border Background="{DynamicResource InputBackgroundBrush}"
                             CornerRadius="4" Padding="12,10">
                         <TextBlock Text="{Binding RestoreSummaryText}"
                                    Style="{StaticResource BodyText}"
@@ -1144,7 +1144,7 @@
                          the last thing between the user and an irreversible overwrite, and a
                          hostname alone is a weak signal - blackcatsvr01 and blackcatsvr02 differ
                          by one character. A red PROD pill is read before the sentence is. -->
-                    <Border Background="#30E74C3C" CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
+                    <Border Background="{DynamicResource DangerPanelBackgroundBrush}" CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
                             Visibility="{Binding IsExecuteArmed, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <ItemsControl ItemsSource="{Binding ConnectedServerTags}"
@@ -1152,37 +1152,37 @@
                                           Margin="0,0,0,6"
                                           Visibility="{Binding HasConnectedServerTags, Converter={StaticResource BoolToVis}}" />
                             <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
-                                <Run Text="&#x26A0;" Foreground="{StaticResource ErrorBrush}" FontSize="14" />
+                                <Run Text="&#x26A0;" Foreground="{DynamicResource ErrorBrush}" FontSize="14" />
                                 <Run Text=" Click again to execute restore against" />
-                                <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource ErrorBrush}" />
+                                <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}" />
                                 <Run Text=". Target:" />
                                 <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
                                 <Run Text="(" />
                                 <Run Text="{Binding ChainSummary, Mode=OneWay}" />
-                                <Run Text="). This operation cannot be undone." Foreground="{StaticResource ErrorBrush}" />
+                                <Run Text="). This operation cannot be undone." Foreground="{DynamicResource ErrorBrush}" />
                             </TextBlock>
                         </StackPanel>
                     </Border>
 
                     <!-- Not connected warning -->
-                    <Border Background="{StaticResource DangerBackgroundBrush}"
+                    <Border Background="{DynamicResource DangerBackgroundBrush}"
                             CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
                             Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                         <TextBlock Style="{StaticResource SecondaryText}">
-                            <Run Text="&#x26A0;" Foreground="{StaticResource WarningBrush}" />
+                            <Run Text="&#x26A0;" Foreground="{DynamicResource WarningBrush}" />
                             <Run Text=" Connect to a SQL Server instance (SQL Servers tab) to enable script execution." />
                         </TextBlock>
                     </Border>
 
                     <TextBlock Text="{Binding ErrorMessage}"
-                               Foreground="{StaticResource ErrorBrush}"
+                               Foreground="{DynamicResource ErrorBrush}"
                                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
                                Margin="0,0,0,12" TextWrapping="Wrap" />
 
                     <!-- The generated script. Stays visible during and after execution: it used to
                          be hidden the moment Execute was pressed, so the script and the console
                          shared one slot and you could not see what was running while it ran. -->
-                    <Border Background="{StaticResource InputBackgroundBrush}"
+                    <Border Background="{DynamicResource InputBackgroundBrush}"
                             CornerRadius="4" Padding="0"
                             Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
@@ -1201,7 +1201,7 @@
                                                     FontFamily="{StaticResource ConsoleFont}"
                                                     FontSize="12"
                                                     TextWrapping="NoWrap"
-                                                    Foreground="{StaticResource ConsoleTextBrush}" />
+                                                    Foreground="{DynamicResource ConsoleTextBrush}" />
                             </ScrollViewer>
                         </StackPanel>
                     </Border>
@@ -1212,8 +1212,8 @@
                          growing string: appending to a bound string re-rendered the whole control
                          on every message, which is why progress arrived in bursts. -->
                     <Border CornerRadius="6" Margin="0,12,0,0"
-                            Background="{StaticResource ConsoleBackgroundBrush}"
-                            BorderBrush="{StaticResource ConsoleBorderBrush}"
+                            Background="{DynamicResource ConsoleBackgroundBrush}"
+                            BorderBrush="{DynamicResource ConsoleBorderBrush}"
                             BorderThickness="1">
                         <!-- Shown only when the console is NOT in its own window - the two are
                              mutually exclusive, so the output is never rendered twice. -->
@@ -1245,9 +1245,9 @@
 
                             <!-- Chrome strip: title, live indicator, copy. -->
                             <Border Grid.Row="0"
-                                    Background="{StaticResource ConsoleChromeBrush}"
+                                    Background="{DynamicResource ConsoleChromeBrush}"
                                     CornerRadius="5,5,0,0"
-                                    BorderBrush="{StaticResource ConsoleBorderBrush}"
+                                    BorderBrush="{DynamicResource ConsoleBorderBrush}"
                                     BorderThickness="0,0,0,1"
                                     Padding="12,7">
                                 <Grid>
@@ -1255,17 +1255,17 @@
                                         <Ellipse Width="9" Height="9" Margin="0,0,7,0">
                                             <Ellipse.Style>
                                                 <Style TargetType="Ellipse">
-                                                    <Setter Property="Fill" Value="{StaticResource ConsoleMutedBrush}" />
+                                                    <Setter Property="Fill" Value="{DynamicResource ConsoleMutedBrush}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsExecuting}" Value="True">
-                                                            <Setter Property="Fill" Value="{StaticResource ConsoleSuccessBrush}" />
+                                                            <Setter Property="Fill" Value="{DynamicResource ConsoleSuccessBrush}" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
                                             </Ellipse.Style>
                                         </Ellipse>
                                         <TextBlock Text="restore console"
-                                                   Foreground="{StaticResource ConsoleMutedBrush}"
+                                                   Foreground="{DynamicResource ConsoleMutedBrush}"
                                                    FontFamily="{StaticResource ConsoleFont}"
                                                    FontSize="11"
                                                    VerticalAlignment="Center" />
@@ -1273,7 +1273,7 @@
 
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                         <TextBlock Text="{Binding ConsoleLines.Count, StringFormat='{}{0} lines'}"
-                                                   Foreground="{StaticResource ConsoleMutedBrush}"
+                                                   Foreground="{DynamicResource ConsoleMutedBrush}"
                                                    FontFamily="{StaticResource ConsoleFont}"
                                                    FontSize="11"
                                                    VerticalAlignment="Center"
@@ -1308,7 +1308,7 @@
                          worst moment to be left working that out from a raw SQL error. Each action
                          shows the exact statement before it runs. -->
                     <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
-                            Background="#3A1E1E" BorderBrush="#A33F3F" BorderThickness="1">
+                            Background="{DynamicResource DangerPanelBackgroundBrush}" BorderBrush="{DynamicResource DangerPanelBorderBrush}" BorderThickness="1">
                         <!-- Same rule as the console: not while it is showing in its own window,
                              where the recovery actions already appear. -->
                         <Border.Style>
@@ -1334,12 +1334,12 @@
                             <ItemsControl ItemsSource="{Binding RecoveryActions}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Background="{StaticResource InputBackgroundBrush}"
+                                        <Border Background="{DynamicResource InputBackgroundBrush}"
                                                 CornerRadius="4" Padding="10" Margin="0,0,0,8">
                                             <StackPanel>
                                                 <TextBlock Text="{Binding Title}"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
                                                            TextWrapping="Wrap" />
                                                 <TextBox Text="{Binding Sql, Mode=OneWay}"
                                                          Style="{StaticResource DarkTextBox}"
@@ -1374,7 +1374,7 @@
             </Border>
 
             <!-- Loading -->
-            <Border Background="#80000000" CornerRadius="6"
+            <Border Background="{DynamicResource OverlayBrush}" CornerRadius="6"
                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Padding="20">
                 <StackPanel HorizontalAlignment="Center">
                     <TextBlock Text="Loading..." Style="{StaticResource BodyText}" HorizontalAlignment="Center" />

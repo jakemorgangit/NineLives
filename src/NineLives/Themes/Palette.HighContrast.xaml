@@ -1,0 +1,155 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        High contrast.
+
+        Not "the dark theme with the brightness turned up". The point of a high-contrast theme is
+        that nothing carries meaning by subtlety: every surface is pure black, every piece of text
+        is pure white or a fully saturated colour, and every border is visible rather than implied.
+
+        Text against background is 21:1 (white on black) and no status colour drops below roughly
+        7:1, which clears WCAG AAA for body text. The muted greys the other themes use for
+        secondary text are gone - secondary text here is #E8E8E8, distinguished by size and weight
+        rather than by fading it out, because fading is exactly what this theme exists to avoid.
+
+        Borders are 1px in the other palettes and the same here, but drawn in a colour that is
+        actually visible against the fill rather than a shade away from it. Card and input borders
+        are white for that reason: a panel edge you cannot see is a panel that is not there.
+
+        Must define exactly the keys in Palette.Dark.xaml - see the note there.
+    -->
+
+    <!-- ── surfaces ──────────────────────────────────────────────────────────── -->
+    <Color x:Key="WindowBackgroundColor">#000000</Color>
+    <Color x:Key="SidebarBackgroundColor">#000000</Color>
+    <Color x:Key="CardBackgroundColor">#000000</Color>
+    <Color x:Key="CardBorderColor">#FFFFFF</Color>
+    <Color x:Key="InputBackgroundColor">#000000</Color>
+    <Color x:Key="InputBorderColor">#FFFFFF</Color>
+    <Color x:Key="InputFocusBorderColor">#FFFF00</Color>
+    <Color x:Key="StatusBarBackgroundColor">#000000</Color>
+    <Color x:Key="SidebarItemHoverColor">#1F1F1F</Color>
+    <!-- Grey, not the accent yellow: white text on yellow is unreadable, and
+         selection is carried by the accent-coloured border instead. -->
+    <Color x:Key="SidebarItemActiveColor">#333333</Color>
+    <Color x:Key="ScrollBarColor">#FFFFFF</Color>
+
+    <!-- ── accent ────────────────────────────────────────────────────────────── -->
+    <!-- Yellow rather than blue. Blue on black is the worst-performing pair for anyone with
+         reduced contrast sensitivity, and yellow-on-black is the pairing high-contrast schemes on
+         Windows have used for decades - it is what people who need this theme expect to see. -->
+    <Color x:Key="AccentColor">#FFFF00</Color>
+    <Color x:Key="AccentHoverColor">#FFFF66</Color>
+    <Color x:Key="AccentPressedColor">#CCCC00</Color>
+
+    <!-- Black text on the yellow fill. White on yellow is unreadable. -->
+    <Color x:Key="AccentForegroundColor">#000000</Color>
+
+    <!-- ── status ────────────────────────────────────────────────────────────── -->
+    <Color x:Key="SuccessColor">#00FF00</Color>
+    <Color x:Key="ErrorColor">#FF5555</Color>
+    <Color x:Key="WarningColor">#FFAA00</Color>
+
+    <!-- ── text ──────────────────────────────────────────────────────────────── -->
+    <Color x:Key="PrimaryTextColor">#FFFFFF</Color>
+    <Color x:Key="SecondaryTextColor">#E8E8E8</Color>
+    <Color x:Key="DisabledTextColor">#A0A0A0</Color>
+
+    <!-- ── panels ────────────────────────────────────────────────────────────── -->
+    <!-- Black fills with a saturated border. A tinted background would reduce the contrast of the
+         text sitting on it, which is the one thing this theme must not do. -->
+    <Color x:Key="SuccessPanelBackgroundColor">#000000</Color>
+    <Color x:Key="SuccessPanelBorderColor">#00FF00</Color>
+    <Color x:Key="WarningPanelBackgroundColor">#000000</Color>
+    <Color x:Key="WarningPanelBorderColor">#FFAA00</Color>
+    <Color x:Key="DangerPanelBackgroundColor">#000000</Color>
+    <Color x:Key="DangerPanelBorderColor">#FF5555</Color>
+    <Color x:Key="DangerBackgroundColor">#000000</Color>
+
+    <!-- ── overlays ──────────────────────────────────────────────────────────── -->
+    <Color x:Key="OverlayColor">#D0000000</Color>
+    <Color x:Key="ShadowColor">#000000</Color>
+
+    <!-- ── brushes ───────────────────────────────────────────────────────────── -->
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="{StaticResource SidebarBackgroundColor}" />
+    <SolidColorBrush x:Key="CardBackgroundBrush" Color="{StaticResource CardBackgroundColor}" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource CardBorderColor}" />
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="{StaticResource InputBackgroundColor}" />
+    <SolidColorBrush x:Key="InputBorderBrush" Color="{StaticResource InputBorderColor}" />
+    <SolidColorBrush x:Key="InputFocusBorderBrush" Color="{StaticResource InputFocusBorderColor}" />
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}" />
+    <SolidColorBrush x:Key="AccentForegroundBrush" Color="{StaticResource AccentForegroundColor}" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
+    <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}" />
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="{StaticResource PrimaryTextColor}" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}" />
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="{StaticResource DisabledTextColor}" />
+    <SolidColorBrush x:Key="SidebarItemHoverBrush" Color="{StaticResource SidebarItemHoverColor}" />
+    <SolidColorBrush x:Key="SidebarItemActiveBrush" Color="{StaticResource SidebarItemActiveColor}" />
+    <SolidColorBrush x:Key="ScrollBarBrush" Color="{StaticResource ScrollBarColor}" />
+    <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="{StaticResource StatusBarBackgroundColor}" />
+    <SolidColorBrush x:Key="DangerBackgroundBrush" Color="{StaticResource DangerBackgroundColor}" />
+
+    <SolidColorBrush x:Key="SuccessPanelBackgroundBrush" Color="{StaticResource SuccessPanelBackgroundColor}" />
+    <SolidColorBrush x:Key="SuccessPanelBorderBrush" Color="{StaticResource SuccessPanelBorderColor}" />
+    <SolidColorBrush x:Key="WarningPanelBackgroundBrush" Color="{StaticResource WarningPanelBackgroundColor}" />
+    <SolidColorBrush x:Key="WarningPanelBorderBrush" Color="{StaticResource WarningPanelBorderColor}" />
+    <SolidColorBrush x:Key="DangerPanelBackgroundBrush" Color="{StaticResource DangerPanelBackgroundColor}" />
+    <SolidColorBrush x:Key="DangerPanelBorderBrush" Color="{StaticResource DangerPanelBorderColor}" />
+
+    <SolidColorBrush x:Key="OverlayBrush" Color="{StaticResource OverlayColor}" />
+
+    <!-- ── console ───────────────────────────────────────────────────────────── -->
+    <SolidColorBrush x:Key="ConsoleBackgroundBrush" Color="#000000" />
+    <SolidColorBrush x:Key="ConsoleBorderBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ConsoleChromeBrush" Color="#000000" />
+    <SolidColorBrush x:Key="ConsoleTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ConsoleMutedBrush" Color="#C0C0C0" />
+    <SolidColorBrush x:Key="ConsoleStepBrush" Color="#00FFFF" />
+    <SolidColorBrush x:Key="ConsoleSuccessBrush" Color="#00FF00" />
+    <SolidColorBrush x:Key="ConsoleWarningBrush" Color="#FFAA00" />
+    <SolidColorBrush x:Key="ConsoleErrorBrush" Color="#FF5555" />
+
+    <!-- ── SQL syntax highlighting ───────────────────────────────────────────── -->
+    <!-- Fully saturated and far apart in hue, so the categories are told apart by more than a
+         shade. Nothing here relies on a subtle difference in tone. -->
+    <SolidColorBrush x:Key="SqlKeywordBrush" Color="#00FFFF" />
+    <SolidColorBrush x:Key="SqlLiteralBrush" Color="#00FF00" />
+    <SolidColorBrush x:Key="SqlCommentBrush" Color="#A0A0A0" />
+    <SolidColorBrush x:Key="SqlNumberBrush" Color="#FFAA00" />
+    <SolidColorBrush x:Key="SqlIdentifierBrush" Color="#FF80FF" />
+
+    <!-- ── update banner ─────────────────────────────────────────────────────── -->
+    <!-- Flat yellow rather than a gradient: a gradient is a subtlety, and the point here is that
+         nothing is subtle. -->
+    <LinearGradientBrush x:Key="UpdateBannerBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Offset="0" Color="#FFFF00" />
+        <GradientStop Offset="1" Color="#FFFF00" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="UpdateBannerTextBrush" Color="#000000" />
+    <SolidColorBrush x:Key="UpdateBannerEdgeBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="UpdateBannerBadgeBrush" Color="#000000" />
+    <SolidColorBrush x:Key="UpdateBannerBadgeGlyphBrush" Color="#FFFF00" />
+
+
+    <!-- Hover and pressed states for the status buttons, and the DataGrid's banded row. All were
+         literals in the control styles, which meant a light theme drew a dark stripe through every
+         grid and a success button that jumped several shades on hover. -->
+    <Color x:Key="SuccessHoverColor">#66FF66</Color>
+    <Color x:Key="SuccessPressedColor">#00CC00</Color>
+    <Color x:Key="ErrorHoverColor">#FF8888</Color>
+    <Color x:Key="ErrorPressedColor">#CC0000</Color>
+    <Color x:Key="AlternatingRowBackgroundColor">#1A1A1A</Color>
+
+    <SolidColorBrush x:Key="SuccessHoverBrush" Color="{StaticResource SuccessHoverColor}" />
+    <SolidColorBrush x:Key="SuccessPressedBrush" Color="{StaticResource SuccessPressedColor}" />
+    <SolidColorBrush x:Key="ErrorHoverBrush" Color="{StaticResource ErrorHoverColor}" />
+    <SolidColorBrush x:Key="ErrorPressedBrush" Color="{StaticResource ErrorPressedColor}" />
+    <SolidColorBrush x:Key="AlternatingRowBackgroundBrush" Color="{StaticResource AlternatingRowBackgroundColor}" />
+
+</ResourceDictionary>
