@@ -74,10 +74,22 @@ public sealed class WpfFixture : IDisposable
         if (captured != null) ExceptionDispatchInfo.Capture(captured).Throw();
     }
 
+    /// <summary>
+    /// Deliberately does NOT shut the dispatcher down.
+    ///
+    /// It used to call InvokeShutdown and join with a five-second timeout. When the join timed out
+    /// - which it started doing once there was enough WPF work queued - the thread was left
+    /// running managed code while the runtime tore down around it, and the test host died with
+    /// "Attempt to execute managed code after the .NET runtime thread state has been destroyed".
+    /// That aborted the whole run mid-way, after every test in it had passed.
+    ///
+    /// The thread is IsBackground, so it cannot keep the process alive; letting the process end it
+    /// removes the race entirely. There is exactly one of these per run and it owns the only
+    /// Application, so nothing is leaked that outlives the process.
+    /// </summary>
     public void Dispose()
     {
-        _dispatcher?.InvokeShutdown();
-        _thread.Join(TimeSpan.FromSeconds(5));
+        GC.SuppressFinalize(this);
     }
 }
 
