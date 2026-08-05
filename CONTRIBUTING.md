@@ -31,7 +31,7 @@ dotnet build
 dotnet test
 ```
 
-Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and Windows (it is a
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and Windows (it is a
 WPF app).
 
 ### Live SQL Server tests

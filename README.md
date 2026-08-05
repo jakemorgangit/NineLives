@@ -4,7 +4,7 @@
 
 **Every database deserves nine lives.**
 
-Nine Lives is a modern desktop application for restoring SQL Server databases from Azure Blob Storage backups — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 8, featuring a dark-mode UI.
+Nine Lives is a modern desktop application for restoring SQL Server databases from Azure Blob Storage backups — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 10, featuring a dark-mode UI.
 
 *A free tool from [Blackcat Data Solutions](https://blackcat.wales).*
 
@@ -146,7 +146,7 @@ Getting the exe signed properly is tracked in
 ### Build from Source
 
 #### Prerequisites
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
 - Windows 10/11 (WPF application)
 
 #### Clone and Build
@@ -331,7 +331,7 @@ When you select a transaction log restore point, the chain includes:
 ## Architecture
 
 Built with:
-- **.NET 8** (LTS) - Windows Presentation Foundation (WPF)
+- **.NET 10** (LTS) - Windows Presentation Foundation (WPF)
 - **CommunityToolkit.Mvvm** - MVVM pattern implementation
 - **Azure.Storage.Blobs** - Azure Blob Storage SDK
 - **Microsoft.Data.SqlClient** - SQL Server connectivity
