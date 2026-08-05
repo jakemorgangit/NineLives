@@ -872,10 +872,7 @@ public partial class RestoreViewModel : ViewModelBase
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 try
                 {
-                    // credentialName is null on purpose: WITH CREDENTIAL is invalid for a SAS
-                    // credential, which is the only kind this app creates.
-                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(
-                        ConnectedServer, urls, credentialName: null);
+                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
                     headers.Add(new ChainHeader(set, header));
                 }
                 catch (Exception)
@@ -1170,7 +1167,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
             var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls, credentialName: null, urlsContainSas: false);
+            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls);
 
             var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? @"C:\SQL\Data";
             var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
@@ -1218,7 +1215,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
             var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, credentialName: null, urlsContainSas: false);
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
 
             if (header == null)
             {
