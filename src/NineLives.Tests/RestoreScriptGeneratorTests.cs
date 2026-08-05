@@ -149,15 +149,56 @@ public class RestoreScriptGeneratorTests
     }
 
     [Fact]
-    public void Generate_StopAtWithLogs_EmittedOnceOnLastLog()
+    public void Generate_StopAtWithLogs_EmittedOnEveryLogRestore()
     {
+        // Microsoft's guidance is to repeat STOPAT on each RESTORE LOG so SQL Server stops in
+        // whichever log actually contains the target. Emitting it only on the last statement
+        // overshoots when the target falls in an earlier log.
+        var stopAt = T0.AddHours(5).AddMinutes(30);
+        var chain = FullDiffLogChain(); // 2 log sets
+        var script = _generator.Generate(chain, Options(o => o.StopAt = stopAt));
+
+        Assert.Equal(chain.LogSets.Count, CountOccurrences(script, "STOPAT"));
+        Assert.Equal(2, CountOccurrences(script, $"STOPAT = '{stopAt:yyyy-MM-ddTHH:mm:ss}',"));
+    }
+
+    [Fact]
+    public void Generate_StopAt_NotEmittedOnFullOrDiffRestore()
+    {
+        // STOPAT belongs to the log chain; putting it on the data restores is not the pattern.
         var stopAt = T0.AddHours(5).AddMinutes(30);
         var script = _generator.Generate(FullDiffLogChain(), Options(o => o.StopAt = stopAt));
 
+        var firstLogIdx = script.IndexOf("RESTORE LOG");
+        var beforeLogs = script[..firstLogIdx];
+        Assert.DoesNotContain("STOPAT", beforeLogs);
+    }
+
+    [Fact]
+    public void Generate_StopAtSingleLogChain_EmittedOnce()
+    {
+        var stopAt = T0.AddHours(5).AddMinutes(1);
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T0),
+            LogSets = [Set(BackupType.TransactionLog, T0.AddHours(5))]
+        };
+
+        var script = _generator.Generate(chain, Options(o => o.StopAt = stopAt));
+
         Assert.Equal(1, CountOccurrences(script, "STOPAT"));
         Assert.Contains($"STOPAT = '{stopAt:yyyy-MM-ddTHH:mm:ss}',", script);
-        // STOPAT belongs to the last log block: it appears after the final RESTORE LOG
-        Assert.True(script.LastIndexOf("RESTORE LOG") < script.IndexOf("STOPAT"));
+    }
+
+    [Fact]
+    public void Generate_StopAt_UsesIsoFormatSqlServerParsesUnambiguously()
+    {
+        // A locale-dependent format here would be read differently by a server in another
+        // region; the ISO form removes the ambiguity between dd/MM and MM/dd.
+        var stopAt = new DateTime(2026, 3, 4, 14, 23, 41);
+        var script = _generator.Generate(FullDiffLogChain(), Options(o => o.StopAt = stopAt));
+
+        Assert.Contains("STOPAT = '2026-03-04T14:23:41',", script);
     }
 
     [Fact]

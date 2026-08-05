@@ -116,7 +116,15 @@ public class RestoreScriptGenerator
         sb.AppendLine($"RESTORE LOG {dbName}");
         AppendFromUrls(sb, logSet, options);
 
-        if (isLast && usePit && options.StopAt.HasValue)
+        // STOPAT goes on EVERY log restore in the chain, not just the last one. Microsoft's
+        // guidance is to repeat it: SQL Server then stops in whichever log actually contains the
+        // target time, and errors early if the point precedes the chain. Emitting it only on the
+        // last statement overshoots when the target falls in an earlier log, silently replaying
+        // transactions the user was trying to stop before.
+        //
+        // The UI bounds the target to within the SELECTED log's window, so earlier logs in the
+        // chain end before it and are applied in full - no gap is introduced.
+        if (usePit && options.StopAt.HasValue)
             sb.AppendLine($"         STOPAT = '{options.StopAt.Value:yyyy-MM-ddTHH:mm:ss}',");
 
         sb.AppendLine($"         {recoveryClause},");
