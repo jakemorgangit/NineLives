@@ -81,7 +81,7 @@ public class SqlServerService
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
-        cmd.CommandText = $"RESTORE HEADERONLY FROM URL = N'{blobUrl.Replace("'", "''")}' WITH CREDENTIAL = N'{credentialName.Replace("'", "''")}'";
+        cmd.CommandText = $"RESTORE HEADERONLY FROM URL = N'{TSql.EscapeLiteral(blobUrl)}' WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'";
 
         var results = new List<BackupFileInfo>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -126,9 +126,9 @@ public class SqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
-        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{u.Replace("'", "''")}'"));
+        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var withCredential = !urlsContainSas && !string.IsNullOrEmpty(credentialName)
-            ? $" WITH CREDENTIAL = N'{credentialName!.Replace("'", "''")}'"
+            ? $" WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'"
             : "";
         cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}{withCredential}";
 
@@ -158,9 +158,9 @@ public class SqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
-        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{u.Replace("'", "''")}'"));
+        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var withCredential = !urlsContainSas && !string.IsNullOrEmpty(credentialName)
-            ? $" WITH CREDENTIAL = N'{credentialName!.Replace("'", "''")}'"
+            ? $" WITH CREDENTIAL = N'{TSql.EscapeLiteral(credentialName)}'"
             : "";
         cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}{withCredential}";
 
@@ -343,10 +343,24 @@ public class SqlServerService
         return (true, isSas);
     }
 
+    // CREATE/DROP CREDENTIAL cannot take the name as a parameter - it is an identifier, not a
+    // value - so it must be quoted. Both statements previously interpolated it raw between
+    // brackets without doubling an embedded ']', which meant the brackets did not actually
+    // delimit anything: a name ending in '] WITH IDENTITY=... SECRET=...; <statement>; CREATE
+    // CREDENTIAL [decoy' produced a well-formed multi-statement batch that ran on a connection
+    // holding CONTROL SERVER. The name is auto-populated from the container URL in config.json
+    // (plain text, no integrity check) and is editable free text in the UI, so it is attacker-
+    // reachable via a single local file write.
+    //
+    // It also broke benignly: an IPv6-literal endpoint such as https://[fe80::1]:10000/... is a
+    // legal URL containing ']' and failed with an opaque syntax error.
     public async Task EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
         CancellationToken ct = default)
     {
+        TSql.ValidateIdentifier(credentialName, nameof(credentialName));
+        var quotedName = TSql.QuoteName(credentialName);
+
         await using var conn = new SqlConnection(BuildConnectionString(server));
         await conn.OpenAsync(ct);
 
@@ -358,16 +372,16 @@ public class SqlServerService
         if (exists)
         {
             await using var dropCmd = conn.CreateCommand();
-            dropCmd.CommandText = $"DROP CREDENTIAL [{credentialName}]";
+            dropCmd.CommandText = $"DROP CREDENTIAL {quotedName}";
             await dropCmd.ExecuteNonQueryAsync(ct);
         }
 
         var cleanSas = sasToken.TrimStart('?');
         await using var createCmd = conn.CreateCommand();
         createCmd.CommandText = $@"
-            CREATE CREDENTIAL [{credentialName}]
+            CREATE CREDENTIAL {quotedName}
             WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
-            SECRET = '{cleanSas.Replace("'", "''")}'";
+            SECRET = '{TSql.EscapeLiteral(cleanSas)}'";
         await createCmd.ExecuteNonQueryAsync(ct);
     }
 

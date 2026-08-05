@@ -959,7 +959,7 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
         var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-        var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{u.Replace("'", "''")}'"));
+        var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE FILELISTONLY FROM {urlClauses}";
         try
         {
@@ -978,7 +978,7 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
         var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-        var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{u.Replace("'", "''")}'"));
+        var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE HEADERONLY FROM {urlClauses}";
         try
         {

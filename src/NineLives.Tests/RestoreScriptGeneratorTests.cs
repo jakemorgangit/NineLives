@@ -216,6 +216,73 @@ public class RestoreScriptGeneratorTests
     }
 
     [Fact]
+    public void Generate_DbNameWithCloseBracket_IsEscaped()
+    {
+        // Previously produced RESTORE DATABASE [My]DB] - a syntax error, because the bracket
+        // was not doubled and so terminated the identifier early.
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.TargetDatabaseName = "My]DB"));
+
+        Assert.Contains("RESTORE DATABASE [My]]DB]", script);
+        Assert.DoesNotContain("RESTORE DATABASE [My]DB]", script);
+    }
+
+    [Fact]
+    public void Generate_DbNameWithCloseBracket_EscapedInDisconnectBlockToo()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.TargetDatabaseName = "My]DB";
+            o.DisconnectSessions = true;
+        }));
+
+        // Identifier positions are bracket-quoted...
+        Assert.Contains("ALTER DATABASE [My]]DB] SET SINGLE_USER", script);
+        Assert.Contains("ALTER DATABASE [My]]DB] SET MULTI_USER", script);
+        // ...and the DB_ID argument is the bare name as a string literal, not a mangled one.
+        Assert.Contains("IF DB_ID('My]DB') IS NOT NULL", script);
+    }
+
+    [Fact]
+    public void Generate_DbNameWithApostrophe_EscapedInDbIdLiteral()
+    {
+        // DB_ID takes the name as data; an apostrophe would otherwise terminate the literal.
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.TargetDatabaseName = "O'Brien";
+            o.DisconnectSessions = true;
+        }));
+
+        Assert.Contains("IF DB_ID('O''Brien') IS NOT NULL", script);
+        Assert.Contains("ALTER DATABASE [O'Brien] SET SINGLE_USER", script);
+    }
+
+    [Fact]
+    public void Generate_StandbyPathWithApostrophe_IsEscaped()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.RecoveryMode = RecoveryMode.Standby;
+            o.StandbyFilePath = @"D:\O'Brien\standby.tuf";
+        }));
+
+        Assert.Contains(@"STANDBY = 'D:\O''Brien\standby.tuf'", script);
+    }
+
+    [Fact]
+    public void Generate_FileMovePathWithApostrophe_IsEscaped()
+    {
+        var script = _generator.Generate(FullOnlyChain(), Options(o =>
+        {
+            o.FileMoves =
+            [
+                new FileMoveOption { LogicalName = "O'Data", NewPhysicalName = @"D:\O'Brien\db.mdf" }
+            ];
+        }));
+
+        Assert.Contains(@"MOVE N'O''Data' TO N'D:\O''Brien\db.mdf',", script);
+    }
+
+    [Fact]
     public void Generate_EmptyDbName_UsesPlaceholder()
     {
         var script = _generator.Generate(FullOnlyChain(), Options(o => o.TargetDatabaseName = ""));
