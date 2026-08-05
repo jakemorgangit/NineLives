@@ -52,6 +52,7 @@
                              Background="Transparent"
                              BorderThickness="0"
                              Foreground="{StaticResource PrimaryTextBrush}"
+                             HorizontalContentAlignment="Stretch"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto"
                              FocusVisualStyle="{x:Null}">
@@ -72,10 +73,9 @@
                                                TextTrimming="CharacterEllipsis"
                                                Margin="16,2,0,0"
                                                MaxWidth="220" />
-                                    <ItemsControl ItemsSource="{Binding Tags}"
-                                                  Style="{StaticResource TagPillList}"
-                                                  Margin="16,2,0,0"
-                                                  MaxWidth="220" />
+                                    <ItemsControl ItemsSource="{Binding TagChips}"
+                                                  Style="{StaticResource TagChipList}"
+                                                  Margin="16,2,0,0" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

@@ -54,6 +54,15 @@ public class ServerConnection
     [JsonIgnore]
     public bool HasAutoTags => !string.IsNullOrWhiteSpace(DetectedVersion);
 
+    /// <summary>
+    /// Manual and automatic tags as one sequence, so the UI can render them from a SINGLE
+    /// wrapping panel. Two adjacent ItemsControls inside a WrapPanel cannot wrap - each is
+    /// measured with infinite width - and their pills get clipped by the row instead.
+    /// </summary>
+    [JsonIgnore]
+    public IEnumerable<TagChip> TagChips =>
+        Tags.Select(TagChip.Manual).Concat(AutoTags.Select(TagChip.Automatic));
+
     /// <summary>True when any tag marks this as a production-like environment.</summary>
     [JsonIgnore]
     public bool IsProductionTagged => Tags.Any(Services.TagPalette.IsProductionLike);

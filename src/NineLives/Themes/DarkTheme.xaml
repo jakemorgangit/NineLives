@@ -658,6 +658,7 @@
     <converters:TagBrushConverter x:Key="TagBrush" />
     <converters:TagPreviewConverter x:Key="TagPreview" />
 
+    <!-- Plain-string pill, for the live preview beside the edit field. -->
     <DataTemplate x:Key="TagPillTemplate">
         <Border CornerRadius="9"
                 Padding="7,1"
@@ -673,6 +674,51 @@
         </Border>
     </DataTemplate>
 
+    <!-- TagChip pill: one template covering manual and automatic, switching on IsAutomatic.
+         Both kinds MUST come from a single ItemsControl - two adjacent ones inside a WrapPanel
+         are each measured with infinite width, so neither wraps and the row clips them. -->
+    <DataTemplate x:Key="TagChipTemplate">
+        <Border x:Name="chip"
+                CornerRadius="9"
+                Padding="7,1"
+                Margin="0,2,4,0"
+                BorderThickness="1"
+                Background="{Binding Text, Converter={StaticResource TagBrush}, ConverterParameter=fill}"
+                BorderBrush="{Binding Text, Converter={StaticResource TagBrush}, ConverterParameter=border}">
+            <TextBlock x:Name="chipText"
+                       Text="{Binding Text}"
+                       FontFamily="Segoe UI"
+                       FontSize="10.5"
+                       FontWeight="SemiBold"
+                       Foreground="{Binding Text, Converter={StaticResource TagBrush}}" />
+        </Border>
+        <DataTemplate.Triggers>
+            <!-- Automatic tags: neutral outline, so a derived fact never competes with a red
+                 PROD pill or reads as something a human asserted. -->
+            <DataTrigger Binding="{Binding IsAutomatic}" Value="True">
+                <Setter TargetName="chip" Property="Background" Value="Transparent" />
+                <Setter TargetName="chip" Property="BorderBrush" Value="{StaticResource InputBorderBrush}" />
+                <Setter TargetName="chipText" Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                <Setter TargetName="chipText" Property="FontWeight" Value="Normal" />
+            </DataTrigger>
+        </DataTemplate.Triggers>
+    </DataTemplate>
+
+    <!-- Drop-in list of chips. HorizontalAlignment=Left keeps the panel from stretching past
+         its content, and the parent must constrain width for the WrapPanel to know where to
+         break - see HorizontalContentAlignment on the lists that use this. -->
+    <Style x:Key="TagChipList" TargetType="ItemsControl">
+        <Setter Property="ItemTemplate" Value="{StaticResource TagChipTemplate}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Drop-in list of pills: set ItemsSource to a collection of tag names. -->
     <Style x:Key="TagPillList" TargetType="ItemsControl">
         <Setter Property="ItemTemplate" Value="{StaticResource TagPillTemplate}" />
@@ -685,32 +731,5 @@
         </Setter>
     </Style>
 
-    <!-- Automatic tags: facts the app detected, not labels the user typed. Deliberately neutral
-         and outline-only so a derived value is never mistaken for a human assertion, and so it
-         cannot compete with a red PROD pill for attention. -->
-    <DataTemplate x:Key="AutoTagPillTemplate">
-        <Border CornerRadius="9"
-                Padding="7,1"
-                Margin="0,2,4,0"
-                BorderThickness="1"
-                Background="Transparent"
-                BorderBrush="{StaticResource InputBorderBrush}">
-            <TextBlock Text="{Binding}"
-                       FontFamily="Segoe UI"
-                       FontSize="10.5"
-                       Foreground="{StaticResource SecondaryTextBrush}" />
-        </Border>
-    </DataTemplate>
-
-    <Style x:Key="AutoTagPillList" TargetType="ItemsControl">
-        <Setter Property="ItemTemplate" Value="{StaticResource AutoTagPillTemplate}" />
-        <Setter Property="ItemsPanel">
-            <Setter.Value>
-                <ItemsPanelTemplate>
-                    <WrapPanel Orientation="Horizontal" />
-                </ItemsPanelTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
 
 </ResourceDictionary>
