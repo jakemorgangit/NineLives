@@ -310,6 +310,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
@@ -320,7 +321,37 @@
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{StaticResource SecondaryTextBrush}" />
                         </TextBlock>
 
+                        <!-- On-demand LSN verification: one RESTORE HEADERONLY per chain member,
+                             so it is a deliberate action rather than automatic on selection. -->
                         <Button Grid.Column="1"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding ValidateChainCommand}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                ToolTip="Read each backup's header and verify the LSN chain is unbroken. Requires a connected server.">
+                            <Button.Content>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Validate Chain" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsValidatingChain}" Value="True">
+                                                    <Setter Property="Text" Value="Validating..." />
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding ChainLsnVerified}" Value="True" />
+                                                        <Condition Binding="{Binding HasChainIssues}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Text" Value="Chain Verified" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+
+                        <Button Grid.Column="2"
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">

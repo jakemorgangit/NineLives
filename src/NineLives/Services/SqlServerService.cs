@@ -103,7 +103,8 @@ public class SqlServerService
                 },
                 FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
                 LastLsn = GetDecimalFromReader(reader, "LastLSN"),
-                DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN")
+                DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
+            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
             });
         }
         return results;
@@ -183,7 +184,8 @@ public class SqlServerService
             },
             FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
             LastLsn = GetDecimalFromReader(reader, "LastLSN"),
-            DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN")
+            DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
+            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
         };
     }
 

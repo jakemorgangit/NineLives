@@ -155,6 +155,13 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _chainIssueSummary = string.Empty;
 
+    /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
+    [ObservableProperty]
+    private bool _chainLsnVerified;
+
+    [ObservableProperty]
+    private bool _isValidatingChain;
+
     [ObservableProperty]
     private bool _disconnectSessions = true;
 
@@ -455,7 +462,11 @@ public partial class RestoreViewModel : ViewModelBase
         ChainSets = new ObservableCollection<BackupSet>(chain.AllSets);
         ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {value.Timestamp:yyyy-MM-dd HH:mm:ss}";
         UpdatePointInTimeWindow(value);
+        // Structural only at selection time; LSN verification is on demand since it costs a
+        // round trip per chain member.
+        ChainLsnVerified = false;
         UpdateChainIssues(chain);
+        ValidateChainCommand.NotifyCanExecuteChanged();
         UpdateRestoreSummary();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
@@ -793,9 +804,65 @@ public partial class RestoreViewModel : ViewModelBase
         ValidatePointInTime();
     }
 
-    private void UpdateChainIssues(BackupChain? chain)
+    /// <summary>
+    /// Reads RESTORE HEADERONLY for every member of the selected chain and validates the LSN
+    /// relationships - the authoritative check that the chain actually restores, as opposed to
+    /// merely looking plausible by filename and timestamp.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanValidateChain))]
+    private async Task ValidateChainAsync()
+    {
+        if (RestoreChain == null || ConnectedServer == null) return;
+
+        IsValidatingChain = true;
+        ClearStatus();
+        try
+        {
+            var headers = new List<ChainHeader>();
+            foreach (var set in RestoreChain.AllSets)
+            {
+                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+                try
+                {
+                    // credentialName is null on purpose: WITH CREDENTIAL is invalid for a SAS
+                    // credential, which is the only kind this app creates.
+                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(
+                        ConnectedServer, urls, credentialName: null);
+                    headers.Add(new ChainHeader(set, header));
+                }
+                catch (Exception)
+                {
+                    // One unreadable member must not abort the whole validation - the validator
+                    // reports it and carries on checking everything else.
+                    headers.Add(new ChainHeader(set, null));
+                }
+            }
+
+            UpdateChainIssues(RestoreChain, headers);
+            ChainLsnVerified = true;
+
+            SetStatus(HasChainIssues
+                ? $"Chain validation found problems - see the panel above."
+                : $"Chain validated: {headers.Count} backup(s) read, LSN chain is intact.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Chain validation failed: {ex.Message}");
+        }
+        finally
+        {
+            IsValidatingChain = false;
+        }
+    }
+
+    private bool CanValidateChain() =>
+        IsConnectedToServer && RestoreChain != null && !IsValidatingChain;
+
+    private void UpdateChainIssues(BackupChain? chain, IReadOnlyList<ChainHeader>? headers = null)
     {
         var issues = _chainValidator.Validate(chain);
+        if (headers != null)
+            issues.AddRange(_chainValidator.ValidateLsnChain(chain, headers));
 
         ChainIssues = new ObservableCollection<ChainIssue>(issues);
         HasChainIssues = issues.Count > 0;
@@ -906,6 +973,7 @@ public partial class RestoreViewModel : ViewModelBase
 
     partial void OnIsConnectedToServerChanged(bool value)
     {
+        ValidateChainCommand.NotifyCanExecuteChanged();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
         CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
