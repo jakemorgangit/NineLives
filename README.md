@@ -309,7 +309,7 @@ Built with:
 ```
 NineLives/
 ├── .github/
-│   └── workflows/               # CI: PR build/test gate + release pipeline
+│   └── workflows/               # CI: PR build/test gate, version-bump gate, release pipeline
 ├── docs/
 │   └── screenshots/             # README screenshots
 ├── src/
@@ -352,10 +352,11 @@ NineLives/
 
 ## Contributing
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+
+In short: **`dev` is the default branch and where work lands; `main` tracks the released code.**
+Fork, branch from `dev`, and open your pull request against `dev`. Releases are a `dev` → `main`
+pull request with a version bump.
 
 ## License
 
