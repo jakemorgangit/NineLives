@@ -163,19 +163,18 @@ public class BlobPrefixTests
     // ── the prefixes match what the real container actually holds ───────────────
 
     [Fact]
-    public void TheDerivedPrefixesMatchTheRealLayout()
+    public void TheDerivedPrefixesMatchAnOlaStyleLayout()
     {
-        // Exactly the shape measured against the live container: DIFF/, FULL/ and LOG/ at the top,
-        // then server, then database. If this ever stops matching, the optimisation is silently
-        // scoping to paths that do not exist and returning nothing.
-        var prefixes = BlobPrefix.Derive(Default, "centaur-sql-001", "Utility", ["DIFF", "FULL", "LOG"]);
+        // The shape verified against a live container: backup-type folders at the top, then
+        // server, then database. If this ever stops matching, the optimisation is silently scoping
+        // to paths that do not exist and returning nothing.
+        //
+        // Hostnames here are deliberately fictitious - see CONTRIBUTING. Real server and database
+        // names do not belong in a public repository.
+        var prefixes = BlobPrefix.Derive(Default, "SRV01", "MyDb", ["DIFF", "FULL", "LOG"]);
 
         Assert.Equal(
-            [
-                "DIFF/centaur-sql-001/Utility/",
-                "FULL/centaur-sql-001/Utility/",
-                "LOG/centaur-sql-001/Utility/"
-            ],
+            ["DIFF/SRV01/MyDb/", "FULL/SRV01/MyDb/", "LOG/SRV01/MyDb/"],
             prefixes);
     }
 }
