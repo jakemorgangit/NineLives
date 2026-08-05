@@ -1081,10 +1081,12 @@ public partial class RestoreViewModel : ViewModelBase
 
         try
         {
-            await _sqlService.EnsureCredentialExistsAsync(
+            var change = await _sqlService.EnsureCredentialExistsAsync(
                 ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
             await RefreshCredentialStatusAsync();
-            SetStatus("Credential created or updated on server.");
+            SetStatus(change == CredentialChange.Created
+                ? "Credential created on server."
+                : "Credential updated on server with the stored SAS token.");
         }
         catch (Exception ex)
         {
@@ -1092,9 +1094,12 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
-    private bool CanCreateCredential() =>
-        IsConnectedToServer && SelectedContainer != null &&
-        (CredentialExistsOnServer != true || !CredentialIsValidSas);
+    // Deliberately available even when the credential is present and valid. SQL Server will not
+    // hand back a credential's secret, so "present and SAS" says nothing about whether the token
+    // inside it still works - a SAS that was rotated or has expired looks identical from here.
+    // Since Execute no longer rewrites the credential on every run, this button is the only way
+    // to push a fresh token, and hiding it left users with no route at all.
+    private bool CanCreateCredential() => IsConnectedToServer && SelectedContainer != null;
 
     [RelayCommand]
     private void CopyScript()
@@ -1331,11 +1336,16 @@ public partial class RestoreViewModel : ViewModelBase
 
         try
         {
-            var config = _credentialStore.LoadConfig();
-            var server = config.Servers.FirstOrDefault(s => s.ServerName == ConnectedServerName);
+            // Execute against the server we are actually connected to, not one looked up by name.
+            // This used to re-read config.json and take the first entry whose ServerName matched,
+            // which is a different object whenever two entries share a host and differ in auth,
+            // port or encryption - a Windows-auth and a SQL-auth entry for the same box, say. The
+            // restore would then run under credentials the user never connected with or tested.
+            // Every other server call on this screen already uses ConnectedServer.
+            var server = ConnectedServer;
             if (server == null)
             {
-                SetError("Connected server not found in config.");
+                SetError("Not connected to a server.");
                 return;
             }
 
@@ -1344,10 +1354,34 @@ public partial class RestoreViewModel : ViewModelBase
                 var sasToken = _credentialStore.GetSasToken(SelectedContainer);
                 if (!string.IsNullOrEmpty(sasToken))
                 {
-                    AppendLog("Creating SQL Server credential for blob access...");
-                    await _sqlService.EnsureCredentialExistsAsync(
-                        server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
-                    AppendLog("Credential created successfully.");
+                    // Only write to the server when the credential is genuinely missing or is not
+                    // a SAS credential. This used to drop and recreate on every single execute,
+                    // regardless of the status the panel above was displaying, which contradicted
+                    // the UI's own "creating it is optional" wording and briefly removed a
+                    // credential that other sessions may have been using.
+                    //
+                    // A credential that exists and is SAS is left alone. Its secret could still be
+                    // a rotated SAS that no longer works - that is unknowable from here, since the
+                    // secret cannot be read back - so the fix for that case is the explicit
+                    // refresh button, not silently rewriting server state on every run.
+                    var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
+                    if (exists && isSas)
+                    {
+                        AppendLog($"Using the existing SQL credential [{SqlCredentialName}]. Server state not modified.");
+                    }
+                    else
+                    {
+                        AppendLog(exists
+                            ? $"Credential [{SqlCredentialName}] exists but is not a SAS credential - updating it..."
+                            : $"Credential [{SqlCredentialName}] is missing - creating it...");
+
+                        var change = await _sqlService.EnsureCredentialExistsAsync(
+                            server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
+
+                        AppendLog(change == CredentialChange.Created
+                            ? "Credential created on the server."
+                            : "Credential updated on the server.");
+                    }
                 }
             }
 
