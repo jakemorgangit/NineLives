@@ -1,0 +1,74 @@
+name: Check version bump
+
+# A dev -> main pull request is a release: main is meant to match the published binary, so the
+# version must move. Feature work targets dev and never reaches this check.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    # Only the release PR is gated. A direct hotfix branch into main is rare enough to bump by
+    # hand, and gating it would block genuine emergency fixes.
+    if: github.head_ref == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Deliberately one job that always runs and always reports, rather than paths-ignore:
+      # a required check that is skipped entirely sits pending forever and blocks the merge.
+      # Documentation-only release PRs pass without a bump.
+      - name: Compare versions against main
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          csproj='src/NineLives/NineLives.csproj'
+
+          changed=$(git diff --name-only "$BASE_SHA" HEAD)
+          echo "Changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          # Anything that is not markdown, the licence, gitignore, or a docs asset counts as a
+          # code change. A new file type defaults to being treated as code, which is the safe
+          # direction to be wrong in.
+          code_changes=$(echo "$changed" \
+            | grep -vE '(\.md$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^docs/)' || true)
+
+          if [ -z "$code_changes" ]; then
+            echo "::notice title=Version bump not required::Only documentation changed in this release PR."
+            exit 0
+          fi
+
+          # POSIX sed rather than grep -oP: PCRE grep is not available on every platform a
+          # contributor might run this logic on, and the runner image should not be the only
+          # place it works.
+          extract_version() { sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' "$1" | head -1; }
+
+          pr_version=$(extract_version "$csproj")
+          git show "$BASE_SHA:$csproj" > /tmp/main.csproj
+          main_version=$(extract_version /tmp/main.csproj)
+
+          echo "main version: $main_version"
+          echo "PR version:   $pr_version"
+
+          if [ -z "$pr_version" ]; then
+            echo "::error::Could not read <Version> from $csproj."
+            exit 1
+          fi
+
+          if [ "$pr_version" = "$main_version" ]; then
+            echo "::error::Version in $csproj ($pr_version) is unchanged from main. Bump it before releasing."
+            exit 1
+          fi
+
+          echo "Version bumped: $main_version -> $pr_version"
