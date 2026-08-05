@@ -838,7 +838,7 @@
                             Visibility="{Binding IsExecuteArmed, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <ItemsControl ItemsSource="{Binding ConnectedServerTags}"
-                                          Style="{StaticResource TagPillList}"
+                                          Style="{StaticResource TagChipList}"
                                           Margin="0,0,0,6"
                                           Visibility="{Binding HasConnectedServerTags, Converter={StaticResource BoolToVis}}" />
                             <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">

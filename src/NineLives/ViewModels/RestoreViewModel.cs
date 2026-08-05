@@ -184,9 +184,13 @@ public partial class RestoreViewModel : ViewModelBase
 
     public ServerConnection? ConnectedServer { get; set; }
 
-    /// <summary>Tags of the connected server, shown on the execute confirmation.</summary>
+    /// <summary>
+    /// Tags of the connected server, shown on the execute confirmation. Chips rather than plain
+    /// strings so the detected version appears alongside the environment labels, and so this
+    /// renders through the same single wrapping template as the lists.
+    /// </summary>
     [ObservableProperty]
-    private ObservableCollection<string> _connectedServerTags = [];
+    private ObservableCollection<TagChip> _connectedServerTags = [];
 
     [ObservableProperty]
     private bool _hasConnectedServerTags;
@@ -980,8 +984,10 @@ public partial class RestoreViewModel : ViewModelBase
 
     partial void OnIsConnectedToServerChanged(bool value)
     {
-        var tags = value ? ConnectedServer?.Tags ?? [] : [];
-        ConnectedServerTags = new ObservableCollection<string>(tags);
+        var chips = value && ConnectedServer != null
+            ? ConnectedServer.TagChips
+            : [];
+        ConnectedServerTags = new ObservableCollection<TagChip>(chips);
         HasConnectedServerTags = ConnectedServerTags.Count > 0;
 
         ValidateChainCommand.NotifyCanExecuteChanged();

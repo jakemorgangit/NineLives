@@ -46,10 +46,15 @@
                                 HorizontalAlignment="Stretch" />
                     </StackPanel>
 
+                    <!-- Stretch + no horizontal scrolling: without both, each row is measured
+                         with unbounded width and the tag WrapPanel never learns where to break,
+                         so pills run off the edge and are clipped. -->
                     <ListBox ItemsSource="{Binding Servers}"
                              SelectedItem="{Binding SelectedServer}"
                              Background="Transparent"
                              BorderThickness="0"
+                             HorizontalContentAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              Foreground="{StaticResource PrimaryTextBrush}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
@@ -62,15 +67,16 @@
                                                    FontWeight="SemiBold"
                                                    Foreground="{StaticResource PrimaryTextBrush}" />
                                     </StackPanel>
+                                    <!-- Now that the row is width-constrained (no horizontal
+                                         scrolling), a long name would be cut mid-character
+                                         rather than scrolled - so trim it explicitly. -->
                                     <TextBlock Text="{Binding DisplayText}"
                                                Style="{StaticResource SecondaryText}"
+                                               TextTrimming="CharacterEllipsis"
                                                Margin="22,2,0,0" />
-                                    <WrapPanel Orientation="Horizontal" Margin="22,2,0,0">
-                                        <ItemsControl ItemsSource="{Binding Tags}"
-                                                      Style="{StaticResource TagPillList}" />
-                                        <ItemsControl ItemsSource="{Binding AutoTags}"
-                                                      Style="{StaticResource AutoTagPillList}" />
-                                    </WrapPanel>
+                                    <ItemsControl ItemsSource="{Binding TagChips}"
+                                                  Style="{StaticResource TagChipList}"
+                                                  Margin="22,2,0,0" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

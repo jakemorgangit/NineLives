@@ -50,6 +50,12 @@ public class BlobContainerConfig
     public ObservableCollection<string> Tags { get; set; } = [];
 
     /// <summary>
+    /// Tags as chips, matching the server list. Containers have no automatic tags yet, but going
+    /// through the same shape keeps one rendering path.
+    /// </summary>
+    public IEnumerable<TagChip> TagChips => Tags.Select(TagChip.Manual);
+
+    /// <summary>
     /// Key used to look up SAS token in Windows Credential Manager.
     /// </summary>
     public string CredentialKey => $"NineLives:Blob:{Name}";
