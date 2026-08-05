@@ -59,8 +59,7 @@ public class BackupChainBuilder
             });
         }
 
-        // For transaction logs, build chains from each full forward.
-        // Includes all diffs in the full's range, then logs after the last diff.
+        // For transaction logs, build a chain from each full forward - one restore point per log.
         foreach (var full in fulls)
         {
             var nextFull = fulls.FirstOrDefault(f => f.Timestamp > full.Timestamp);
@@ -73,36 +72,44 @@ public class BackupChainBuilder
 
             if (applicableLogs.Count == 0) continue;
 
-            // At most one diff: the latest one before the log chain (differentials are cumulative
-            // since the last full). Only diffs whose ACTUAL base is this full may join the chain -
-            // being inside the range is not enough. When the anchor is a copy-only full no diff
-            // ever qualifies, so the chain becomes copy-only full + logs, which is valid.
-            var diffsInRange = diffs
+            // Only diffs whose ACTUAL base is this full may join a chain - being inside the range
+            // is not enough. When the anchor is a copy-only full no diff ever qualifies, so the
+            // chain becomes copy-only full + logs, which is valid.
+            var applicableDiffs = diffs
                 .Where(d => d.Timestamp > full.Timestamp && d.Timestamp < upperBound
                             && ReferenceEquals(BaseFullFor(d), full))
                 .OrderBy(d => d.Timestamp)
                 .ToList();
-            var latestDiff = diffsInRange.Count > 0 ? diffsInRange.Last() : null;
-            var baseTimestamp = latestDiff != null ? latestDiff.Timestamp : full.Timestamp;
 
-            var chainLogs = applicableLogs
-                .Where(l => l.Timestamp >= baseTimestamp)
-                .OrderBy(l => l.Timestamp)
-                .ToList();
-
-            var logChainSoFar = new List<BackupSet>();
-            for (int i = 0; i < chainLogs.Count; i++)
+            // The differential is chosen PER LOG: the latest one taken at or before that log.
+            //
+            // Previously a single latestDiff was picked for the whole range and the logs were then
+            // filtered to those at or after it - so every log between the full and the latest
+            // differential produced NO restore point at all. Measured against a real 24-day
+            // Ola-style set, that hid 73 of 94 log backups (78%), a 72-hour window in which no
+            // point-in-time recovery was offered even though every backup needed for it existed
+            // and was already listed in the browse view.
+            //
+            // Choosing per log restores the natural rule: use the shortest valid chain that
+            // reaches this point. Before the first differential that means full + logs, which is
+            // a chain SQL Server restores happily - it was simply never generated.
+            foreach (var log in applicableLogs)
             {
-                logChainSoFar.Add(chainLogs[i]);
+                var diff = applicableDiffs.LastOrDefault(d => d.Timestamp <= log.Timestamp);
+                var baseTimestamp = diff?.Timestamp ?? full.Timestamp;
+
+                var chainLogs = applicableLogs
+                    .Where(l => l.Timestamp >= baseTimestamp && l.Timestamp <= log.Timestamp)
+                    .ToList();
 
                 points.Add(new RestorePoint
                 {
-                    Timestamp = chainLogs[i].Timestamp,
+                    Timestamp = log.Timestamp,
                     Type = BackupType.TransactionLog,
-                    PrimarySet = chainLogs[i],
+                    PrimarySet = log,
                     RequiredFullSet = full,
-                    RequiredDiffSets = latestDiff != null ? [latestDiff] : [],
-                    RequiredLogSets = [.. logChainSoFar]
+                    RequiredDiffSets = diff != null ? [diff] : [],
+                    RequiredLogSets = chainLogs
                 });
             }
         }

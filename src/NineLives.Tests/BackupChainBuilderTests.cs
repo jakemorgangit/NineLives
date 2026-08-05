@@ -195,8 +195,11 @@ public class BackupChainBuilderTests
     }
 
     [Fact]
-    public void ComputeRestorePoints_DiffWithinLogRange_UsesLatestDiffAndDropsEarlierLogs()
+    public void ComputeRestorePoints_DiffWithinLogRange_PicksTheDifferentialPerLog()
     {
+        // Rewritten for #24. This previously asserted that logs before the latest differential
+        // were DROPPED - the defect itself, faithfully characterized. Every log now yields a
+        // restore point, each using the shortest valid chain that reaches it.
         var full = Set(BackupType.Full, T(1));
         var logBeforeDiffs = Set(BackupType.TransactionLog, T(2));
         var diff1 = Set(BackupType.Differential, T(3));
@@ -208,21 +211,47 @@ public class BackupChainBuilderTests
         var points = _builder.ComputeRestorePoints(
             [full, logBeforeDiffs, diff1, logBetweenDiffs, diff2, logAfter1, logAfter2]);
 
-        // Full point, two diff points, and log points only for logs at/after the latest diff.
+        // Every backup is now a reachable point in time.
         Assert.Equal(
-            new[] { T(1), T(3), T(5), T(6), T(7) },
+            new[] { T(1), T(2), T(3), T(4), T(5), T(6), T(7) },
             points.Select(p => p.Timestamp).ToArray());
 
         var logPoints = points.Where(p => p.Type == BackupType.TransactionLog).ToList();
+        Assert.Equal(4, logPoints.Count);
+
+        // Before any differential: full + logs, no differential at all.
+        Assert.Empty(logPoints[0].RequiredDiffSets);
+        Assert.Equal([logBeforeDiffs], logPoints[0].RequiredLogSets);
+
+        // Between the two differentials: the EARLIER one is correct here, not the latest.
+        Assert.Equal([diff1], logPoints[1].RequiredDiffSets);
+        Assert.Equal([logBetweenDiffs], logPoints[1].RequiredLogSets);
+
+        // After the latest differential: unchanged from before the fix.
+        Assert.Equal([diff2], logPoints[2].RequiredDiffSets);
+        Assert.Equal([logAfter1], logPoints[2].RequiredLogSets);
+        Assert.Equal([diff2], logPoints[3].RequiredDiffSets);
+        Assert.Equal([logAfter1, logAfter2], logPoints[3].RequiredLogSets);
+    }
+
+    [Fact]
+    public void ComputeRestorePoints_LogsBeforeTheFirstDifferential_UseFullPlusLogsOnly()
+    {
+        // The chain the app could never generate: full + logs, skipping the differential
+        // entirely because it had not been taken yet.
+        var full = Set(BackupType.Full, T(1));
+        var log1 = Set(BackupType.TransactionLog, T(2));
+        var log2 = Set(BackupType.TransactionLog, T(3));
+        var diff = Set(BackupType.Differential, T(4));
+
+        var points = _builder.ComputeRestorePoints([full, log1, log2, diff]);
+        var logPoints = points.Where(p => p.Type == BackupType.TransactionLog).ToList();
+
         Assert.Equal(2, logPoints.Count);
-
-        // Only the latest diff is required, never earlier diffs.
-        Assert.Equal([diff2], logPoints[0].RequiredDiffSets);
-        Assert.Equal([diff2], logPoints[1].RequiredDiffSets);
-
-        // The log chain starts after the latest diff; earlier logs are not included.
-        Assert.Equal([logAfter1], logPoints[0].RequiredLogSets);
-        Assert.Equal([logAfter1, logAfter2], logPoints[1].RequiredLogSets);
+        Assert.All(logPoints, p => Assert.Empty(p.RequiredDiffSets));
+        Assert.All(logPoints, p => Assert.Same(full, p.RequiredFullSet));
+        Assert.Equal([log1], logPoints[0].RequiredLogSets);
+        Assert.Equal([log1, log2], logPoints[1].RequiredLogSets);
     }
 
     [Fact]
@@ -243,17 +272,23 @@ public class BackupChainBuilderTests
     }
 
     [Fact]
-    public void ComputeRestorePoints_AllLogsBeforeLatestDiff_ProducesNoLogPoints()
+    public void ComputeRestorePoints_LogBeforeTheOnlyDiff_IsStillOffered()
     {
+        // Rewritten for #24: this asserted the log produced NO restore point. It now gets one,
+        // restored as full + log with the differential skipped.
         var full = Set(BackupType.Full, T(1));
         var log = Set(BackupType.TransactionLog, T(2));
         var diff = Set(BackupType.Differential, T(3));
 
         var points = _builder.ComputeRestorePoints([full, log, diff]);
 
-        Assert.Equal(2, points.Count);
-        Assert.DoesNotContain(points, p => p.Type == BackupType.TransactionLog);
-        Assert.Equal(new[] { T(1), T(3) }, points.Select(p => p.Timestamp).ToArray());
+        Assert.Equal(3, points.Count);
+        Assert.Equal(new[] { T(1), T(2), T(3) }, points.Select(p => p.Timestamp).ToArray());
+
+        var logPoint = Assert.Single(points, p => p.Type == BackupType.TransactionLog);
+        Assert.Same(full, logPoint.RequiredFullSet);
+        Assert.Empty(logPoint.RequiredDiffSets);
+        Assert.Equal([log], logPoint.RequiredLogSets);
     }
 
     [Fact]
@@ -285,8 +320,9 @@ public class BackupChainBuilderTests
         var timestamps = points.Select(p => p.Timestamp).ToList();
         Assert.Equal(timestamps.OrderBy(t => t).ToList(), timestamps);
 
-        // full1, diff@3, log@4 (chain starts at the diff), full2, log@6.
-        Assert.Equal(new[] { T(1), T(3), T(4), T(5), T(6) }, timestamps.ToArray());
+        // Every backup is a point: full1, log@2 (full+log, pre-differential), diff@3,
+        // log@4 (full+diff+log), full2, log@6. log@2 was previously missing - see #24.
+        Assert.Equal(new[] { T(1), T(2), T(3), T(4), T(5), T(6) }, timestamps.ToArray());
     }
 
     // ---- GetRestoreWindow (BackupSet overload) ---------------------------
