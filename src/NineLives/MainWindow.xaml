@@ -46,37 +46,65 @@
              because something is on fire, and a popup between the DBA and the restore button
              would be exactly wrong. -->
         <Border Grid.Row="0"
-                Background="#1B2A44"
-                BorderBrush="#2E4468"
+                Background="{StaticResource UpdateBannerBrush}"
+                BorderBrush="{StaticResource UpdateBannerEdgeBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="16,8"
+                Padding="16,10"
                 Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVis}}">
+            <!-- Lifts the band off the window rather than letting it read as another dark stripe. -->
+            <Border.Effect>
+                <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.45" Direction="270" />
+            </Border.Effect>
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
+                <!-- Badge. Pulses slowly - enough to catch the eye on a screen someone is already
+                     looking at, slow enough not to nag while they work. -->
+                <Grid Grid.Column="0" Width="24" Height="24" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <Ellipse Fill="#1A1205" Opacity="0.92" />
+                    <TextBlock Text="&#x2191;"
+                               Foreground="#FFC24B"
+                               FontSize="15"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <Grid.Triggers>
+                        <EventTrigger RoutedEvent="Loaded">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                     From="1.0" To="0.45" Duration="0:0:1.1"
+                                                     AutoReverse="True" RepeatBehavior="Forever" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Grid.Triggers>
+                </Grid>
+
+                <TextBlock Grid.Column="1"
                            Text="{Binding UpdateMessage}"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource PrimaryTextBrush}"
+                           Foreground="{StaticResource UpdateBannerTextBrush}"
                            FontFamily="Segoe UI"
-                           FontSize="12.5" />
-
-                <Button Grid.Column="1"
-                        Content="View release"
-                        Command="{Binding OpenReleasesPageCommand}"
-                        Style="{StaticResource SecondaryButton}"
-                        Padding="12,4"
-                        Margin="12,0,8,0" />
+                           FontSize="13.5"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap" />
 
                 <Button Grid.Column="2"
+                        Content="View release"
+                        Command="{Binding OpenReleasesPageCommand}"
+                        Style="{StaticResource UpdateBannerPrimaryButton}"
+                        Margin="12,0,8,0" />
+
+                <Button Grid.Column="3"
                         Content="Dismiss"
                         Command="{Binding DismissUpdateCommand}"
-                        Style="{StaticResource SecondaryButton}"
-                        Padding="12,4" />
+                        Style="{StaticResource UpdateBannerGhostButton}" />
             </Grid>
         </Border>
 

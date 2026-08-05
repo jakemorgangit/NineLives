@@ -22,6 +22,79 @@
 
     <FontFamily x:Key="ConsoleFont">Cascadia Code, Cascadia Mono, Consolas, Courier New</FontFamily>
 
+    <!-- Update banner.
+         Amber rather than red: a new release is worth noticing, not an emergency, and this app
+         uses red for things that have actually gone wrong. Against a dark navy UI a bright amber
+         band is unmissable without pretending to be a failure. Dark text on it, because pale text
+         on amber is the one combination that would undo the contrast. -->
+    <LinearGradientBrush x:Key="UpdateBannerBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#FFC24B" Offset="0" />
+        <GradientStop Color="#F59E0B" Offset="0.55" />
+        <GradientStop Color="#EA8C04" Offset="1" />
+    </LinearGradientBrush>
+
+    <SolidColorBrush x:Key="UpdateBannerTextBrush" Color="#1A1205" />
+    <SolidColorBrush x:Key="UpdateBannerEdgeBrush" Color="#B36F00" />
+
+    <!-- Solid dark on amber: the one thing to click, and it inverts the banner's own contrast. -->
+    <Style x:Key="UpdateBannerPrimaryButton" TargetType="Button">
+        <Setter Property="Background" Value="#1B1E2B" />
+        <Setter Property="Foreground" Value="#FFE9B8" />
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="#000000" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Deliberately quieter than the primary: dismissing should be available, not inviting. -->
+    <Style x:Key="UpdateBannerGhostButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="#4A3308" />
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="#A96B05"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="#33FFFFFF" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Console rows. A ListBox for the virtualisation, stripped of every ListBox affordance:
          no selection highlight, no hover, no focus rectangle, tight line spacing. -->
     <Style x:Key="ConsoleListBoxItem" TargetType="ListBoxItem">
