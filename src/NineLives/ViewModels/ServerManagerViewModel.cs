@@ -93,6 +93,26 @@ public partial class ServerManagerViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Records the product version parsed from a @@VERSION banner against a saved server, and
+    /// refreshes its row so the automatic tag appears at once.
+    ///
+    /// Populated only when the user actually connects or tests - the app never probes saved
+    /// servers on its own. Reaching out to every configured instance at startup, some of which
+    /// are production, is not something a restore tool should do unasked.
+    /// </summary>
+    private void RecordDetectedVersion(ServerConnection? server, string? banner)
+    {
+        if (server == null) return;
+
+        var detected = SqlVersionName.FromVersionBanner(banner);
+        if (detected == null || detected == server.DetectedVersion) return;
+
+        server.DetectedVersion = detected;
+        SaveServers();
+        RefreshServerRow(server);
+    }
+
+    /// <summary>
     /// Forces one row to re-render after a non-observable property changed on it.
     ///
     /// DetectedVersion is a plain property on a serialised model, so setting it raises nothing a
@@ -247,6 +267,12 @@ public partial class ServerManagerViewModel : ViewModelBase
             ServerVersion = firstLine;
             TestSuccess = true;
             TestResult = $"Connected successfully!\n{firstLine}";
+
+            // Test Connection already proves the server and reads the banner, so record the
+            // version tag from it too. BuildCurrentServer returns a throwaway object built from
+            // the edit form, so the value has to be written back to the SAVED entry - otherwise
+            // testing an existing server tells us the version and then discards it.
+            RecordDetectedVersion(IsNew ? null : SelectedServer, version);
         }
         catch (Exception ex)
         {
@@ -274,14 +300,7 @@ public partial class ServerManagerViewModel : ViewModelBase
             // effort: a server that connects but will not answer @@VERSION should still connect.
             try
             {
-                var banner = await _sqlService.GetServerVersionAsync(SelectedServer);
-                var detected = SqlVersionName.FromVersionBanner(banner);
-                if (detected != null && detected != SelectedServer.DetectedVersion)
-                {
-                    SelectedServer.DetectedVersion = detected;
-                    SaveServers();
-                    RefreshServerRow(SelectedServer);
-                }
+                RecordDetectedVersion(SelectedServer, await _sqlService.GetServerVersionAsync(SelectedServer));
             }
             catch
             {
