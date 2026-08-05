@@ -38,7 +38,9 @@ public class SqlServerService
         {
             builder.IntegratedSecurity = false;
             builder.UserID = server.Username;
-            builder.Password = _credentialStore.GetSqlPassword(server);
+            // An unsaved password wins, so Test Connection can try one without it having to be
+            // persisted first (#12). Null for every ordinary connection.
+            builder.Password = server.UnsavedPassword ?? _credentialStore.GetSqlPassword(server);
         }
 
         return builder.ConnectionString;

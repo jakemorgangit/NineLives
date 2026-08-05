@@ -16,7 +16,9 @@ public class BlobStorageService
 
     private BlobContainerClient CreateClient(BlobContainerConfig config)
     {
-        var sasToken = _credentialStore.GetSasToken(config);
+        // An unsaved token wins, so Test Connection can try one without it having to be persisted
+        // first (#12). Null for every ordinary operation, which falls through to the stored token.
+        var sasToken = config.UnsavedSasToken ?? _credentialStore.GetSasToken(config);
         if (string.IsNullOrEmpty(sasToken))
             throw new InvalidOperationException(
                 "No SAS token found. Please configure the SAS token for this container.");

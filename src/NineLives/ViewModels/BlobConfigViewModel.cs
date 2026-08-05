@@ -406,6 +406,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
             container = new BlobContainerConfig
             {
+                // Assigned here rather than defaulted on the model - see the note on Id.
+                Id = BlobContainerConfig.NewId(),
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
                 PathPattern = EditPathPattern,
@@ -498,9 +500,16 @@ public partial class BlobConfigViewModel : ViewModelBase
                 config = SelectedContainer; // Use stored token for test
             else
             {
-                config = new BlobContainerConfig { Name = EditName, ContainerUrl = EditContainerUrl };
-                if (!string.IsNullOrWhiteSpace(EditSasToken))
-                    _credentialStore.SaveSasToken(config, EditSasToken);
+                // In memory only. This used to call SaveSasToken, which is a durable write to
+                // Credential Manager - so pasting a typo'd or expired token, testing it, and
+                // clicking Cancel destroyed the working token that was there before, with no way
+                // to get it back because the form never displays stored tokens (#12).
+                config = new BlobContainerConfig
+                {
+                    Name = EditName,
+                    ContainerUrl = EditContainerUrl,
+                    UnsavedSasToken = string.IsNullOrWhiteSpace(EditSasToken) ? null : EditSasToken
+                };
             }
         }
         else
