@@ -972,8 +972,23 @@
                     <Border CornerRadius="6" Margin="0,12,0,0"
                             Background="{StaticResource ConsoleBackgroundBrush}"
                             BorderBrush="{StaticResource ConsoleBorderBrush}"
-                            BorderThickness="1"
-                            Visibility="{Binding HasConsoleOutput, Converter={StaticResource BoolToVis}}">
+                            BorderThickness="1">
+                        <!-- Shown only when the console is NOT in its own window - the two are
+                             mutually exclusive, so the output is never rendered twice. -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding HasConsoleOutput}" Value="True" />
+                                            <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -1039,8 +1054,23 @@
                          worst moment to be left working that out from a raw SQL error. Each action
                          shows the exact statement before it runs. -->
                     <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
-                            Background="#3A1E1E" BorderBrush="#A33F3F" BorderThickness="1"
-                            Visibility="{Binding HasRecoveryActions, Converter={StaticResource BoolToVis}}">
+                            Background="#3A1E1E" BorderBrush="#A33F3F" BorderThickness="1">
+                        <!-- Same rule as the console: not while it is showing in its own window,
+                             where the recovery actions already appear. -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding HasRecoveryActions}" Value="True" />
+                                            <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel>
                             <TextBlock Text="THE TARGET DATABASE NEEDS ATTENTION"
                                        Style="{StaticResource LabelText}" Margin="0,0,0,8" />

@@ -16,6 +16,7 @@ namespace Blackcat.NineLives.Tests;
 /// These write to the real Windows Credential Manager, so every key is namespaced under
 /// "ninelives-test-" plus a fresh Guid and removed in Dispose. Config goes to a temp directory.
 /// </summary>
+[Collection("CredentialManager")]
 public class SecretKeyMigrationTests : IDisposable
 {
     private readonly string _dir = Path.Combine(

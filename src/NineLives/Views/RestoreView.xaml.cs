@@ -68,12 +68,20 @@ public partial class RestoreView : UserControl
 
         _executionWindow = new ExecutionWindow(vm) { Owner = Window.GetWindow(this) };
 
+        // The inline console hides while the window is up, so the output is only ever in one
+        // place, and comes back afterwards so the record stays reachable from the main view.
+        vm.IsConsoleDetached = true;
+
         // ShowDialog blocks, so it must not run inside the property-changed notification that the
         // restore itself is unwinding through. Posting lets the execution carry on underneath.
         Dispatcher.BeginInvoke(new Action(() =>
         {
             try { _executionWindow?.ShowDialog(); }
-            finally { _executionWindow = null; }
+            finally
+            {
+                _executionWindow = null;
+                vm.IsConsoleDetached = false;
+            }
         }), DispatcherPriority.Background);
     }
 

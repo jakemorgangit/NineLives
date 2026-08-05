@@ -20,6 +20,7 @@ namespace Blackcat.NineLives.Tests;
 ///
 /// Gated on NINELIVES_TEST_SQL like the other live tests; each cleans up after itself.
 /// </summary>
+[Collection("CredentialManager")]
 public class CredentialLifecycleTests
 {
     private static string? TestServerName =>
