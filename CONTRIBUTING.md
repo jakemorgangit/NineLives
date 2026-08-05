@@ -15,9 +15,10 @@ feature branch  ──PR──►  dev  ──release PR──►  main  ──t
 - **`main` always matches the published release.** Anyone cloning `main` gets code that
   corresponds to the executable on the Releases page — which matters for a restore tool, where
   "which version am I actually running?" is a question people ask mid-incident.
-- **Releases are a `dev` → `main` pull request.** A version-bump check enforces that
-  `<Version>` in `src/NineLives/NineLives.csproj` has moved. Publishing a GitHub Release then
-  builds, tests, and attaches `NineLives.exe` with checksums automatically.
+- **Releases are a `dev` → `main` pull request.** A check enforces that `<Version>` in
+  `src/NineLives/NineLives.csproj` has not already been published as a release — so a version
+  number can never cover two different builds. Publishing a GitHub Release then builds, tests,
+  and attaches `NineLives.exe` with checksums automatically.
 
 Branch naming is loose, but `fix/<issue>-<slug>` and `feat/<issue>-<slug>` keep things scannable.
 

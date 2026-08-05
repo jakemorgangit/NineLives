@@ -25,10 +25,11 @@ jobs:
       # Deliberately one job that always runs and always reports, rather than paths-ignore:
       # a required check that is skipped entirely sits pending forever and blocks the merge.
       # Documentation-only release PRs pass without a bump.
-      - name: Compare versions against main
+      - name: Check the version being released is not already published
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -66,9 +67,23 @@ jobs:
             exit 1
           fi
 
-          if [ "$pr_version" = "$main_version" ]; then
-            echo "::error::Version in $csproj ($pr_version) is unchanged from main. Bump it before releasing."
+          # The rule this gate actually enforces is "never publish two different builds under one
+          # version number". Comparing against main is only a proxy for that, and it gets the
+          # first release wrong: main can carry an unreleased version marker, in which case
+          # shipping it is legitimate because nothing was ever published under it.
+          #
+          # So the authoritative check is whether a release already exists for the version being
+          # shipped. That is stricter where it matters (it also catches re-releasing a version
+          # that main has since moved past) and correct on the first release.
+          if gh release view "v$pr_version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v$pr_version has already been published. Bump <Version> in $csproj before releasing again."
             exit 1
           fi
 
-          echo "Version bumped: $main_version -> $pr_version"
+          if [ "$pr_version" = "$main_version" ]; then
+            echo "::notice title=Version unchanged from main::main is also at $pr_version, but v$pr_version has never been published - shipping it is safe."
+          else
+            echo "Version bumped: $main_version -> $pr_version"
+          fi
+
+          echo "OK to release v$pr_version"
