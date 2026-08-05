@@ -205,6 +205,64 @@ public class RestoreViewModelTests
         Assert.True(vm.TimelineHeight > 50);
     }
 
+    // ── changing container ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Everything on the Restore screen below the container dropdown came from that container.
+    /// Switching it left the timeline, the chain and the script belonging to the previous one,
+    /// while the credential panel and Create credential moved to the new one - so Execute stayed
+    /// armed, pointed at the old container's URLs, and failed with Msg 3201 after WITH REPLACE had
+    /// already dropped the target.
+    /// </summary>
+    [Fact]
+    public async Task ChangingContainerDropsWhatTheLastOneLoaded()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(3);
+        vm.SelectedContainer = Container();
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+        vm.TargetDatabaseName = "MyDb_Restored";
+
+        Assert.True(vm.BackupsLoaded);
+        Assert.NotEmpty(vm.RestorePoints);
+        Assert.NotEmpty(vm.GeneratedScript);
+
+        vm.SelectedContainer = Container();   // a different container
+
+        Assert.False(vm.BackupsLoaded);
+        Assert.Empty(vm.RestorePoints);
+        Assert.False(vm.HasRestorePoints);
+        Assert.Null(vm.SelectedRestorePoint);
+        Assert.Null(vm.RestoreChain);
+        Assert.Empty(vm.GeneratedScript);
+        Assert.False(vm.HasScript);
+        Assert.Empty(vm.DiscoveredDatabases);
+    }
+
+    [Fact]
+    public async Task ChangingContainerDisarmsExecute()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(1);
+        vm.SelectedContainer = Container();
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+        vm.TargetDatabaseName = "MyDb_Restored";
+        vm.IsConnectedToServer = true;
+        vm.ConnectedServer = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        await vm.ExecuteScriptCommand.ExecuteAsync(null);
+        Assert.True(vm.IsExecuteArmed);
+
+        vm.SelectedContainer = Container();
+
+        Assert.False(vm.IsExecuteArmed);
+    }
+
     // ── narrowing the restore points (#27) ──────────────────────────────────────
 
     [Fact]

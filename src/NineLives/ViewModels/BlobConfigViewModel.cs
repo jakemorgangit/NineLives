@@ -30,6 +30,8 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private string _editTags = string.Empty;
 
+    private string _originalTags = string.Empty;
+
     [ObservableProperty]
     private string _editContainerUrl = string.Empty;
 
@@ -167,6 +169,10 @@ public partial class BlobConfigViewModel : ViewModelBase
     }
     partial void OnEditAgPathPatternChanged(string? value) => CheckForUnsavedChanges();
 
+    // Tags are saved like every other field, so editing only the tags has to count as an unsaved
+    // change - otherwise the guard that protects unsaved edits lets them be discarded silently.
+    partial void OnEditTagsChanged(string value) => CheckForUnsavedChanges();
+
     private void CheckForUnsavedChanges()
     {
         if (!IsEditing) return;
@@ -179,7 +185,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             sasChanged ||
             EditPathPattern != _originalPattern ||
             EditBackupSourceType != _originalBackupSourceType ||
-            EditAgPathPattern != _originalAgPathPattern;
+            EditAgPathPattern != _originalAgPathPattern ||
+            EditTags != _originalTags;
     }
 
     private void StoreOriginalValues()
@@ -190,6 +197,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         _originalPattern = EditPathPattern;
         _originalBackupSourceType = EditBackupSourceType;
         _originalAgPathPattern = EditAgPathPattern;
+        _originalTags = EditTags;
         HasUnsavedChanges = false;
     }
 
@@ -510,6 +518,13 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditPathPattern = SelectedContainer.PathPattern;
         EditBackupSourceType = SelectedContainer.BackupSourceType;
         EditAgPathPattern = SelectedContainer.AgPathPattern;
+
+        // Tags too. Save writes whatever is in this box over the container's tags, so leaving it
+        // empty here deleted every tag on any container whose token was refreshed - silently, and
+        // with no undo. Refresh Token is a separate button from Edit, so replacing an expired
+        // token was the natural way to hit it.
+        EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
+
         SyncPathElementsFromPattern();
         SyncAgPathElementsFromPattern();
         IsNew = false;

@@ -386,7 +386,51 @@ public partial class RestoreViewModel : ViewModelBase
         if (value != null)
             SqlCredentialName = value.ContainerUrl;
         CredentialSectionVisible = value != null;
+
+        // Everything on screen below this point came from the PREVIOUS container. Leaving it there
+        // meant the credential panel and Create credential targeted the new container while the
+        // script still restored from the old one's URLs - so Execute stayed armed and enabled, and
+        // failed with Msg 3201 after WITH REPLACE had already dropped the target.
+        ClearLoadedBackups();
+
         _ = RefreshCredentialStatusAsync();
+    }
+
+    /// <summary>
+    /// Drops everything derived from a container's contents. Called when the container changes and
+    /// when a load is abandoned, so what is on screen always belongs to the container named above
+    /// it.
+    /// </summary>
+    private void ClearLoadedBackups()
+    {
+        _allBackups = [];
+        _allSets = [];
+        _dbSets = [];
+        _allPoints = [];
+
+        BackupsLoaded = false;
+        DiscoveredServers = [];
+        DiscoveredDatabases = [];
+        SelectedServerName = null;
+        SelectedDatabaseName = null;
+
+        RestorePoints = [];
+        HasRestorePoints = false;
+        HasVisiblePoints = false;
+        PointCountText = string.Empty;
+        RestoreWindowText = string.Empty;
+        TimelineTicks.Clear();
+        TimelineHeight = 50;
+
+        // Assigning null runs the selection handler, which clears the chain, the script, the
+        // verification results and the inventory findings.
+        SelectedRestorePoint = null;
+
+        // Disarm. An armed Execute that survives a container change is an armed Execute aimed at
+        // something the user is no longer looking at.
+        IsExecuteArmed = false;
+        ExecuteButtonText = "Execute on Server";
+        _armTimeoutCts?.Cancel();
     }
 
     /// <summary>Call when ConnectedServer or SelectedContainer changes so credential status is updated.</summary>
@@ -647,6 +691,11 @@ public partial class RestoreViewModel : ViewModelBase
             InspectBackupMetadataCommand.NotifyCanExecuteChanged();
             CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
             CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
+
+            // No selected point means no script. Clearing the chain and leaving the script behind
+            // left a complete, authoritative-looking RESTORE on screen with nothing selected above
+            // it - which is the stale-script problem in its purest form.
+            UpdateRestoreSummary();
             return;
         }
 
