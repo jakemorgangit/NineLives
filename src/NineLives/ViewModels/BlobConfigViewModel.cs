@@ -189,18 +189,28 @@ public partial class BlobConfigViewModel : ViewModelBase
 
     private void UpdateSasExpiryStatus(BlobContainerConfig container)
     {
-        var expiry = _credentialStore.GetSasTokenExpiry(container);
-        if (expiry.HasValue)
+        var expiry = _credentialStore.ReadSasTokenExpiry(container);
+
+        if (expiry.CouldNotParse)
         {
-            IsSasExpired = expiry.Value < DateTime.UtcNow;
-            var remaining = expiry.Value - DateTime.UtcNow;
+            // The token states an expiry we cannot read, so we cannot say it is still valid.
+            // Showing this as "unknown" alongside everything else that is fine would be a lie of
+            // omission - the restore is the wrong place to discover it (#21).
+            SasExpiryText = "SAS token expiry could not be read - treat this token as expired and replace it";
+            IsSasExpired = true;
+        }
+        else if (expiry.ExpiresAt is { } expiresAt)
+        {
+            IsSasExpired = expiresAt < DateTime.UtcNow;
+            var remaining = expiresAt - DateTime.UtcNow;
             SasExpiryText = IsSasExpired
                 ? $"SAS token expired {-remaining.TotalHours:F0}h ago"
-                : $"SAS token expires in {remaining.TotalHours:F0}h ({expiry.Value:yyyy-MM-dd HH:mm} UTC)";
+                : $"SAS token expires in {remaining.TotalHours:F0}h ({expiresAt:yyyy-MM-dd HH:mm} UTC)";
         }
         else
         {
-            SasExpiryText = "SAS token expiry unknown";
+            // No se= at all, which is legitimate for a SAS built on a stored access policy.
+            SasExpiryText = "SAS token states no expiry";
             IsSasExpired = false;
         }
     }
