@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -466,8 +467,11 @@ public partial class RestoreViewModel : ViewModelBase
         BackupChainBuilder chainBuilder,
         RestoreScriptGenerator scriptGenerator,
         ICredentialStore credentialStore,
-        OperationLog? log = null)
+        OperationLog? log = null,
+        IRestoreHistoryStore? history = null)
     {
+        _history = history ?? new RestoreHistoryStore();
+
         _blobService = blobService;
         _sqlService = sqlService;
         _chainBuilder = chainBuilder;
@@ -483,6 +487,7 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     private readonly OperationLog _log;
+    private readonly IRestoreHistoryStore _history;
 
     public void RefreshContainers()
     {
@@ -1600,6 +1605,14 @@ public partial class RestoreViewModel : ViewModelBase
         IsExecuteArmed = false;
         ExecuteButtonText = "Execute on Server";
 
+        var startedAt = DateTime.Now;
+        var outcome = RestoreOutcome.Failed;
+        string? failure = null;
+
+        // Set false when the run is abandoned before anything was attempted, so history records
+        // executions rather than button presses.
+        var attempted = true;
+
         var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
         ExecutionComplete = false;
@@ -1620,6 +1633,7 @@ public partial class RestoreViewModel : ViewModelBase
             var server = ConnectedServer;
             if (server == null)
             {
+                attempted = false;
                 SetError("Not connected to a server.");
                 return;
             }
@@ -1692,11 +1706,14 @@ public partial class RestoreViewModel : ViewModelBase
                 executeToken);
 
             ExecutionSuccess = true;
+            outcome = RestoreOutcome.Succeeded;
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
         }
         catch (OperationCanceledException)
         {
+            outcome = RestoreOutcome.Cancelled;
+            failure = "Cancelled by the user part-way through the chain.";
             // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
             // the client waiting and SQL Server rolls back the statement that was in flight, but
             // the target stays mid-restore - so this must be as loud as a failure, and it goes
@@ -1716,6 +1733,8 @@ public partial class RestoreViewModel : ViewModelBase
         catch (Exception ex)
         {
             ExecutionSuccess = false;
+            outcome = RestoreOutcome.Failed;
+            failure = ex.Message;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
 
@@ -1731,7 +1750,35 @@ public partial class RestoreViewModel : ViewModelBase
             ExecutionComplete = true;
             FlushConsole();   // nothing buffered may outlive the run
             RefreshCancelState();
+
+            // After the flush, so the recorded log is the whole console rather than whatever had
+            // made it out of the batching buffer. Recorded for every outcome including cancelled -
+            // "I stopped it" is exactly the kind of thing a change ticket needs to say.
+            if (attempted) RecordHistory(startedAt, outcome, failure);
         }
+    }
+
+    /// <summary>
+    /// Files this execution in the history (#31). Never throws: the store swallows its own
+    /// failures, and a restore must not be reported as failed because a record could not be kept.
+    /// </summary>
+    private void RecordHistory(DateTime startedAt, RestoreOutcome outcome, string? failure)
+    {
+        _history.Append(new RestoreHistoryEntry
+        {
+            StartedAt = startedAt,
+            CompletedAt = DateTime.Now,
+            ServerName = ConnectedServer?.ServerName ?? "unknown",
+            TargetDatabase = TargetDatabaseName,
+            ContainerName = SelectedContainer?.Name,
+            SourceDatabase = SelectedDatabaseName,
+            RestorePointTimestamp = SelectedRestorePoint?.Timestamp,
+            ChainSummary = RestoreChain?.Summary ?? "no chain",
+            Outcome = outcome,
+            ErrorMessage = failure,
+            Script = GeneratedScript,
+            Log = ConsoleText
+        });
     }
 
     /// <summary>
@@ -1910,6 +1957,65 @@ public partial class RestoreViewModel : ViewModelBase
     [RelayCommand]
     private void CopyConsole()
         => TryCopyToClipboard(ConsoleText, "Execution log copied to clipboard.");
+
+    /// <summary>
+    /// Writes the console to a file, with a header saying what it was (#31). The clipboard is fine
+    /// for pasting into a chat window; a change ticket or an incident write-up wants a file, and
+    /// wants it to say which server and which database on its own.
+    /// </summary>
+    [RelayCommand]
+    private void SaveConsole()
+    {
+        if (string.IsNullOrEmpty(ConsoleText))
+        {
+            SetError("There is no execution log to save yet.");
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Text Files (*.txt)|*.txt|Log Files (*.log)|*.log|All Files (*.*)|*.*",
+            DefaultExt = ".txt",
+            FileName = $"ninelives_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, BuildSavedLog());
+            SetStatus($"Execution log saved to {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            // Read-only location, full disk, or a path the database name made invalid. Any of
+            // those used to take the whole app down from inside a synchronous command (#13).
+            SetError($"Could not save the execution log: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The console plus the context needed to read it a week later. Redacted on the way out for
+    /// the same reason the operation log is - this file gets attached to tickets.
+    /// </summary>
+    private string BuildSavedLog()
+    {
+        var header = new StringBuilder();
+        header.AppendLine("Nine Lives - restore execution log");
+        header.AppendLine($"Saved:      {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        header.AppendLine($"Server:     {ConnectedServer?.ServerName ?? "not connected"}");
+        header.AppendLine($"Target:     {TargetDatabaseName}");
+        if (SelectedContainer != null)
+            header.AppendLine($"Container:  {SelectedContainer.Name}");
+        if (SelectedRestorePoint != null)
+            header.AppendLine($"Point:      {SelectedRestorePoint.TimestampDisplay}");
+        header.AppendLine($"Chain:      {RestoreChain?.Summary ?? "none"}");
+        header.AppendLine($"Outcome:    {(ExecutionComplete ? (ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
+        header.AppendLine(new string('-', 60));
+        header.AppendLine();
+
+        return LogRedactor.Redact(header + ConsoleText);
+    }
 
     private async Task RunArmCountdownAsync(CancellationToken ct)
     {

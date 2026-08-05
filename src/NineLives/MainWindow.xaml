@@ -31,6 +31,9 @@
         <DataTemplate DataType="{x:Type vm:RestoreViewModel}">
             <views:RestoreView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
+            <views:HistoryView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:AboutViewModel}">
             <views:AboutView />
         </DataTemplate>
@@ -224,6 +227,15 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x267B;" FontSize="15" VerticalAlignment="Center" Width="24" />
                                 <TextBlock Text="Restore" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton Style="{StaticResource SidebarButton}"
+                                     Command="{Binding NavigateToCommand}"
+                                     CommandParameter="History">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x1F553;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                                <TextBlock Text="History" VerticalAlignment="Center" />
                             </StackPanel>
                         </RadioButton>
                     </StackPanel>

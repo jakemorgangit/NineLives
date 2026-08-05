@@ -7,6 +7,7 @@
          was added to it. Views that still declare their own simply shadow this with an identical
          instance, so both work. -->
     <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+    <converters:NullToVisibilityConverter x:Key="NullToVis" />
 
     <!-- Terminal console. Darker than the cards on purpose, so the console reads as a separate
          surface the way a real terminal does rather than as another panel in the form. -->

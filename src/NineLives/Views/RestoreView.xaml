@@ -1164,7 +1164,13 @@
                                                 Command="{Binding CopyConsoleCommand}"
                                                 Style="{StaticResource SecondaryButton}"
                                                 Padding="8,2" FontSize="11"
+                                                Margin="0,0,8,0"
                                                 ToolTip="Copies the whole console, which is what to attach to a bug report." />
+                                        <Button Content="Save output"
+                                                Command="{Binding SaveConsoleCommand}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="8,2" FontSize="11"
+                                                ToolTip="Writes the console to a file, with a header naming the server, the target database and the outcome - for a change ticket or an incident write-up." />
                                     </StackPanel>
                                 </Grid>
                             </Border>

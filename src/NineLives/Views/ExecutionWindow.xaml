@@ -73,7 +73,12 @@
                             <Button Content="Copy output"
                                     Command="{Binding CopyConsoleCommand}"
                                     Style="{StaticResource SecondaryButton}"
-                                    Padding="8,2" FontSize="11" />
+                                    Padding="8,2" FontSize="11" Margin="0,0,8,0" />
+                            <Button Content="Save output"
+                                    Command="{Binding SaveConsoleCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Padding="8,2" FontSize="11"
+                                    ToolTip="Writes the console to a file, with a header naming the server, the target database and the outcome." />
                         </StackPanel>
                     </Grid>
                 </Border>

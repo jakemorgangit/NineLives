@@ -106,6 +106,20 @@ public sealed class FakeBlobStorageService : IBlobStorageService
     public List<string> GetDiscoveredServers(List<BackupFileInfo> files) => _real.GetDiscoveredServers(files);
 }
 
+/// <summary>An in-memory restore history, so the tests never touch the real one.</summary>
+public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
+{
+    public List<RestoreHistoryEntry> Entries { get; } = [];
+
+    public string FilePath => "(in memory)";
+
+    public List<RestoreHistoryEntry> Load() => Entries.ToList();
+
+    public void Append(RestoreHistoryEntry entry) => Entries.Insert(0, entry);
+
+    public void Clear() => Entries.Clear();
+}
+
 /// <summary>
 /// A SQL Server that records what it was asked to do. Nothing opens a connection.
 /// </summary>
