@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Web;
 
 namespace Blackcat.NineLives.Models;
@@ -39,9 +40,14 @@ public class BlobContainerConfig
 
     /// <summary>
     /// Free-text labels shown as coloured pills. Absent from older config files, which
-    /// deserialise to an empty list - no migration needed.
+    /// deserialise to an empty collection - no migration needed.
+    ///
+    /// ObservableCollection, and callers MUST mutate it in place rather than assigning a new
+    /// one: these models are plain serialised objects with no PropertyChanged, so a reassignment
+    /// is invisible to a bound ItemsControl and the pills only appear after navigating away and
+    /// back. Mutating in place raises CollectionChanged, which the binding does see.
     /// </summary>
-    public List<string> Tags { get; set; } = [];
+    public ObservableCollection<string> Tags { get; set; } = [];
 
     /// <summary>
     /// Key used to look up SAS token in Windows Credential Manager.

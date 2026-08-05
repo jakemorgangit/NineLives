@@ -397,7 +397,7 @@ public partial class BlobConfigViewModel : ViewModelBase
                 PathPattern = EditPathPattern,
                 BackupSourceType = EditBackupSourceType,
                 AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim(),
-                Tags = TagPalette.ParseTags(EditTags)
+                Tags = [.. TagPalette.ParseTags(EditTags)]
             };
             Containers.Add(container);
         }
@@ -405,7 +405,8 @@ public partial class BlobConfigViewModel : ViewModelBase
         {
             container = SelectedContainer!;
             container.Name = EditName;
-            container.Tags = TagPalette.ParseTags(EditTags);
+            // Mutate in place - see ReplaceTags.
+            ReplaceTags(container.Tags, TagPalette.ParseTags(EditTags));
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
             container.PathPattern = EditPathPattern;
             container.BackupSourceType = EditBackupSourceType;

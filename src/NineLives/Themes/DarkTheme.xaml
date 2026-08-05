@@ -685,4 +685,32 @@
         </Setter>
     </Style>
 
+    <!-- Automatic tags: facts the app detected, not labels the user typed. Deliberately neutral
+         and outline-only so a derived value is never mistaken for a human assertion, and so it
+         cannot compete with a red PROD pill for attention. -->
+    <DataTemplate x:Key="AutoTagPillTemplate">
+        <Border CornerRadius="9"
+                Padding="7,1"
+                Margin="0,2,4,0"
+                BorderThickness="1"
+                Background="Transparent"
+                BorderBrush="{StaticResource InputBorderBrush}">
+            <TextBlock Text="{Binding}"
+                       FontFamily="Segoe UI"
+                       FontSize="10.5"
+                       Foreground="{StaticResource SecondaryTextBrush}" />
+        </Border>
+    </DataTemplate>
+
+    <Style x:Key="AutoTagPillList" TargetType="ItemsControl">
+        <Setter Property="ItemTemplate" Value="{StaticResource AutoTagPillTemplate}" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

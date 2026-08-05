@@ -65,9 +65,12 @@
                                     <TextBlock Text="{Binding DisplayText}"
                                                Style="{StaticResource SecondaryText}"
                                                Margin="22,2,0,0" />
-                                    <ItemsControl ItemsSource="{Binding Tags}"
-                                                  Style="{StaticResource TagPillList}"
-                                                  Margin="22,2,0,0" />
+                                    <WrapPanel Orientation="Horizontal" Margin="22,2,0,0">
+                                        <ItemsControl ItemsSource="{Binding Tags}"
+                                                      Style="{StaticResource TagPillList}" />
+                                        <ItemsControl ItemsSource="{Binding AutoTags}"
+                                                      Style="{StaticResource AutoTagPillList}" />
+                                    </WrapPanel>
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
