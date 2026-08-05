@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: write
+  # Build provenance attestation: id-token mints the short-lived Sigstore identity that
+  # proves the signature came from this workflow, attestations stores the result.
+  id-token: write
+  attestations: write
 
 # Release runs are never cancelled and never share a concurrency group — each one must
 # finish and attach its assets to the release that triggered it.
@@ -67,6 +71,22 @@ jobs:
           $checksums | Out-File -FilePath releases/SHA256SUMS.txt -Encoding utf8
           Write-Host "Checksums:"
           $checksums | ForEach-Object { Write-Host $_ }
+
+      # Signed, tamper-evident proof of where this exe came from: which repo, which commit,
+      # which workflow run. Anyone can check it with
+      #     gh attestation verify NineLives.exe --repo jakemorgangit/NineLives
+      # and get a hard answer, rather than trusting that the file on the Releases page is
+      # the one this workflow built. A checksum only proves the file matches a number
+      # published next to it; provenance ties it back to source.
+      #
+      # This is NOT code signing and does nothing for SmartScreen - see #33 and
+      # docs/code-signing.md. It is the part that can be done without a certificate.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            releases/NineLives.exe
+            releases/NineLives-${{ steps.version.outputs.VERSION }}-win-x64.zip
 
       - name: Upload release assets
         env:
