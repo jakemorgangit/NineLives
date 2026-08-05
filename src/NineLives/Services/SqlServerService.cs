@@ -1,5 +1,6 @@
 using System.Data;
 using System.Security;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Blackcat.NineLives.Models;
 
@@ -436,8 +437,20 @@ public class SqlServerService
         }
     }
 
+    /// <summary>
+    /// A one-line preview of a statement for the console.
+    ///
+    /// Whitespace is collapsed FIRST. Taking the first 80 characters raw pulled in the newlines
+    /// and blank lines of the script's comment banner, so a single "Executing statement 1 of 22"
+    /// message arrived as several lines with gaps between them.
+    /// </summary>
     private static string Summarize(string statement)
-        => statement[..Math.Min(80, statement.Length)].Trim();
+    {
+        var flattened = WhitespaceRun.Replace(statement, " ").Trim();
+        return flattened.Length <= 80 ? flattened : flattened[..80] + "...";
+    }
+
+    private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>Checks if a credential with the given name exists on the server and has identity SHARED ACCESS SIGNATURE (for blob URL restores).</summary>
     public async Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(

@@ -260,6 +260,114 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         });
     }
 
+    /// <summary>
+    /// The console renders its lines and no longer shares a slot with the generated script - both
+    /// are on screen together.
+    ///
+    /// Checked in the state AFTER a restore, which is when the inline console is the one in use:
+    /// during a restore the console lives in its own window and the inline one is deliberately
+    /// hidden.
+    /// </summary>
+    [Fact]
+    public void TheConsoleAndTheScriptAreBothVisibleTogether()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.BackupsLoaded = true;
+            vm.HasScript = true;
+            vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
+            vm.ConsoleLines =
+            [
+                new ConsoleLine("Beginning restore execution...", ConsoleLineKind.Step),
+                new ConsoleLine("50 percent processed."),
+                new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
+            ];
+            vm.HasConsoleOutput = true;
+            vm.IsExecuting = false;
+            vm.ExecutionComplete = true;
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.Contains(texts, t => t.Contains("50 percent processed", StringComparison.Ordinal));
+                Assert.Contains(texts, t => t.Contains("Beginning restore execution", StringComparison.Ordinal));
+
+                // The script pane used to be hidden the moment execution started, so the two
+                // shared one slot. Both must now be on screen at the same time.
+                var script = Assert.Single(FindAll<SqlTextBlock>(view));
+                Assert.Contains("RESTORE DATABASE [MyDb]", script.Sql, StringComparison.Ordinal);
+
+                // ...and it is actually highlighted, not one undifferentiated run.
+                var runs = script.Inlines.OfType<System.Windows.Documents.Run>().ToList();
+                Assert.True(runs.Count > 1, "The script rendered as a single run - no highlighting applied.");
+                Assert.Contains(runs, r => r.Text == "RESTORE");
+
+                listener.AssertNone("RestoreView console");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    /// <summary>
+    /// The inline console and the execution window are mutually exclusive: while the console is
+    /// showing in its own window the inline one must be gone, not sitting behind it.
+    /// </summary>
+    [Fact]
+    public void TheInlineConsoleHidesWhileTheConsoleIsInItsOwnWindow()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.BackupsLoaded = true;
+            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
+            vm.HasConsoleOutput = true;
+
+            var view = new RestoreView { DataContext = vm };
+
+            vm.IsConsoleDetached = false;
+            Realise(view);
+            Assert.True(FindAll<ListBox>(view).Any(IsShown),
+                "The inline console should be visible when it is not shown in its own window.");
+
+            vm.IsConsoleDetached = true;
+            Realise(view);
+            Assert.False(FindAll<ListBox>(view).Any(IsShown),
+                "The inline console is still on screen behind the execution window.");
+        });
+    }
+
+    /// <summary>
+    /// The belt-and-braces half: while a restore is running the console is always in its own
+    /// window, so the inline one must be gone even if the detach flag never got set.
+    /// </summary>
+    [Fact]
+    public void TheInlineConsoleHidesWhileARestoreIsRunning()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.BackupsLoaded = true;
+            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
+            vm.HasConsoleOutput = true;
+            vm.IsConsoleDetached = false;   // as if the wiring failed
+            vm.IsExecuting = true;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            Assert.False(FindAll<ListBox>(view).Any(IsShown),
+                "Two consoles would be on screen at once during a restore.");
+        });
+    }
+
     /// <summary>The inventory warnings panel added with #46 - separate from the chain issues one.</summary>
     [Fact]
     public void TheInventoryPanelShowsItsFindings()

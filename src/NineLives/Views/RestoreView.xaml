@@ -1,7 +1,8 @@
 <UserControl x:Class="Blackcat.NineLives.Views.RestoreView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
+             xmlns:converters="clr-namespace:Blackcat.NineLives.Converters"
+             xmlns:views="clr-namespace:Blackcat.NineLives.Views">
 
     <UserControl.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
@@ -936,45 +937,121 @@
                                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
                                Margin="0,0,0,12" TextWrapping="Wrap" />
 
-                    <!-- Script Output (hidden during execution) -->
+                    <!-- The generated script. Stays visible during and after execution: it used to
+                         be hidden the moment Execute was pressed, so the script and the console
+                         shared one slot and you could not see what was running while it ran. -->
                     <Border Background="{StaticResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="0">
+                            CornerRadius="4" Padding="0"
+                            Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <Grid Margin="12,8,12,4">
+                                <TextBlock Text="GENERATED SCRIPT" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="updates as you change options"
+                                           Style="{StaticResource SecondaryText}"
+                                           FontSize="11"
+                                           HorizontalAlignment="Right" />
+                            </Grid>
+                            <ScrollViewer MaxHeight="320"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Auto"
+                                          Padding="12,4,12,10">
+                                <views:SqlTextBlock Sql="{Binding GeneratedScript}"
+                                                    FontFamily="{StaticResource ConsoleFont}"
+                                                    FontSize="12"
+                                                    TextWrapping="NoWrap"
+                                                    Foreground="{StaticResource ConsoleTextBrush}" />
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Execution console.
+                         Its own surface, darker than the cards, so it reads as a terminal rather
+                         than another form panel. Lines come from a collection rather than one
+                         growing string: appending to a bound string re-rendered the whole control
+                         on every message, which is why progress arrived in bursts. -->
+                    <Border CornerRadius="6" Margin="0,12,0,0"
+                            Background="{StaticResource ConsoleBackgroundBrush}"
+                            BorderBrush="{StaticResource ConsoleBorderBrush}"
+                            BorderThickness="1">
+                        <!-- Shown only when the console is NOT in its own window - the two are
+                             mutually exclusive, so the output is never rendered twice. -->
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="Visibility" Value="Collapsed" />
                                 <Style.Triggers>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding HasScript}" Value="True" />
+                                            <Condition Binding="{Binding HasConsoleOutput}" Value="True" />
+                                            <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
+                                            <!-- Belt and braces. While a restore runs the console
+                                                 is always in its own window, so the inline one
+                                                 must be gone even if the detach flag never got
+                                                 set - a wiring failure should not put two
+                                                 consoles on screen. -->
                                             <Condition Binding="{Binding IsExecuting}" Value="False" />
-                                            <Condition Binding="{Binding ExecutionComplete}" Value="False" />
                                         </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible" />
                                     </MultiDataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
-                        <TextBox Text="{Binding GeneratedScript, Mode=OneWay}"
-                                 Style="{StaticResource DarkTextBox}"
-                                 IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto" MaxHeight="400"
-                                 FontFamily="Cascadia Code, Consolas, Courier New" FontSize="12" />
-                    </Border>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                    <!-- Execution Log -->
-                    <Border Background="{StaticResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="0" Margin="0,12,0,0"
-                            Visibility="{Binding ExecutionLog, Converter={StaticResource NullToVis}}">
-                        <StackPanel>
-                            <TextBlock Text="EXECUTION LOG" Style="{StaticResource LabelText}" Margin="12,8,0,4" />
-                            <TextBox x:Name="ExecutionLogBox"
-                                     Text="{Binding ExecutionLog, Mode=OneWay}"
-                                     Style="{StaticResource DarkTextBox}"
-                                     IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
-                                     VerticalScrollBarVisibility="Auto" MaxHeight="300"
-                                     FontFamily="Cascadia Code, Consolas, Courier New" FontSize="12"
-                                     TextChanged="ExecutionLogBox_TextChanged" />
-                        </StackPanel>
+                            <!-- Chrome strip: title, live indicator, copy. -->
+                            <Border Grid.Row="0"
+                                    Background="{StaticResource ConsoleChromeBrush}"
+                                    CornerRadius="5,5,0,0"
+                                    BorderBrush="{StaticResource ConsoleBorderBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="12,7">
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Ellipse Width="9" Height="9" Margin="0,0,7,0">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{StaticResource ConsoleMutedBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExecuting}" Value="True">
+                                                            <Setter Property="Fill" Value="{StaticResource ConsoleSuccessBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="restore console"
+                                                   Foreground="{StaticResource ConsoleMutedBrush}"
+                                                   FontFamily="{StaticResource ConsoleFont}"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding ConsoleLines.Count, StringFormat='{}{0} lines'}"
+                                                   Foreground="{StaticResource ConsoleMutedBrush}"
+                                                   FontFamily="{StaticResource ConsoleFont}"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,12,0" />
+                                        <Button Content="Copy output"
+                                                Command="{Binding CopyConsoleCommand}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="8,2" FontSize="11"
+                                                ToolTip="Copies the whole console, which is what to attach to a bug report." />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Virtualised so a long restore stays responsive. Auto-follows the
+                                 last line unless the user has scrolled up to read something. -->
+                            <ListBox Grid.Row="1" x:Name="ConsoleList"
+                                     ItemsSource="{Binding ConsoleLines}"
+                                     Style="{StaticResource ConsoleListBox}"
+                                     MaxHeight="360" />
+                        </Grid>
                     </Border>
 
                     <!-- What a failed restore left behind, and how to undo it (#14). A chain that
@@ -983,8 +1060,23 @@
                          worst moment to be left working that out from a raw SQL error. Each action
                          shows the exact statement before it runs. -->
                     <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
-                            Background="#3A1E1E" BorderBrush="#A33F3F" BorderThickness="1"
-                            Visibility="{Binding HasRecoveryActions, Converter={StaticResource BoolToVis}}">
+                            Background="#3A1E1E" BorderBrush="#A33F3F" BorderThickness="1">
+                        <!-- Same rule as the console: not while it is showing in its own window,
+                             where the recovery actions already appear. -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding HasRecoveryActions}" Value="True" />
+                                            <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel>
                             <TextBlock Text="THE TARGET DATABASE NEEDS ATTENTION"
                                        Style="{StaticResource LabelText}" Margin="0,0,0,8" />

@@ -9,6 +9,7 @@ namespace Blackcat.NineLives.Tests;
 /// The password stays out of the connection string (#20), and certificate trust is answerable
 /// rather than assumed (#17).
 /// </summary>
+[Collection("CredentialManager")]
 public class ConnectionSecurityTests : IDisposable
 {
     private readonly string _dir = Path.Combine(

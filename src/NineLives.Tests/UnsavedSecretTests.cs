@@ -20,6 +20,7 @@ namespace Blackcat.NineLives.Tests;
 /// The fix is a transient in-memory secret the services prefer over the stored one. These tests
 /// pin both halves: the transient value is used, and it never reaches disk.
 /// </summary>
+[Collection("CredentialManager")]
 public class UnsavedSecretTests : IDisposable
 {
     private readonly string _dir = Path.Combine(

@@ -58,6 +58,9 @@ public sealed class OperationLog
     public void ServerChange(string serverName, string what)
         => Write("CHANGE", $"[{serverName}] {what}");
 
+    private string? _ensuredDirectory;
+    private int _writesSinceRollCheck;
+
     private void Write(string level, string message)
     {
         try
@@ -66,15 +69,29 @@ public sealed class OperationLog
 
             lock (_gate)
             {
-                System.IO.Directory.CreateDirectory(_directory);
-                RollIfTooBig();
+                // Creating the directory and stat-ing the file on EVERY line meant three
+                // filesystem calls per message. A restore reporting progress every few percent
+                // does that hundreds of times from the UI thread, which is a real part of why the
+                // console stuttered. The directory is created once, and the size is only checked
+                // periodically - a log overshooting the roll threshold by a few hundred lines
+                // costs nothing, and the check is not free.
+                if (_ensuredDirectory != _directory)
+                {
+                    System.IO.Directory.CreateDirectory(_directory);
+                    _ensuredDirectory = _directory;
+                }
+
+                if (_writesSinceRollCheck++ % 200 == 0) RollIfTooBig();
+
                 File.AppendAllText(CurrentFile, line + Environment.NewLine, Encoding.UTF8);
             }
         }
         catch
         {
             // Logging is never worth failing an operation over. A locked file, a full disk or a
-            // redirected profile all end up here and are all survivable.
+            // redirected profile all end up here and are all survivable. Forget the cached
+            // directory so a transient failure is retried rather than assumed permanent.
+            _ensuredDirectory = null;
         }
     }
 
