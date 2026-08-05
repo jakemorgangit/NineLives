@@ -510,6 +510,60 @@ public class XamlLoadTests(WpfFixture wpf)
     }
 
     /// <summary>
+    /// The restore point list and its narrowing controls (#27). The list is the only way to pick
+    /// one point out of hundreds, so a binding that silently failed would leave the timeline as
+    /// the only selector again - which is the problem being fixed.
+    /// </summary>
+    [Fact]
+    public void TheRestorePointListRendersAndBindsItsSelection()
+    {
+        wpf.Invoke(() =>
+        {
+            var full = new BackupSet
+            {
+                SetId = "20260110_220000",
+                Type = BackupType.Full,
+                Timestamp = new DateTime(2026, 1, 10, 22, 0, 0),
+                Files = [new BackupFileInfo { BlobName = "FULL/SRV01/MyDb/20260110_220000.bak", SizeBytes = 1000 }]
+            };
+
+            var vm = NewRestoreViewModel();
+            vm.HasRestorePoints = true;
+            vm.HasVisiblePoints = true;
+            vm.PointCountText = "Showing 1 of 4 restore point(s)";
+            vm.RestorePoints =
+            [
+                new RestorePoint
+                {
+                    Timestamp = full.Timestamp,
+                    Type = BackupType.Full,
+                    PrimarySet = full,
+                    RequiredFullSet = full
+                }
+            ];
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.True(
+                    texts.Any(t => t.Contains("2026-01-10 22:00:00", StringComparison.Ordinal)),
+                    "The restore point list did not render its rows.");
+                Assert.Contains(texts, t => t.Contains("Showing 1 of 4", StringComparison.Ordinal));
+
+                listener.AssertNone("RestoreView point list");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    /// <summary>
     /// The restore history view (#31). Populated, because its rows colour the outcome through a
     /// Style on a Run and the detail pane only exists once something is selected - none of which
     /// is built when the list is empty.
