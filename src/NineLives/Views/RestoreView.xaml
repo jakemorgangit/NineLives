@@ -248,10 +248,14 @@
                                                         <TextBlock FontWeight="SemiBold">
                                                             <Run Text="{Binding TypeDisplay, Mode=OneWay}" />
                                                             <Run Text=" — " />
-                                                            <Run Text="{Binding Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}', Mode=OneWay}" />
+                                                            <Run Text="{Binding TimestampDisplay, Mode=OneWay}" />
                                                         </TextBlock>
                                                         <TextBlock Text="{Binding ChainDescription}"
                                                                    Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding TimestampNote}"
+                                                                   Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"
+                                                                   Margin="0,4,0,0"
+                                                                   Visibility="{Binding IsTimestampApproximate, Converter={StaticResource BoolToVis}}" />
                                                     </StackPanel>
                                                 </Button.ToolTip>
                                             </Button>
@@ -330,8 +334,22 @@
 
                             <DataGridTextColumn Header="Set ID" Width="160"
                                                 Binding="{Binding SetId}" />
+                            <!-- Sorts on the underlying value, not the display string, so a "~"
+                                 prefix cannot push approximate sets to one end of the grid. -->
                             <DataGridTextColumn Header="Timestamp" Width="150"
-                                                Binding="{Binding Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" />
+                                                SortMemberPath="Timestamp"
+                                                Binding="{Binding TimestampDisplay}">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="ToolTip" Value="{Binding TimestampNote}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsTimestampApproximate}" Value="True">
+                                                <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                             <DataGridTextColumn Header="Files" Width="55"
                                                 Binding="{Binding FileCount}" />
                             <DataGridTextColumn Header="Striped" Width="60"
@@ -352,7 +370,7 @@
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
                             <Run Text="Selected: " Foreground="{StaticResource SecondaryTextBrush}" />
-                            <Run Text="{Binding SelectedRestorePoint.Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}', Mode=OneWay}"
+                            <Run Text="{Binding SelectedRestorePoint.TimestampDisplay, Mode=OneWay}"
                                  FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
                             <Run Text="  |  " Foreground="{StaticResource SecondaryTextBrush}" />
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{StaticResource SecondaryTextBrush}" />
@@ -496,7 +514,8 @@
                                             <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}"
                                                        Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="3"
-                                                       Text="{Binding EffectiveDate, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}"
+                                                       Text="{Binding EffectiveDateDisplay}"
+                                                       ToolTip="{Binding EffectiveDateNote}"
                                                        Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
                                         </Grid>
                                     </DataTemplate>

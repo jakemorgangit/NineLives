@@ -241,8 +241,14 @@ public class BlobStorageService
             LogBackups = sets.Count(s => s.Type == BackupType.TransactionLog),
             UnknownFiles = sets.Count(s => s.Type == BackupType.Unknown),
             TotalSizeBytes = sets.Sum(s => s.TotalSizeBytes),
-            EarliestBackup = sets.Count > 0 ? sets.Min(s => new DateTimeOffset(s.Timestamp)) : null,
-            LatestBackup = sets.Count > 0 ? sets.Max(s => new DateTimeOffset(s.Timestamp)) : null
+
+            // Deliberately NOT EarliestBackup/LatestBackup. A set's Timestamp is a bare wall clock
+            // whose zone varies by set, and wrapping it in a DateTimeOffset stamped it with the
+            // WORKSTATION's offset - which is nobody's clock, and double-shifted the blob-derived
+            // ones. The set range keeps its own members so the two can never be confused.
+            EarliestSetTimestamp = sets.Count > 0 ? sets.Min(s => s.Timestamp) : null,
+            LatestSetTimestamp = sets.Count > 0 ? sets.Max(s => s.Timestamp) : null,
+            ApproximateSets = sets.Count(s => s.IsTimestampApproximate)
         };
     }
 
@@ -294,14 +300,21 @@ public class BlobStorageService
         {
             var first = groupFiles[0];
             var (setId, _) = BackupSet.ParseFileName(first.FileName);
-            var timestamp = BackupSet.ParseTimestamp(setId) ?? first.LastModified.DateTime;
+
+            // The filename is the backup server's local clock; the blob's LastModified is UTC.
+            // Nothing here can reconcile them, so record WHICH one this set got and let the UI
+            // mark the fallback as approximate rather than presenting both as one timeline.
+            var parsed = BackupSet.ParseTimestamp(setId);
 
             sets.Add(new BackupSet
             {
                 SetId = setId,
                 Type = first.Type,
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
-                Timestamp = timestamp,
+                Timestamp = parsed ?? BackupTime.WallClock(first.LastModified),
+                TimestampSource = parsed != null
+                    ? BackupTimestampSource.FileName
+                    : BackupTimestampSource.BlobLastModified,
                 DatabaseName = first.InferredDatabaseName,
                 ServerName = first.InferredServerName,
                 InstanceName = first.InferredInstanceName,
@@ -551,8 +564,24 @@ public class ContainerSummary
     public int LogBackups { get; set; }
     public int UnknownFiles { get; set; }
     public long TotalSizeBytes { get; set; }
+
+    /// <summary>
+    /// File-level range, straight from blob metadata, so genuine UTC instants. Only populated by
+    /// the file-based summary.
+    /// </summary>
     public DateTimeOffset? EarliestBackup { get; set; }
     public DateTimeOffset? LatestBackup { get; set; }
+
+    /// <summary>
+    /// Set-level range. Bare wall clocks, not instants: most read the backup server's local clock
+    /// and any counted by <see cref="ApproximateSets"/> read UTC instead. Only populated by the
+    /// set-based summary.
+    /// </summary>
+    public DateTime? EarliestSetTimestamp { get; set; }
+    public DateTime? LatestSetTimestamp { get; set; }
+
+    /// <summary>How many sets had to fall back to the blob's LastModified for their time.</summary>
+    public int ApproximateSets { get; set; }
 
     public string TotalSizeDisplay => ByteSize.Format(TotalSizeBytes);
 }
