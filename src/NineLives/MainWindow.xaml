@@ -8,7 +8,7 @@
         Height="800" Width="1200"
         MinHeight="600" MinWidth="900"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource WindowBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
 
     <!-- DataContext is set in the constructor, not here. Declaring it in XAML meant every
          construction of this window - including a test that only wanted to check the markup -
@@ -50,14 +50,14 @@
              because something is on fire, and a popup between the DBA and the restore button
              would be exactly wrong. -->
         <Border Grid.Row="0"
-                Background="{StaticResource UpdateBannerBrush}"
-                BorderBrush="{StaticResource UpdateBannerEdgeBrush}"
+                Background="{DynamicResource UpdateBannerBrush}"
+                BorderBrush="{DynamicResource UpdateBannerEdgeBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="16,10"
                 Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVis}}">
             <!-- Lifts the band off the window rather than letting it read as another dark stripe. -->
             <Border.Effect>
-                <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.45" Direction="270" />
+                <DropShadowEffect Color="{DynamicResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.45" Direction="270" />
             </Border.Effect>
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -70,9 +70,9 @@
                 <!-- Badge. Pulses slowly - enough to catch the eye on a screen someone is already
                      looking at, slow enough not to nag while they work. -->
                 <Grid Grid.Column="0" Width="24" Height="24" Margin="0,0,12,0" VerticalAlignment="Center">
-                    <Ellipse Fill="#1A1205" Opacity="0.92" />
+                    <Ellipse Fill="{DynamicResource UpdateBannerBadgeBrush}" Opacity="0.92" />
                     <TextBlock Text="&#x2191;"
-                               Foreground="#FFC24B"
+                               Foreground="{DynamicResource UpdateBannerBadgeGlyphBrush}"
                                FontSize="15"
                                FontWeight="Bold"
                                HorizontalAlignment="Center"
@@ -93,7 +93,7 @@
                 <TextBlock Grid.Column="1"
                            Text="{Binding UpdateMessage}"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource UpdateBannerTextBrush}"
+                           Foreground="{DynamicResource UpdateBannerTextBrush}"
                            FontFamily="Segoe UI"
                            FontSize="13.5"
                            FontWeight="SemiBold"
@@ -119,13 +119,13 @@
             </Grid.ColumnDefinitions>
 
             <!-- Sidebar -->
-            <Border Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}">
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}">
                 <DockPanel>
                     <!-- App Title -->
                     <StackPanel DockPanel.Dock="Top" Margin="20,20,20,8">
                         <TextBlock FontSize="18" FontWeight="Bold"
                                    FontFamily="Segoe UI">
-                            <Run Text="Nine" Foreground="{StaticResource PrimaryTextBrush}" /><Run Text=" Lives" Foreground="{StaticResource AccentBrush}" />
+                            <Run Text="Nine" Foreground="{DynamicResource PrimaryTextBrush}" /><Run Text=" Lives" Foreground="{DynamicResource AccentBrush}" />
                         </TextBlock>
                         <TextBlock Text="SQL Restore from Azure Blob"
                                    Style="{StaticResource SecondaryText}"
@@ -134,7 +134,7 @@
 
                     <Border DockPanel.Dock="Top"
                             Height="1"
-                            Background="{StaticResource CardBorderBrush}"
+                            Background="{DynamicResource CardBorderBrush}"
                             Margin="16,8,16,8" />
 
                     <!-- About Button -->
@@ -151,18 +151,18 @@
 
                     <!-- Connection Status -->
                     <Border DockPanel.Dock="Bottom"
-                            Background="{StaticResource CardBackgroundBrush}"
+                            Background="{DynamicResource CardBackgroundBrush}"
                             CornerRadius="6"
                             Padding="12,8"
                             Margin="12,8,12,16">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <Ellipse Width="8" Height="8"
-                                         Fill="{StaticResource SuccessBrush}"
+                                         Fill="{DynamicResource SuccessBrush}"
                                          VerticalAlignment="Center"
                                          Visibility="{Binding IsConnectedToSql, Converter={StaticResource BoolToVis}}" />
                                 <Ellipse Width="8" Height="8"
-                                         Fill="{StaticResource SecondaryTextBrush}"
+                                         Fill="{DynamicResource SecondaryTextBrush}"
                                          VerticalAlignment="Center"
                                          Visibility="{Binding IsConnectedToSql, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
                                 <TextBlock Style="{StaticResource SecondaryText}"
@@ -179,7 +179,7 @@
                     <StackPanel DockPanel.Dock="Top" Margin="0,8,0,0">
                         <TextBlock Text="CONFIGURATION"
                                    FontSize="10" FontWeight="Bold"
-                                   Foreground="{StaticResource DisabledTextBrush}"
+                                   Foreground="{DynamicResource DisabledTextBrush}"
                                    Margin="20,8,0,4"
                                    FontFamily="Segoe UI" />
 
@@ -203,12 +203,12 @@
                         </RadioButton>
 
                         <Border Height="1"
-                                Background="{StaticResource CardBorderBrush}"
+                                Background="{DynamicResource CardBorderBrush}"
                                 Margin="16,12,16,4" />
 
                         <TextBlock Text="OPERATIONS"
                                    FontSize="10" FontWeight="Bold"
-                                   Foreground="{StaticResource DisabledTextBrush}"
+                                   Foreground="{DynamicResource DisabledTextBrush}"
                                    Margin="20,8,0,4"
                                    FontFamily="Segoe UI" />
 
@@ -248,7 +248,7 @@
                 <Border DockPanel.Dock="Top"
                         Padding="16,6"
                         Visibility="{Binding IsConnectedToSql, Converter={StaticResource BoolToVis}}">
-                    <Border Background="#1A27AE60" CornerRadius="4" Padding="10,5">
+                    <Border Background="{DynamicResource SuccessPanelBackgroundBrush}" CornerRadius="4" Padding="10,5">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -256,11 +256,11 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Orientation="Horizontal">
                                 <Ellipse Width="8" Height="8"
-                                         Fill="{StaticResource SuccessBrush}"
+                                         Fill="{DynamicResource SuccessBrush}"
                                          VerticalAlignment="Center"
                                          Margin="0,0,8,0" />
                                 <TextBlock VerticalAlignment="Center"
-                                           Foreground="{StaticResource SuccessBrush}"
+                                           Foreground="{DynamicResource SuccessBrush}"
                                            FontSize="12">
                                     <Run Text="Connected to" />
                                     <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" />
@@ -273,8 +273,8 @@
                                     FontSize="11"
                                     Background="Transparent"
                                     BorderThickness="1"
-                                    BorderBrush="{StaticResource SuccessBrush}"
-                                    Foreground="{StaticResource SuccessBrush}"
+                                    BorderBrush="{DynamicResource SuccessBrush}"
+                                    Foreground="{DynamicResource SuccessBrush}"
                                     Cursor="Hand"
                                     VerticalAlignment="Center" />
                         </Grid>
@@ -286,7 +286,7 @@
 
         <!-- Status Bar -->
         <Border Grid.Row="2"
-                Background="{StaticResource StatusBarBackgroundBrush}"
+                Background="{DynamicResource StatusBarBackgroundBrush}"
                 Padding="16,6">
             <Grid>
                 <Grid.ColumnDefinitions>
