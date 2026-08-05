@@ -52,6 +52,10 @@ Nine Lives points at a container, discovers every backup, groups striped sets, c
 - Colour-coded dots for Full (blue), Differential (orange), and Log (green) backups
 - Clickable restore points with automatic chain calculation
 - Intelligent backup chain building including required differentials
+- **Stop at an exact moment (`STOPAT`)** — select a transaction log restore point and specify a
+  precise time within it, rather than being limited to the end of a log backup. `STOPAT` is
+  emitted on every `RESTORE LOG` in the chain, so recovery stops in whichever log actually
+  contains the target time.
 
 ### Restore Script Generation
 - Complete T-SQL restore scripts with proper `FROM URL` syntax
@@ -189,6 +193,10 @@ The executable will be created at `./publish/NineLives.exe`.
    - **WITH REPLACE** - Overwrite if database exists
    - **WITH MOVE** - Relocate files (paths auto-detected from connected server)
    - **Recovery Mode** - RECOVERY (online), NORECOVERY (for more restores), or STANDBY
+   - **Point in Time** - when a transaction log restore point is selected, tick *Stop at a
+     specific time* and enter the target as `yyyy-MM-dd HH:mm:ss`. The time must fall within the
+     selected log's window (after the previous restore point, up to the selected one); to stop
+     earlier or later, pick a different point on the timeline.
 7. Click **Generate Script** to create the T-SQL
 8. Either:
    - **Copy to Clipboard** or **Save to File** to run manually in SSMS

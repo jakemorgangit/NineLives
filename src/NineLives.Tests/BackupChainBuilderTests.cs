@@ -521,4 +521,98 @@ public class BackupChainBuilderTests
         Assert.Same(point.RequiredLogSets, chain.LogSets);
         Assert.Null(chain.StopAt);
     }
+
+    // ---- StopAtWindow (point-in-time bounds) -----------------------------
+
+    [Fact]
+    public void StopAtWindow_NoLogs_IsNull()
+    {
+        var chain = new BackupChain { FullSet = Set(BackupType.Full, T(1)) };
+        Assert.Null(chain.StopAtWindow);
+    }
+
+    [Fact]
+    public void StopAtWindow_SingleLogAfterFull_SpansFullToLog()
+    {
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T(1)),
+            LogSets = [Set(BackupType.TransactionLog, T(2))]
+        };
+
+        var window = chain.StopAtWindow;
+
+        Assert.NotNull(window);
+        Assert.Equal(T(1), window!.Value.Earliest);
+        Assert.Equal(T(2), window.Value.Latest);
+    }
+
+    [Fact]
+    public void StopAtWindow_SingleLogAfterDiff_StartsAtTheDiff()
+    {
+        // The database is restored up to the differential before the log is applied, so the
+        // differential - not the full - is the lower bound.
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T(1)),
+            DiffSets = [Set(BackupType.Differential, T(4))],
+            LogSets = [Set(BackupType.TransactionLog, T(5))]
+        };
+
+        Assert.Equal(T(4), chain.StopAtWindow!.Value.Earliest);
+        Assert.Equal(T(5), chain.StopAtWindow.Value.Latest);
+    }
+
+    [Fact]
+    public void StopAtWindow_MultipleLogs_StartsAtThePenultimateLog()
+    {
+        // The target must land inside the LAST log; every earlier log applies in full.
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T(1)),
+            LogSets =
+            [
+                Set(BackupType.TransactionLog, T(2)),
+                Set(BackupType.TransactionLog, T(3)),
+                Set(BackupType.TransactionLog, T(4))
+            ]
+        };
+
+        Assert.Equal(T(3), chain.StopAtWindow!.Value.Earliest);
+        Assert.Equal(T(4), chain.StopAtWindow.Value.Latest);
+    }
+
+    [Fact]
+    public void StopAtWindow_PrefersPenultimateLogOverAnEarlierDiff()
+    {
+        var chain = new BackupChain
+        {
+            FullSet = Set(BackupType.Full, T(1)),
+            DiffSets = [Set(BackupType.Differential, T(4))],
+            LogSets =
+            [
+                Set(BackupType.TransactionLog, T(5)),
+                Set(BackupType.TransactionLog, T(6))
+            ]
+        };
+
+        Assert.Equal(T(5), chain.StopAtWindow!.Value.Earliest);
+    }
+
+    [Fact]
+    public void StopAtWindow_UpperBoundMatchesTheSelectedRestorePoint()
+    {
+        // The bound the UI offers must equal the point the user clicked on the timeline.
+        var points = _builder.ComputeRestorePoints(
+        [
+            Set(BackupType.Full, T(1)),
+            Set(BackupType.TransactionLog, T(2)),
+            Set(BackupType.TransactionLog, T(3))
+        ]);
+
+        var selected = points.Last(p => p.Type == BackupType.TransactionLog);
+        var chain = _builder.BuildChainFromRestorePoint(selected);
+
+        Assert.Equal(selected.Timestamp, chain.StopAtWindow!.Value.Latest);
+    }
 }

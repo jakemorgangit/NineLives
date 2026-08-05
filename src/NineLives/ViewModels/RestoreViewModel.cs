@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -98,6 +99,42 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _standbyFilePath = string.Empty;
+
+    // ── Point-in-time (STOPAT) ───────────────────────────────────────────────────
+    // Only meaningful for a transaction-log restore point. Without this the granularity of a
+    // "point in time" restore is the end of whichever log backup was selected - so with
+    // 15-minute logs, recovering from a bad DELETE at 14:23:41 could only land on 14:15 or
+    // 14:30. The target is bounded to within the selected log's window; to stop earlier the
+    // user picks an earlier restore point, which keeps the generated chain correct.
+
+    /// <summary>True when the selected restore point is a log, so STOPAT applies.</summary>
+    [ObservableProperty]
+    private bool _canUsePointInTime;
+
+    [ObservableProperty]
+    private bool _usePointInTime;
+
+    /// <summary>User-entered target time, parsed into <see cref="StopAtDateTime"/>.</summary>
+    [ObservableProperty]
+    private string _stopAtText = string.Empty;
+
+    /// <summary>Parsed and validated target, or null when unusable.</summary>
+    [ObservableProperty]
+    private DateTime? _stopAtDateTime;
+
+    /// <summary>Exclusive lower bound: the end of the previous set in the chain.</summary>
+    [ObservableProperty]
+    private DateTime? _stopAtEarliest;
+
+    /// <summary>Inclusive upper bound: the end of the selected log backup.</summary>
+    [ObservableProperty]
+    private DateTime? _stopAtLatest;
+
+    [ObservableProperty]
+    private string _pointInTimeMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasPointInTimeError;
 
     [ObservableProperty]
     private bool _disconnectSessions = true;
@@ -384,6 +421,7 @@ public partial class RestoreViewModel : ViewModelBase
             ChainFiles.Clear();
             ChainSets.Clear();
             ChainSummary = string.Empty;
+            UpdatePointInTimeWindow(null);
             FetchedFileMoves = [];
             HasFetchedFileMoves = false;
             BackupMetadataSummary = null;
@@ -400,6 +438,7 @@ public partial class RestoreViewModel : ViewModelBase
         ChainFiles = new ObservableCollection<BackupFileInfo>(chain.AllFiles);
         ChainSets = new ObservableCollection<BackupSet>(chain.AllSets);
         ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {value.Timestamp:yyyy-MM-dd HH:mm:ss}";
+        UpdatePointInTimeWindow(value);
         UpdateRestoreSummary();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
@@ -673,7 +712,9 @@ public partial class RestoreViewModel : ViewModelBase
         parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
         parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
 
-        if (SelectedRestorePoint != null && SelectedRestorePoint.Type == BackupType.TransactionLog)
+        if (EffectiveStopAt is DateTime stopAt)
+            parts.Add($"Stop at {stopAt:yyyy-MM-dd HH:mm:ss} (point-in-time recovery).");
+        else if (SelectedRestorePoint != null && SelectedRestorePoint.Type == BackupType.TransactionLog)
             parts.Add($"Restore to end of log backup at {SelectedRestorePoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
 
         var optionsList = new List<string>();
@@ -702,6 +743,112 @@ public partial class RestoreViewModel : ViewModelBase
             parts.Add("Options: " + string.Join("; ", optionsList) + ".");
 
         RestoreSummaryText = string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// Recomputes the STOPAT window for the selected restore point. The window itself is
+    /// <see cref="BackupChain.StopAtWindow"/>; this only projects it onto the UI state.
+    /// </summary>
+    private void UpdatePointInTimeWindow(RestorePoint? point)
+    {
+        var window = point?.Type == BackupType.TransactionLog
+            ? RestoreChain?.StopAtWindow
+            : null;
+
+        if (window == null)
+        {
+            CanUsePointInTime = false;
+            UsePointInTime = false;
+            StopAtEarliest = null;
+            StopAtLatest = null;
+            StopAtText = string.Empty;
+            StopAtDateTime = null;
+            PointInTimeMessage = string.Empty;
+            HasPointInTimeError = false;
+            return;
+        }
+
+        CanUsePointInTime = true;
+        StopAtEarliest = window.Value.Earliest;
+        StopAtLatest = window.Value.Latest;
+        UsePointInTime = false;
+        StopAtText = window.Value.Latest.ToString(StopAtFormat);
+        ValidatePointInTime();
+    }
+
+    private const string StopAtFormat = "yyyy-MM-dd HH:mm:ss";
+
+    private static readonly string[] StopAtAcceptedFormats =
+    [
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-ddTHH:mm"
+    ];
+
+    private void ValidatePointInTime()
+    {
+        if (!CanUsePointInTime)
+        {
+            StopAtDateTime = null;
+            PointInTimeMessage = string.Empty;
+            HasPointInTimeError = false;
+            return;
+        }
+
+        if (!DateTime.TryParseExact(
+                StopAtText?.Trim(), StopAtAcceptedFormats,
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            StopAtDateTime = null;
+            HasPointInTimeError = UsePointInTime;
+            PointInTimeMessage = $"Enter a time as {StopAtFormat}.";
+            UpdateRestoreSummary();
+            return;
+        }
+
+        // Exclusive lower bound: at exactly the previous set's time nothing from this log has
+        // been applied yet, which is the earlier restore point, not this one.
+        if (parsed <= StopAtEarliest)
+        {
+            StopAtDateTime = null;
+            HasPointInTimeError = UsePointInTime;
+            PointInTimeMessage =
+                $"Must be after {StopAtEarliest:yyyy-MM-dd HH:mm:ss} — to stop earlier, " +
+                "select an earlier restore point on the timeline.";
+            UpdateRestoreSummary();
+            return;
+        }
+
+        if (parsed > StopAtLatest)
+        {
+            StopAtDateTime = null;
+            HasPointInTimeError = UsePointInTime;
+            PointInTimeMessage =
+                $"Must be at or before {StopAtLatest:yyyy-MM-dd HH:mm:ss} — to stop later, " +
+                "select a later restore point on the timeline.";
+            UpdateRestoreSummary();
+            return;
+        }
+
+        StopAtDateTime = parsed;
+        HasPointInTimeError = false;
+        PointInTimeMessage = UsePointInTime
+            ? $"Recovery will stop at {parsed:yyyy-MM-dd HH:mm:ss}; later transactions in this log are discarded."
+            : $"Valid range: after {StopAtEarliest:yyyy-MM-dd HH:mm:ss} up to {StopAtLatest:yyyy-MM-dd HH:mm:ss}.";
+        UpdateRestoreSummary();
+    }
+
+    /// <summary>The STOPAT value to generate, or null to restore the whole log chain.</summary>
+    private DateTime? EffectiveStopAt =>
+        CanUsePointInTime && UsePointInTime && !HasPointInTimeError ? StopAtDateTime : null;
+
+    partial void OnStopAtTextChanged(string value) => ValidatePointInTime();
+
+    partial void OnUsePointInTimeChanged(bool value)
+    {
+        ValidatePointInTime();
+        UpdateRestoreSummary();
     }
 
     partial void OnWithReplaceChanged(bool value) => UpdateRestoreSummary();
@@ -739,6 +886,14 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
+        // Refuse to silently fall back to a full-chain restore when the user asked to stop at a
+        // time we could not use - that would replay exactly the transactions they meant to skip.
+        if (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
+        {
+            SetError($"Point-in-time target is not valid. {PointInTimeMessage}");
+            return;
+        }
+
         var sasToken = SelectedContainer != null
             ? _credentialStore.GetSasToken(SelectedContainer)
             : null;
@@ -770,7 +925,7 @@ public partial class RestoreViewModel : ViewModelBase
             StandbyFilePath = string.IsNullOrWhiteSpace(StandbyFilePath) ? null : StandbyFilePath,
             DisconnectSessions = DisconnectSessions,
             StatsPercent = StatsPercent,
-            StopAt = RestoreChain.StopAt,
+            StopAt = EffectiveStopAt,
             KeepReplication = KeepReplication,
             EnableBroker = EnableBroker,
             NewBroker = NewBroker,

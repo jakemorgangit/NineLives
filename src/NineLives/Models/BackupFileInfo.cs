@@ -296,6 +296,36 @@ public class BackupChain
         }
     }
 
+    /// <summary>
+    /// The window a STOPAT target must fall within for this chain.
+    ///
+    /// Lower bound (exclusive) is whatever the database is restored up to before the final log is
+    /// applied - the previous log, else the latest differential, else the full. Upper bound
+    /// (inclusive) is the final log itself.
+    ///
+    /// Constraining the target to the LAST log's window is what keeps the generated chain valid:
+    /// every earlier log ends before the target and so applies in full, introducing no gap. A
+    /// target inside an EARLIER log would require truncating the chain to that log, otherwise the
+    /// later logs restore across a gap and fail with error 4305.
+    ///
+    /// Null when the chain has no logs - STOPAT only applies to a log restore.
+    /// </summary>
+    public (DateTime Earliest, DateTime Latest)? StopAtWindow
+    {
+        get
+        {
+            if (LogSets.Count == 0) return null;
+
+            var earliest = LogSets.Count >= 2
+                ? LogSets[^2].Timestamp
+                : DiffSets.Count > 0
+                    ? DiffSets[^1].Timestamp
+                    : FullSet.Timestamp;
+
+            return (earliest, LogSets[^1].Timestamp);
+        }
+    }
+
     public static BackupChain FromRestorePoint(RestorePoint rp)
     {
         return new BackupChain

@@ -604,6 +604,26 @@
                                      Margin="0,0,0,16"
                                      Visibility="{Binding IsStandbyMode, Converter={StaticResource BoolToVis}}" />
 
+                            <!-- Point-in-time (STOPAT): only shown for a log restore point, where
+                                 stopping partway through the log is meaningful. -->
+                            <StackPanel Visibility="{Binding CanUsePointInTime, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="POINT IN TIME" Style="{StaticResource LabelText}" />
+                                <CheckBox Content="Stop at a specific time (STOPAT)"
+                                          IsChecked="{Binding UsePointInTime}"
+                                          Style="{StaticResource DarkCheckBox}"
+                                          Margin="0,4,0,8"
+                                          ToolTip="Recover to an exact moment inside the selected log backup instead of restoring the whole log." />
+                                <TextBox Text="{Binding StopAtText, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         IsEnabled="{Binding UsePointInTime}"
+                                         Width="180" HorizontalAlignment="Left"
+                                         ToolTip="yyyy-MM-dd HH:mm:ss" />
+                                <TextBlock Text="{Binding PointInTimeMessage}"
+                                           Style="{StaticResource SecondaryText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,16" />
+                            </StackPanel>
+
                             <TextBlock Text="STATS PERCENT" Style="{StaticResource LabelText}" />
                             <TextBox Text="{Binding StatsPercent, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
