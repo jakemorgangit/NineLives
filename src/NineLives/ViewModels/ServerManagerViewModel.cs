@@ -387,8 +387,15 @@ public partial class ServerManagerViewModel : ViewModelBase
                 TrustServerCertificate = EditTrustServerCert,
                 Encrypt = EditEncrypt
             };
+            // In memory only. This used to call SaveSqlPassword, which is a durable write to
+            // Credential Manager - so testing a mistyped password overwrote the working one
+            // before the user had agreed to anything, and Cancel could not undo it (#12).
             if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
-                _credentialStore.SaveSqlPassword(server, EditPassword);
+                server.UnsavedPassword = EditPassword;
+            else if (EditAuthMode == AuthMode.SqlAuth && !IsNew)
+                // No new password typed: test against the one already saved for this entry.
+                server.Id = SelectedServer?.Id;
+
             return server;
         }
         return SelectedServer;

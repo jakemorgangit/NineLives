@@ -123,6 +123,18 @@ public class BlobContainerConfig : INotifyPropertyChanged
     [JsonIgnore]
     public string LegacyCredentialKey => $"NineLives:Blob:{Name}";
 
+    /// <summary>
+    /// A SAS token held in memory for this object only, never written anywhere. When set, the
+    /// blob service uses it in place of the stored one.
+    ///
+    /// This exists for Test Connection (#12). Testing a newly typed token used to persist it to
+    /// Credential Manager first - so pasting a typo'd or expired token, testing it, watching it
+    /// fail and clicking Cancel destroyed the working token that was there before, with no way
+    /// to get it back because the form never displays stored tokens.
+    /// </summary>
+    [JsonIgnore]
+    public string? UnsavedSasToken { get; set; }
+
     public bool IsExpired => GetSasExpiry() is DateTime expiry && expiry < DateTime.UtcNow;
 
     public DateTime? SasExpiry => GetSasExpiry();

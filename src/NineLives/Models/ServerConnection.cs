@@ -146,6 +146,14 @@ public class ServerConnection : INotifyPropertyChanged
     [JsonIgnore]
     public string LegacyCredentialKey => $"NineLives:SQL:{Name}";
 
+    /// <summary>
+    /// A password held in memory for this object only, never written anywhere. When set, the
+    /// connection string uses it in place of the stored one. Same purpose as
+    /// <see cref="BlobContainerConfig.UnsavedSasToken"/> - see the note there (#12).
+    /// </summary>
+    [JsonIgnore]
+    public string? UnsavedPassword { get; set; }
+
     public string DisplayText => AuthMode == AuthMode.WindowsAuth
         ? $"{ServerName} (Windows Auth)"
         : $"{ServerName} ({Username})";
