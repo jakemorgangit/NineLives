@@ -414,6 +414,63 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         });
     }
 
+    /// <summary>
+    /// The VERIFYONLY results panel (#26). Its rows colour the status through a Style on a Run,
+    /// which is only ever built when the template is realised - so an empty collection would leave
+    /// that markup completely unexercised.
+    /// </summary>
+    [Fact]
+    public void TheVerifyPanelShowsWhatSqlServerSaidAboutEachBackup()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var good = new BackupSet { SetId = "20260110_220000", Type = BackupType.Full };
+            var bad = new BackupSet { SetId = "20260110_230000", Type = BackupType.TransactionLog };
+
+            vm.ChainVerifyResults.Add(new ChainVerifyResult
+            {
+                Set = good,
+                Result = new VerifyOnlyResult(true, "The backup set on file 1 is valid.")
+            });
+            vm.ChainVerifyResults.Add(new ChainVerifyResult
+            {
+                Set = bad,
+                Result = new VerifyOnlyResult(false, "Cannot open backup device.")
+            });
+            vm.HasVerifyResults = true;
+            vm.HasVerifyFailures = true;
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.True(
+                    texts.Any(t => t.Contains("Cannot open backup device.", StringComparison.Ordinal)),
+                    "The verify panel did not render its results. TextBlocks found: " +
+                    string.Join(" | ", texts.Where(t => !string.IsNullOrWhiteSpace(t))));
+                // The status sits in its own Run so it can be coloured, so look at the inlines
+                // rather than the TextBlock's flattened text.
+                var runs = FindAll<TextBlock>(view)
+                    .SelectMany(t => t.Inlines.OfType<System.Windows.Documents.Run>())
+                    .Select(r => r.Text)
+                    .ToList();
+
+                Assert.True(runs.Contains("FAILED"), "A failed backup did not read as failed.");
+                Assert.True(runs.Contains("Valid"), "A good backup did not read as valid.");
+
+                listener.AssertNone("RestoreView verify panel");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
     /// <summary>Tag pills render through one wrapping template; they used to clip (#67).</summary>
     [Fact]
     public void TagPillsRenderForAServerRow()

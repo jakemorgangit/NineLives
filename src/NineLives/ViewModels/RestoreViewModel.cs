@@ -254,6 +254,18 @@ public partial class RestoreViewModel : ViewModelBase
     private bool _isValidatingChain;
 
     [ObservableProperty]
+    private bool _isVerifyingChain;
+
+    /// <summary>Per-set RESTORE VERIFYONLY results for the selected chain.</summary>
+    public ObservableCollection<ChainVerifyResult> ChainVerifyResults { get; } = [];
+
+    [ObservableProperty]
+    private bool _hasVerifyResults;
+
+    [ObservableProperty]
+    private bool _hasVerifyFailures;
+
+    [ObservableProperty]
     private bool _disconnectSessions = true;
 
     [ObservableProperty]
@@ -267,6 +279,12 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _newBroker;
+
+    [ObservableProperty]
+    private bool _withChecksum;
+
+    [ObservableProperty]
+    private bool _continueAfterError;
 
     [ObservableProperty]
     private bool _useWithMove;
@@ -535,6 +553,11 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnSelectedRestorePointChanged(RestorePoint? value)
     {
         ShowChainDetails = false;
+
+        // Verification belongs to the chain that was verified. Leaving the results on screen
+        // after the selection moves would show a green tick against backups nothing has read.
+        ClearVerifyResults();
+
         if (value == null)
         {
             RestoreChain = null;
@@ -566,6 +589,7 @@ public partial class RestoreViewModel : ViewModelBase
         ChainLsnVerified = false;
         UpdateChainIssues(chain);
         ValidateChainCommand.NotifyCanExecuteChanged();
+        VerifyChainCommand.NotifyCanExecuteChanged();
         UpdateRestoreSummary();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
@@ -1024,6 +1048,72 @@ public partial class RestoreViewModel : ViewModelBase
     private bool CanValidateChain() =>
         IsConnectedToServer && RestoreChain != null && !IsValidatingChain;
 
+    /// <summary>
+    /// Runs RESTORE VERIFYONLY over every set in the chain: does each backup actually read back,
+    /// before an hour is spent finding out that it does not.
+    ///
+    /// This asks a different question from Validate chain. That one reads headers and checks the
+    /// LSNs line up - whether these backups belong together. This one reads the whole backup and
+    /// checks it is intact - whether they are usable at all. A truncated or half-uploaded blob
+    /// passes the first and fails this.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanVerifyChain))]
+    private async Task VerifyChainAsync()
+    {
+        if (RestoreChain == null || ConnectedServer == null) return;
+
+        IsVerifyingChain = true;
+        ClearStatus();
+        ChainVerifyResults.Clear();
+        HasVerifyResults = false;
+
+        try
+        {
+            var sets = RestoreChain.AllSets;
+            for (int i = 0; i < sets.Count; i++)
+            {
+                var set = sets[i];
+                SetStatus($"Verifying {i + 1} of {sets.Count}: {set.TypeDisplay} {set.SetId}...");
+
+                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+                var result = await _sqlService.RestoreVerifyOnlyAsync(
+                    ConnectedServer, urls, WithChecksum);
+
+                ChainVerifyResults.Add(new ChainVerifyResult { Set = set, Result = result });
+                HasVerifyResults = true;
+            }
+
+            var failed = ChainVerifyResults.Count(r => !r.IsValid);
+            HasVerifyFailures = failed > 0;
+
+            SetStatus(failed > 0
+                ? $"{failed} of {ChainVerifyResults.Count} backup(s) failed verification - see below. Do not rely on this chain."
+                : $"All {ChainVerifyResults.Count} backup(s) in the chain verified.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Verification cancelled.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Verification could not run: {ex.Message}");
+        }
+        finally
+        {
+            IsVerifyingChain = false;
+        }
+    }
+
+    private bool CanVerifyChain() =>
+        IsConnectedToServer && RestoreChain != null && !IsVerifyingChain && !IsExecuting;
+
+    private void ClearVerifyResults()
+    {
+        ChainVerifyResults.Clear();
+        HasVerifyResults = false;
+        HasVerifyFailures = false;
+    }
+
     private void UpdateChainIssues(BackupChain? chain, IReadOnlyList<ChainHeader>? headers = null)
     {
         var issues = _chainValidator.Validate(chain);
@@ -1135,6 +1225,12 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnKeepReplicationChanged(bool value) => UpdateRestoreSummary();
     partial void OnEnableBrokerChanged(bool value) => UpdateRestoreSummary();
     partial void OnNewBrokerChanged(bool value) => UpdateRestoreSummary();
+    partial void OnWithChecksumChanged(bool value) => UpdateRestoreSummary();
+    partial void OnContinueAfterErrorChanged(bool value) => UpdateRestoreSummary();
+
+    // Verification opens its own connection and reads whole backups. Letting it start while a
+    // restore is running would put a second heavy reader on the same server at the worst moment.
+    partial void OnIsExecutingChanged(bool value) => VerifyChainCommand.NotifyCanExecuteChanged();
     partial void OnTargetDatabaseNameChanged(string value) => UpdateRestoreSummary();
 
     partial void OnIsConnectedToServerChanged(bool value)
@@ -1146,6 +1242,7 @@ public partial class RestoreViewModel : ViewModelBase
         HasConnectedServerTags = ConnectedServerTags.Count > 0;
 
         ValidateChainCommand.NotifyCanExecuteChanged();
+        VerifyChainCommand.NotifyCanExecuteChanged();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
         CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
@@ -1243,6 +1340,8 @@ public partial class RestoreViewModel : ViewModelBase
             KeepReplication = KeepReplication,
             EnableBroker = EnableBroker,
             NewBroker = NewBroker,
+            WithChecksum = WithChecksum,
+            ContinueAfterError = ContinueAfterError,
             SqlCredentialName = SqlCredentialName,
             SasToken = sasToken,
             StorageAccountUrl = SelectedContainer?.ContainerUrl,
