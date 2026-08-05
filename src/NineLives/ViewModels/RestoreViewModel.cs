@@ -16,6 +16,7 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly SqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
+    private readonly BackupChainValidator _chainValidator = new();
     private readonly CredentialStore _credentialStore;
 
     private List<BackupFileInfo> _allBackups = [];
@@ -135,6 +136,24 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _hasPointInTimeError;
+
+    // ── Chain gap detection ──────────────────────────────────────────────────────
+    // Structural validation of the selected chain, run at selection time. The app otherwise
+    // assumes every discovered backup is present and intact, so a missing stripe or a hole in
+    // the log sequence only surfaces mid-restore - after WITH REPLACE has dropped the target.
+
+    [ObservableProperty]
+    private ObservableCollection<ChainIssue> _chainIssues = [];
+
+    [ObservableProperty]
+    private bool _hasChainIssues;
+
+    /// <summary>True when at least one issue makes the restore impossible as generated.</summary>
+    [ObservableProperty]
+    private bool _hasChainErrors;
+
+    [ObservableProperty]
+    private string _chainIssueSummary = string.Empty;
 
     [ObservableProperty]
     private bool _disconnectSessions = true;
@@ -418,6 +437,7 @@ public partial class RestoreViewModel : ViewModelBase
             ChainSets.Clear();
             ChainSummary = string.Empty;
             UpdatePointInTimeWindow(null);
+            UpdateChainIssues(null);
             FetchedFileMoves = [];
             HasFetchedFileMoves = false;
             BackupMetadataSummary = null;
@@ -435,6 +455,7 @@ public partial class RestoreViewModel : ViewModelBase
         ChainSets = new ObservableCollection<BackupSet>(chain.AllSets);
         ChainSummary = $"{chain.Summary} | {chain.FileCount} files | Target: {value.Timestamp:yyyy-MM-dd HH:mm:ss}";
         UpdatePointInTimeWindow(value);
+        UpdateChainIssues(chain);
         UpdateRestoreSummary();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
@@ -770,6 +791,30 @@ public partial class RestoreViewModel : ViewModelBase
         UsePointInTime = false;
         StopAtText = window.Value.Latest.ToString(StopAtFormat);
         ValidatePointInTime();
+    }
+
+    private void UpdateChainIssues(BackupChain? chain)
+    {
+        var issues = _chainValidator.Validate(chain);
+
+        ChainIssues = new ObservableCollection<ChainIssue>(issues);
+        HasChainIssues = issues.Count > 0;
+        HasChainErrors = issues.Any(i => i.IsError);
+
+        if (issues.Count == 0)
+        {
+            ChainIssueSummary = string.Empty;
+            return;
+        }
+
+        var errors = issues.Count(i => i.IsError);
+        var warnings = issues.Count - errors;
+
+        ChainIssueSummary = errors > 0 && warnings > 0
+            ? $"{errors} problem(s) will prevent this restore, and {warnings} warning(s)"
+            : errors > 0
+                ? $"{errors} problem(s) will prevent this restore"
+                : $"{warnings} warning(s) about this chain";
     }
 
     private const string StopAtFormat = "yyyy-MM-dd HH:mm:ss";
@@ -1166,6 +1211,17 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (string.IsNullOrEmpty(GeneratedScript) || !IsConnectedToServer)
             return;
+
+        // Refuse to arm when the chain cannot possibly restore. This is the last safe moment:
+        // once execution starts, WITH REPLACE drops the target database, and a chain that fails
+        // partway leaves nothing usable behind. Failing here costs the user a few seconds;
+        // failing mid-restore costs them the database they were restoring over.
+        if (HasChainErrors && !IsExecuteArmed)
+        {
+            var first = ChainIssues.First(i => i.IsError);
+            SetError($"Cannot execute: {first.Title}. {first.Detail}");
+            return;
+        }
 
         if (!IsExecuteArmed)
         {
