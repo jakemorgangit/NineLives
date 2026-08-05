@@ -352,13 +352,10 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (_allSets.Count == 0) return;
 
-        var filtered = _allSets.AsEnumerable();
-        if (!string.IsNullOrEmpty(value))
-            filtered = filtered.Where(s =>
-            {
-                var parts = value.Split('\\', 2);
-                return string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
-            });
+        // Compare the FULL server identity. Matching on the host alone made selecting
+        // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that
+        // only exist on the other instance.
+        var filtered = _allSets.Where(s => s.MatchesServer(value));
 
         var dbs = filtered
             .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
@@ -380,12 +377,11 @@ public partial class RestoreViewModel : ViewModelBase
             .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        // Full server identity again - this is the filter that decides which sets reach
+        // BackupChainBuilder, so a host-only match let one instance's full pair with another
+        // instance's differentials and logs.
         if (!string.IsNullOrEmpty(SelectedServerName))
-        {
-            var parts = SelectedServerName.Split('\\', 2);
-            _dbSets = _dbSets.Where(s =>
-                string.Equals(s.ServerName, parts[0], StringComparison.OrdinalIgnoreCase)).ToList();
-        }
+            _dbSets = _dbSets.Where(s => s.MatchesServer(SelectedServerName)).ToList();
 
         FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
         DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);

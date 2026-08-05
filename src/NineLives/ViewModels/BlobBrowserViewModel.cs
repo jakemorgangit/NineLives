@@ -242,22 +242,14 @@ public partial class BlobBrowserViewModel : ViewModelBase
         }
     }
 
+    // Both delegate to the shared identity comparison. MatchesServerSet previously had a
+    // parts.Length == 2 branch that was byte-identical to its fallback and never compared the
+    // instance, so set-based summary counts silently included other instances of the same host.
     private static bool MatchesServer(BackupFileInfo file, string serverFilter)
-    {
-        var parts = serverFilter.Split('\\', 2);
-        if (parts.Length == 2)
-            return string.Equals(file.InferredServerName, parts[0], StringComparison.OrdinalIgnoreCase)
-                && string.Equals(file.InferredInstanceName, parts[1], StringComparison.OrdinalIgnoreCase);
-        return string.Equals(file.InferredServerName, parts[0], StringComparison.OrdinalIgnoreCase);
-    }
+        => file.MatchesServer(serverFilter);
 
     private static bool MatchesServerSet(BackupSet set, string serverFilter)
-    {
-        var parts = serverFilter.Split('\\', 2);
-        if (parts.Length == 2)
-            return string.Equals(set.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
-        return string.Equals(set.ServerName, parts[0], StringComparison.OrdinalIgnoreCase);
-    }
+        => set.MatchesServer(serverFilter);
 
     [RelayCommand]
     private void CopyPathHttps(BackupFileInfo? file)
