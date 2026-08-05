@@ -27,11 +27,26 @@ public class BackupChainBuilder
             });
         }
 
+        // A differential's base is the latest NON-copy-only full at or before it.
+        //
+        // A copy-only full does not reset the differential base: the base LSN stays with the last
+        // regular full, and SQL Server rejects a differential applied on top of a copy-only full
+        // with error 3136 ("the database has not been restored to the correct earlier state").
+        // Ola writes copy-only backups into the same FULL folder with the same naming, so before
+        // this an ad-hoc copy-only taken mid-week silently became the base for every subsequent
+        // differential - and, via the log-chain code below, broke every restore point from that
+        // differential onward until the next regular full.
+        //
+        // Copy-only sets remain first-class everywhere else: they are offered as Full restore
+        // points above, and they anchor log chains below, both of which are perfectly valid.
+        BackupSet? BaseFullFor(BackupSet diff) =>
+            fulls.LastOrDefault(f => !f.IsCopyOnly && f.Timestamp <= diff.Timestamp);
+
         // Each diff restore point: Full + that single diff only (differentials are cumulative
         // since the last full, so earlier diffs are never needed in the chain).
         foreach (var diff in diffs)
         {
-            var baseFull = fulls.LastOrDefault(f => f.Timestamp <= diff.Timestamp);
+            var baseFull = BaseFullFor(diff);
             if (baseFull == null) continue;
 
             points.Add(new RestorePoint
@@ -58,9 +73,13 @@ public class BackupChainBuilder
 
             if (applicableLogs.Count == 0) continue;
 
-            // At most one diff: the latest one before the log chain (differentials are cumulative since the last full).
+            // At most one diff: the latest one before the log chain (differentials are cumulative
+            // since the last full). Only diffs whose ACTUAL base is this full may join the chain -
+            // being inside the range is not enough. When the anchor is a copy-only full no diff
+            // ever qualifies, so the chain becomes copy-only full + logs, which is valid.
             var diffsInRange = diffs
-                .Where(d => d.Timestamp > full.Timestamp && d.Timestamp < upperBound)
+                .Where(d => d.Timestamp > full.Timestamp && d.Timestamp < upperBound
+                            && ReferenceEquals(BaseFullFor(d), full))
                 .OrderBy(d => d.Timestamp)
                 .ToList();
             var latestDiff = diffsInRange.Count > 0 ? diffsInRange.Last() : null;
