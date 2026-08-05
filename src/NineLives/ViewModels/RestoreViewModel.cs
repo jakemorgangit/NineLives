@@ -155,6 +155,18 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _chainIssueSummary = string.Empty;
 
+    /// <summary>
+    /// Findings about the discovered backups as a whole rather than the selected chain - backups
+    /// that exist but can never be offered as a restore point. Kept apart from ChainIssues because
+    /// they do not change when the selection does, and because they explain a gap between what the
+    /// browse list shows and what the timeline offers.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ChainIssue> _inventoryIssues = [];
+
+    [ObservableProperty]
+    private bool _hasInventoryIssues;
+
     /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
     [ObservableProperty]
     private bool _chainLsnVerified;
@@ -542,6 +554,17 @@ public partial class RestoreViewModel : ViewModelBase
     private void ComputeAndDisplayRestorePoints()
     {
         var points = _chainBuilder.ComputeRestorePoints(_dbSets);
+
+        // Inventory-level findings: backups that exist but can never be offered. These belong to
+        // the discovered set rather than to any one chain, so they are held separately and survive
+        // changing the selected restore point.
+        //
+        // ValidateInventory was written for #62 and then never called, so orphaned differentials,
+        // orphaned logs and "no full backup at all" were being computed nowhere and shown nowhere.
+        InventoryIssues = new ObservableCollection<ChainIssue>(
+            _chainValidator.ValidateInventory(_dbSets)
+                .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
+        HasInventoryIssues = InventoryIssues.Count > 0;
 
         // Compute timeline positions (0-1)
         if (points.Count > 1)
