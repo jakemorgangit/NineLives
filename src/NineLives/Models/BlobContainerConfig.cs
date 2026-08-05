@@ -24,6 +24,22 @@ public enum BackupSourceType
 /// </summary>
 public class BlobContainerConfig : INotifyPropertyChanged
 {
+    /// <summary>
+    /// Stable identity for the stored SAS token, assigned once and never changed.
+    ///
+    /// The credential key used to derive from Name, so renaming a container pointed it at a key
+    /// that did not exist and the working token was stranded under the old one with no way to get
+    /// it back (#8).
+    ///
+    /// Null on entries written before this existed. It is deliberately NOT defaulted to a new Guid:
+    /// an absent value in JSON leaves the property at its initialiser, so defaulting would hand
+    /// every legacy entry a fresh id on load and lose its secret immediately. ConfigMigrator
+    /// assigns ids and moves the secrets; NewId() is what callers creating a container use.
+    /// </summary>
+    public string? Id { get; set; }
+
+    public static string NewId() => Guid.NewGuid().ToString("n");
+
     public string Name { get; set; } = string.Empty;
     public string ContainerUrl { get; set; } = string.Empty;
 
@@ -95,9 +111,17 @@ public class BlobContainerConfig : INotifyPropertyChanged
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     /// <summary>
-    /// Key used to look up SAS token in Windows Credential Manager.
+    /// Key used to look up the SAS token in Windows Credential Manager. Keyed on the immutable
+    /// <see cref="Id"/> so renaming the container does not strand its token; falls back to the
+    /// old name-derived key only for entries that have not been migrated yet.
     /// </summary>
-    public string CredentialKey => $"NineLives:Blob:{Name}";
+    [JsonIgnore]
+    public string CredentialKey =>
+        string.IsNullOrEmpty(Id) ? LegacyCredentialKey : $"NineLives:Blob:{Id}";
+
+    /// <summary>The pre-#8 name-derived key. Only ConfigMigrator should need this.</summary>
+    [JsonIgnore]
+    public string LegacyCredentialKey => $"NineLives:Blob:{Name}";
 
     public bool IsExpired => GetSasExpiry() is DateTime expiry && expiry < DateTime.UtcNow;
 

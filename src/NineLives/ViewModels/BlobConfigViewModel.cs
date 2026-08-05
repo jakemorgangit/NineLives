@@ -406,6 +406,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
             container = new BlobContainerConfig
             {
+                // Assigned here rather than defaulted on the model - see the note on Id.
+                Id = BlobContainerConfig.NewId(),
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
                 PathPattern = EditPathPattern,

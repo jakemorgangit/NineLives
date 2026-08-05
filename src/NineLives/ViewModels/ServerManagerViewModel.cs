@@ -210,7 +210,8 @@ public partial class ServerManagerViewModel : ViewModelBase
                 SetError("A server with this name already exists.");
                 return;
             }
-            server = new ServerConnection();
+            // Id assigned here rather than defaulted on the model - see the note on it.
+            server = new ServerConnection { Id = ServerConnection.NewId() };
             Servers.Add(server);
         }
         else
