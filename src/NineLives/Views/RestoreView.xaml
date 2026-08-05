@@ -341,6 +341,50 @@
                         </Button>
                     </Grid>
 
+                    <!-- Chain gap detection: always visible when something is wrong, so a missing
+                         stripe or a hole in the log sequence is seen BEFORE the script is run,
+                         not after WITH REPLACE has already dropped the target database. -->
+                    <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                            Visibility="{Binding HasChainIssues, Converter={StaticResource BoolToVis}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#332B1A" />
+                                <Setter Property="BorderBrush" Value="#8A6D2F" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasChainErrors}" Value="True">
+                                        <Setter Property="Background" Value="#3A1E1E" />
+                                        <Setter Property="BorderBrush" Value="#A33F3F" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{Binding ChainIssueSummary}"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8" />
+                            <ItemsControl ItemsSource="{Binding ChainIssues}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold">
+                                                <Run Text="{Binding SeverityDisplay, Mode=OneWay}" />
+                                                <Run Text="  " />
+                                                <Run Text="{Binding Title, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Detail}"
+                                                       Style="{StaticResource SecondaryText}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Restore Chain Detail (togglable) -->
                     <Border Background="{StaticResource InputBackgroundBrush}"
                             CornerRadius="4" Padding="12" Margin="0,12,0,0"
