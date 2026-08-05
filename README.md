@@ -112,6 +112,37 @@ Download the latest release from the [Releases page](https://github.com/jakemorg
 - Windows 10/11 (x64)
 - No .NET runtime installation required (self-contained)
 
+### "Windows protected your PC"
+
+The executable is not yet code-signed, so SmartScreen will stop it the first time you run it.
+Click **More info** → **Run anyway**.
+
+That warning means Windows has not seen this file before — not that anything is wrong with it. But
+you shouldn't have to take that on faith for a tool you're about to point at production with
+sysadmin rights, so there are two ways to check.
+
+**Checksum** — confirms the file matches what the release page publishes:
+
+```powershell
+Get-FileHash NineLives.exe -Algorithm SHA256
+```
+
+Compare against `SHA256SUMS.txt` on the release.
+
+**Build provenance** — confirms the file was built by this repository's release workflow, from a
+specific commit, and has not been altered since. Needs the [GitHub CLI](https://cli.github.com):
+
+```powershell
+gh attestation verify NineLives.exe --repo jakemorgangit/NineLives
+```
+
+A pass prints the commit and workflow that produced it. This is a stronger guarantee than the
+checksum, which only proves the file matches a number published beside it.
+
+Getting the exe signed properly is tracked in
+[#33](https://github.com/jakemorgangit/NineLives/issues/33); the options are written up in
+[docs/code-signing.md](docs/code-signing.md).
+
 ### Build from Source
 
 #### Prerequisites
