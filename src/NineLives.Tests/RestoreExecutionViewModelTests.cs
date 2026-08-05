@@ -37,6 +37,14 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         LastModified = new DateTimeOffset(T0, TimeSpan.Zero)
     };
 
+    /// <summary>
+    /// A log in a temp directory. Without this the execute path appends real restore lines to the
+    /// user's actual %LOCALAPPDATA% log - a test writing into the thing someone attaches to a bug
+    /// report.
+    /// </summary>
+    private static OperationLog ThrowawayLog() => new(System.IO.Path.Combine(
+        System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n")));
+
     /// <summary>Loads one full backup and arms the execute button, ready to fire.</summary>
     private static async Task<(RestoreViewModel vm, FakeSqlServerService sql)> ReadyToExecute(
         ServerConnection connected, FakeCredentialStore store)
@@ -45,7 +53,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         var sql = new FakeSqlServerService();
 
         var vm = new RestoreViewModel(
-            blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store)
+            blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store, ThrowawayLog())
         {
             SelectedContainer = Container()
         };

@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -23,7 +23,8 @@ public class RestoreViewModelTests
     private readonly FakeCredentialStore _store = new();
 
     private RestoreViewModel NewViewModel() => new(
-        _blob, _sql, new BackupChainBuilder(), new RestoreScriptGenerator(), _store);
+        _blob, _sql, new BackupChainBuilder(), new RestoreScriptGenerator(), _store,
+        new OperationLog(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))));
 
     private static readonly DateTime T0 = new(2026, 1, 10, 22, 0, 0);
 

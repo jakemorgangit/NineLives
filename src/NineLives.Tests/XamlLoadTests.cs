@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -519,7 +519,8 @@ public class XamlLoadTests(WpfFixture wpf)
             new SqlServerService(store),
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
-            store);
+            store,
+            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))));
     }
 
     /// <summary>

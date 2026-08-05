@@ -465,15 +465,24 @@ public partial class RestoreViewModel : ViewModelBase
         ISqlServerService sqlService,
         BackupChainBuilder chainBuilder,
         RestoreScriptGenerator scriptGenerator,
-        ICredentialStore credentialStore)
+        ICredentialStore credentialStore,
+        OperationLog? log = null)
     {
         _blobService = blobService;
         _sqlService = sqlService;
         _chainBuilder = chainBuilder;
         _scriptGenerator = scriptGenerator;
         _credentialStore = credentialStore;
+
+        // Defaults to the app's one log. Optional so a test can point it at a temp directory -
+        // without it, running the execute path in a test appends real restore lines to the user's
+        // actual log file, which is the same class of side effect this whole change is about.
+        _log = log ?? App.Log;
+
         RefreshContainers();
     }
+
+    private readonly OperationLog _log;
 
     public void RefreshContainers()
     {
@@ -1658,13 +1667,13 @@ public partial class RestoreViewModel : ViewModelBase
 
                         // Changing a credential is a change to shared state on someone's instance.
                         // It belongs in the file, not only in a console that closes with the app.
-                        App.Log.ServerChange(server.ServerName,
+                        _log.ServerChange(server.ServerName,
                             $"credential [{SqlCredentialName}] {change.ToString().ToLowerInvariant()}");
                     }
                 }
             }
 
-            App.Log.ServerChange(server.ServerName,
+            _log.ServerChange(server.ServerName,
                 $"restore starting: target [{TargetDatabaseName}], " +
                 $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
                 $"recovery={RecoveryMode}, stopAt={EffectiveStopAt?.ToString("s") ?? "none"}");
@@ -1696,7 +1705,7 @@ public partial class RestoreViewModel : ViewModelBase
             AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
                       "restore stopped part-way through the chain.");
 
-            App.Log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
+            _log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
                 $"restore CANCELLED by user, target [{TargetDatabaseName}]");
 
             SetError("Restore cancelled. The target database has been left mid-restore - see below.");
@@ -1850,7 +1859,7 @@ public partial class RestoreViewModel : ViewModelBase
             _pending.Add(ConsoleLine.From(line));
         }
 
-        App.Log.Info($"[execute] {message.Trim()}");
+        _log.Info($"[execute] {message.Trim()}");
         ScheduleConsoleFlush();
     }
 
