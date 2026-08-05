@@ -85,11 +85,25 @@ public partial class ServerManagerViewModel : ViewModelBase
         Servers = new ObservableCollection<ServerConnection>(config.Servers);
     }
 
-    private void SaveServers()
+    /// <summary>
+    /// Persists the server list. Returns false and sets the error when the write failed, so
+    /// callers do not go on to report success - the config save used to swallow everything and
+    /// the UI said "saved successfully" whether or not anything reached the disk.
+    /// </summary>
+    private bool SaveServers()
     {
-        var config = _credentialStore.LoadConfig();
-        config.Servers = [.. Servers];
-        _credentialStore.SaveConfig(config);
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            config.Servers = [.. Servers];
+            _credentialStore.SaveConfig(config);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not save configuration: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
@@ -220,7 +234,14 @@ public partial class ServerManagerViewModel : ViewModelBase
             _credentialStore.SaveSqlPassword(server, EditPassword);
         }
 
-        SaveServers();
+        if (!SaveServers())
+        {
+            // Nothing reached the disk, so do not leave the list showing a server that is not
+            // really there. Stay in the edit form so the save can be retried.
+            if (IsNew) Servers.Remove(server);
+            return;
+        }
+
         SelectedServer = server;
         IsEditing = false;
         SetStatus("Server saved successfully.");
@@ -231,10 +252,23 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         if (SelectedServer == null) return;
 
-        if (SelectedServer.AuthMode == AuthMode.SqlAuth)
-            _credentialStore.DeleteSecret(SelectedServer.CredentialKey);
+        // Take the server out of the config first and only destroy its stored password once that
+        // write has landed. The other order threw the password away and then, if the save failed,
+        // left the server in config.json with no credential behind it.
+        var removed = SelectedServer;
+        var index = Servers.IndexOf(removed);
+        Servers.Remove(removed);
+        if (!SaveServers())
+        {
+            Servers.Insert(Math.Clamp(index, 0, Servers.Count), removed);
+            SelectedServer = removed;
+            return;
+        }
 
-        if (IsConnected && ConnectedServerDisplay == SelectedServer.DisplayText)
+        if (removed.AuthMode == AuthMode.SqlAuth)
+            _credentialStore.DeleteSecret(removed.CredentialKey);
+
+        if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
         {
             IsConnected = false;
             ConnectedServerDisplay = string.Empty;
@@ -245,8 +279,6 @@ public partial class ServerManagerViewModel : ViewModelBase
             });
         }
 
-        Servers.Remove(SelectedServer);
-        SaveServers();
         SelectedServer = Servers.FirstOrDefault();
         SetStatus("Server removed.");
     }
