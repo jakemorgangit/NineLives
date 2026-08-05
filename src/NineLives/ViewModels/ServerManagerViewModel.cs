@@ -22,6 +22,10 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private string _editName = string.Empty;
 
+    /// <summary>Comma-separated tag list as typed by the user; parsed on save.</summary>
+    [ObservableProperty]
+    private string _editTags = string.Empty;
+
     [ObservableProperty]
     private string _editServerName = string.Empty;
 
@@ -92,6 +96,7 @@ public partial class ServerManagerViewModel : ViewModelBase
     private void AddNew()
     {
         EditName = string.Empty;
+        EditTags = string.Empty;
         EditServerName = string.Empty;
         EditAuthMode = AuthMode.WindowsAuth;
         EditUsername = string.Empty;
@@ -109,6 +114,7 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         if (SelectedServer == null) return;
         EditName = SelectedServer.Name;
+        EditTags = TagPalette.FormatTags(SelectedServer.Tags);
         EditServerName = SelectedServer.ServerName;
         EditAuthMode = SelectedServer.AuthMode;
         EditUsername = SelectedServer.Username ?? string.Empty;
@@ -160,6 +166,7 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
 
         server.Name = EditName;
+        server.Tags = TagPalette.ParseTags(EditTags);
         server.ServerName = EditServerName;
         server.AuthMode = EditAuthMode;
         server.Username = EditAuthMode == AuthMode.SqlAuth ? EditUsername : null;

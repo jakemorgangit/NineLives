@@ -830,19 +830,28 @@
                                 MinWidth="140" />
                     </StackPanel>
 
-                    <!-- Execute armed warning -->
+                    <!-- Execute armed warning. The server's tags appear here deliberately: this is
+                         the last thing between the user and an irreversible overwrite, and a
+                         hostname alone is a weak signal - blackcatsvr01 and blackcatsvr02 differ
+                         by one character. A red PROD pill is read before the sentence is. -->
                     <Border Background="#30E74C3C" CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
                             Visibility="{Binding IsExecuteArmed, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
-                            <Run Text="&#x26A0;" Foreground="{StaticResource ErrorBrush}" FontSize="14" />
-                            <Run Text=" Click again to execute restore against" />
-                            <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource ErrorBrush}" />
-                            <Run Text=". Target:" />
-                            <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
-                            <Run Text="(" />
-                            <Run Text="{Binding ChainSummary, Mode=OneWay}" />
-                            <Run Text="). This operation cannot be undone." Foreground="{StaticResource ErrorBrush}" />
-                        </TextBlock>
+                        <StackPanel>
+                            <ItemsControl ItemsSource="{Binding ConnectedServerTags}"
+                                          Style="{StaticResource TagPillList}"
+                                          Margin="0,0,0,6"
+                                          Visibility="{Binding HasConnectedServerTags, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                                <Run Text="&#x26A0;" Foreground="{StaticResource ErrorBrush}" FontSize="14" />
+                                <Run Text=" Click again to execute restore against" />
+                                <Run Text="{Binding ConnectedServerName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource ErrorBrush}" />
+                                <Run Text=". Target:" />
+                                <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="(" />
+                                <Run Text="{Binding ChainSummary, Mode=OneWay}" />
+                                <Run Text="). This operation cannot be undone." Foreground="{StaticResource ErrorBrush}" />
+                            </TextBlock>
+                        </StackPanel>
                     </Border>
 
                     <!-- Not connected warning -->

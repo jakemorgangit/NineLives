@@ -20,6 +20,10 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private string _editName = string.Empty;
 
+    /// <summary>Comma-separated tag list as typed by the user; parsed on save.</summary>
+    [ObservableProperty]
+    private string _editTags = string.Empty;
+
     [ObservableProperty]
     private string _editContainerUrl = string.Empty;
 
@@ -314,6 +318,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void AddNew()
     {
         EditName = string.Empty;
+        EditTags = string.Empty;
         EditContainerUrl = string.Empty;
         EditSasToken = string.Empty;
         EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
@@ -335,6 +340,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     {
         if (SelectedContainer == null) return;
         EditName = SelectedContainer.Name;
+        EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
         EditContainerUrl = SelectedContainer.ContainerUrl;
         var storedToken = _credentialStore.GetSasToken(SelectedContainer);
         HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
@@ -390,7 +396,8 @@ public partial class BlobConfigViewModel : ViewModelBase
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
                 PathPattern = EditPathPattern,
                 BackupSourceType = EditBackupSourceType,
-                AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim()
+                AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim(),
+                Tags = TagPalette.ParseTags(EditTags)
             };
             Containers.Add(container);
         }
@@ -398,6 +405,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         {
             container = SelectedContainer!;
             container.Name = EditName;
+            container.Tags = TagPalette.ParseTags(EditTags);
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
             container.PathPattern = EditPathPattern;
             container.BackupSourceType = EditBackupSourceType;

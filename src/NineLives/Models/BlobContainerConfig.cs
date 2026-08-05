@@ -38,6 +38,12 @@ public class BlobContainerConfig
     public string? AgPathPattern { get; set; }
 
     /// <summary>
+    /// Free-text labels shown as coloured pills. Absent from older config files, which
+    /// deserialise to an empty list - no migration needed.
+    /// </summary>
+    public List<string> Tags { get; set; } = [];
+
+    /// <summary>
     /// Key used to look up SAS token in Windows Credential Manager.
     /// </summary>
     public string CredentialKey => $"NineLives:Blob:{Name}";
