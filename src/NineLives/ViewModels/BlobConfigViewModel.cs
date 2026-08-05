@@ -122,11 +122,25 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
     }
 
-    private void SaveContainers()
+    /// <summary>
+    /// Persists the container list. Returns false and sets the error when the write failed, so
+    /// callers do not go on to report success - the config save used to swallow everything and
+    /// the UI said "saved successfully" whether or not anything reached the disk.
+    /// </summary>
+    private bool SaveContainers()
     {
-        var config = _credentialStore.LoadConfig();
-        config.BlobContainers = [.. Containers];
-        _credentialStore.SaveConfig(config);
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            config.BlobContainers = [.. Containers];
+            _credentialStore.SaveConfig(config);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not save configuration: {ex.Message}");
+            return false;
+        }
     }
 
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
@@ -417,7 +431,14 @@ public partial class BlobConfigViewModel : ViewModelBase
         if (haveTokenToSave)
             _credentialStore.SaveSasToken(container, EditSasToken);
         // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
-        SaveContainers();
+        if (!SaveContainers())
+        {
+            // Nothing reached the disk, so do not leave the list showing a container that is not
+            // really there. Stay in the edit form so the save can be retried once whatever was
+            // holding the file has let go.
+            if (IsNew) Containers.Remove(container);
+            return;
+        }
 
         SelectedContainer = container;
         IsEditing = false;
@@ -430,9 +451,20 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void Delete()
     {
         if (SelectedContainer == null) return;
-        _credentialStore.DeleteSecret(SelectedContainer.CredentialKey);
-        Containers.Remove(SelectedContainer);
-        SaveContainers();
+
+        // Remove from the config first and only destroy the secret once that write has actually
+        // landed. The other order threw the SAS token away and then, if the save failed, left the
+        // container in config.json pointing at a credential that no longer exists.
+        var removed = SelectedContainer;
+        Containers.Remove(removed);
+        if (!SaveContainers())
+        {
+            Containers.Add(removed);
+            SelectedContainer = removed;
+            return;
+        }
+
+        _credentialStore.DeleteSecret(removed.CredentialKey);
         SelectedContainer = Containers.FirstOrDefault();
         SetStatus("Container removed.");
     }
