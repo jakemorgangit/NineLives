@@ -243,6 +243,14 @@
                         <TextBlock Text="Loading backup files..."
                                    Style="{StaticResource BodyText}"
                                    HorizontalAlignment="Center" />
+                        <!-- A container with a large number of blobs is enumerated a page at a
+                             time and there was previously no way out of it (#25). -->
+                        <Button Content="Cancel"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CancelLoadCommand}"
+                                Visibility="{Binding CanCancelLoad, Converter={StaticResource BoolToVis}}"
+                                Padding="10,6" Margin="0,10,0,0"
+                                HorizontalAlignment="Center" />
                     </StackPanel>
                 </Border>
             </Grid>
