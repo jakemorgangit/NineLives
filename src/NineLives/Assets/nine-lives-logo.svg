@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="936" viewBox="0 0 375 343" role="img" aria-labelledby="title desc">
+  <title id="title">Nine Lives paw logo</title>
+  <desc id="desc">A geometric dark cat paw with a blue number nine, on a transparent background.</desc>
+
+  <defs>
+    <linearGradient id="padFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#373c43"/>
+      <stop offset="0.48" stop-color="#262b31"/>
+      <stop offset="1" stop-color="#15191f"/>
+    </linearGradient>
+
+    <linearGradient id="padEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#89919b"/>
+      <stop offset="0.46" stop-color="#5f6873"/>
+      <stop offset="0.72" stop-color="#397fd8"/>
+      <stop offset="1" stop-color="#147cff"/>
+    </linearGradient>
+
+    <linearGradient id="nineFill" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#69a9ff"/>
+      <stop offset="0.45" stop-color="#3b83e9"/>
+      <stop offset="1" stop-color="#1f61bb"/>
+    </linearGradient>
+
+    <linearGradient id="nineEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9bc5ff"/>
+      <stop offset="1" stop-color="#245cae"/>
+    </linearGradient>
+
+
+    <filter id="blueGlow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="2.3" result="blur"/>
+      <feFlood flood-color="#1686ff" flood-opacity="0.35" result="colour"/>
+      <feComposite in="colour" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Paw pads -->
+  <g stroke-linejoin="round">
+    <path d="M29 106 L55 106 L95 151 L97 193 L84 210 L64 217 L35 203 L20 185 L13 156 Z"
+          fill="url(#padFill)" stroke="url(#padEdge)" stroke-width="2.4"/>
+
+    <path d="M115 9 L145 9 L178 70 L178 121 L166 139 L132 151 L100 143 L89 93 Z"
+          fill="url(#padFill)" stroke="url(#padEdge)" stroke-width="2.4"/>
+
+    <path d="M236 9 L267 9 L293 59 L282 120 L267 141 L229 146 L205 124 L204 72 Z"
+          fill="url(#padFill)" stroke="url(#padEdge)" stroke-width="2.4"/>
+
+    <path d="M327 106 L351 106 L370 156 L357 194 L338 210 L315 217 L294 205 L286 188 L288 150 Z"
+          fill="url(#padFill)" stroke="url(#padEdge)" stroke-width="2.4"/>
+
+    <path d="M167 163 L212 163 L245 181 L315 253 L315 296 L277 334 L210 327 L170 327 L106 334 L67 297 L67 254 L134 184 Z"
+          fill="url(#padFill)" stroke="url(#padEdge)" stroke-width="2.8"/>
+  </g>
+
+  <!-- Number 9 -->
+  <path filter="url(#blueGlow)"
+        d="M137 327
+           L169 327
+           L232 263
+           L232 220
+           L212 200
+           L169 200
+           L151 220
+           L151 254
+           L169 276
+           L188 276
+           L200 254
+           L181 254
+           L171 244
+           L171 222
+           L181 212
+           L201 212
+           L211 222
+           L211 253
+           Z"
+        fill="url(#nineFill)"
+        stroke="url(#nineEdge)"
+        stroke-width="1.6"
+        stroke-linejoin="round"/>
+</svg>
