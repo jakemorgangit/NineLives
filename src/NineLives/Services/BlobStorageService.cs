@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Blackcat.NineLives.Models;
@@ -74,6 +75,7 @@ public class BlobStorageService
                     file.Type = agParsed.BackupType;
                     file.InferredSetId = agParsed.SetId;
                     file.IsAgDefaultNaming = true;
+                    file.IsCopyOnly = agParsed.IsCopyOnly;
                 }
             }
 
@@ -103,6 +105,9 @@ public class BlobStorageService
 
             if (file.Type == BackupType.Unknown)
                 file.Type = InferBackupTypeFromExtension(blob.Name);
+
+            if (!file.IsCopyOnly)
+                file.IsCopyOnly = IsCopyOnlyFileName(file.FileName);
 
             files.Add(file);
         }
@@ -193,6 +198,9 @@ public class BlobStorageService
                 file.InferredInstanceName ?? "",
                 file.InferredDatabaseName ?? "",
                 BlobDirectory(file.BlobName),
+                // AG naming derives setId from the timestamp alone, so a copy-only and a regular
+                // full taken in the same second would otherwise merge into one mixed set.
+                file.IsCopyOnly ? "copyonly" : "",
                 setId);
 
             if (!groups.TryGetValue(key, out var list))
@@ -218,12 +226,29 @@ public class BlobStorageService
                 Timestamp = timestamp,
                 DatabaseName = first.InferredDatabaseName,
                 ServerName = first.InferredServerName,
-                InstanceName = first.InferredInstanceName
+                InstanceName = first.InferredInstanceName,
+                IsCopyOnly = first.IsCopyOnly
             });
         }
 
         return sets.OrderBy(s => s.Timestamp).ToList();
     }
+
+    // A COPY_ONLY marker delimited by _ - . and preceded by a delimiter, so a database whose
+    // name merely CONTAINS the words is not caught. Requiring a leading delimiter (rather than
+    // allowing start-of-string) keeps a database literally named "Copy_Only_Archive" safe.
+    // Deliberately not a bare substring match - see the ContainsDiffIndicator defect, where
+    // "diff" matched DiffusionDb and classified its full backups as differentials.
+    private static readonly Regex CopyOnlyRegex = new(
+        @"[_\-.]copy[_\-]?only(?:$|[_\-.])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// True when a backup filename carries a COPY_ONLY marker. Public because it is pure logic
+    /// worth testing directly - the caller sits behind Azure IO.
+    /// </summary>
+    public static bool IsCopyOnlyFileName(string fileName)
+        => !string.IsNullOrEmpty(fileName) && CopyOnlyRegex.IsMatch(fileName);
 
     /// <summary>Parent folder of a blob name, or empty for a flat name. Scopes set grouping.</summary>
     private static string BlobDirectory(string blobName)

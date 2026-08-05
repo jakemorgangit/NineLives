@@ -27,6 +27,12 @@ public class BackupFileInfo
     /// True when this file was identified using Ola Hallengren default AG naming (flat filename).
     /// </summary>
     public bool IsAgDefaultNaming { get; set; }
+
+    /// <summary>
+    /// True when this is a COPY_ONLY backup. Copy-only fulls do not reset the differential base,
+    /// so they can never serve as the base for a differential restore.
+    /// </summary>
+    public bool IsCopyOnly { get; set; }
     /// <summary>
     /// When IsAgDefaultNaming, the backup set id (e.g. 20260226_200032) used for grouping stripes.
     /// </summary>
@@ -100,6 +106,13 @@ public class BackupSet
     /// their backups interleave into a single restore timeline.
     /// </summary>
     public string? InstanceName { get; set; }
+
+    /// <summary>
+    /// True when this is a COPY_ONLY backup set. A copy-only full is a perfectly good restore
+    /// point on its own and a valid anchor for a log chain, but it does NOT reset the
+    /// differential base - so it can never be the base for a differential restore.
+    /// </summary>
+    public bool IsCopyOnly { get; set; }
 
     /// <summary>Server as the filter dropdowns present it: <c>HOST\INSTANCE</c> or <c>HOST</c>.</summary>
     public string? ServerDisplay => ServerIdentity.Format(ServerName, InstanceName);

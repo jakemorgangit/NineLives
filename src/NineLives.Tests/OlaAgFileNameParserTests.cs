@@ -11,6 +11,52 @@ namespace Blackcat.NineLives.Tests;
 /// </summary>
 public class OlaAgFileNameParserTests
 {
+    // ---- COPY_ONLY support ----------------------------------------
+
+    [Fact]
+    public void TryParse_CopyOnlyFull_IsParsedAndFlagged()
+    {
+        // Without the optional _COPY_ONLY group these did not match at all: they fell through to
+        // path parsing and, in a flat container, ended up with no database name - silently
+        // disappearing from the model rather than being offered as a restore point.
+        var parsed = OlaAgFileNameParser.TryParse(
+            "mycluster01$My-AG1_MyDatabase_FULL_COPY_ONLY_20260226_200032_1.bak");
+
+        Assert.NotNull(parsed);
+        Assert.True(parsed!.IsCopyOnly);
+        Assert.Equal("MyDatabase", parsed.DatabaseName);
+        Assert.Equal(BackupType.Full, parsed.BackupType);
+        Assert.Equal("20260226_200032", parsed.SetId);
+        Assert.Equal("mycluster01$My-AG1", parsed.ServerDisplay);
+        Assert.Equal(1, parsed.FileNumber);
+    }
+
+    [Fact]
+    public void TryParse_RegularFull_IsNotFlaggedCopyOnly()
+    {
+        var parsed = OlaAgFileNameParser.TryParse(
+            "mycluster01$My-AG1_MyDatabase_FULL_20260226_200032_1.bak");
+
+        Assert.NotNull(parsed);
+        Assert.False(parsed!.IsCopyOnly);
+    }
+
+    [Fact]
+    public void TryParse_CopyOnlyLog_IsParsedAndFlagged()
+    {
+        var parsed = OlaAgFileNameParser.TryParse(
+            "mycluster01$My-AG1_MyDatabase_LOG_COPY_ONLY_20260226_210500_1.trn");
+
+        Assert.NotNull(parsed);
+        Assert.True(parsed!.IsCopyOnly);
+        Assert.Equal(BackupType.TransactionLog, parsed.BackupType);
+    }
+
+    [Fact]
+    public void LooksLikeAgDefault_CopyOnlyName_IsRecognised()
+        => Assert.True(OlaAgFileNameParser.LooksLikeAgDefault(
+            "mycluster01$My-AG1_MyDatabase_FULL_COPY_ONLY_20260226_200032_1.bak"));
+
     // ---------------------------------------------------------------
     // TryParse — happy paths
     // ---------------------------------------------------------------

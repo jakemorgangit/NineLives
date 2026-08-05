@@ -22,10 +22,12 @@ public class BlobStorageServiceTests
         string? instance = null,
         long size = 100,
         DateTime? lastModified = null,
-        string? agSetId = null)
+        string? agSetId = null,
+        bool copyOnly = false)
     {
         return new BackupFileInfo
         {
+            IsCopyOnly = copyOnly,
             BlobName = blobName,
             BlobUrl = $"https://acct.blob.core.windows.net/backups/{blobName}",
             Type = type,
@@ -300,6 +302,51 @@ public class BlobStorageServiceTests
         Assert.Equal(@"SQLHOST\PROD", set.ServerDisplay);
         Assert.True(set.MatchesServer(@"SQLHOST\PROD"));
         Assert.False(set.MatchesServer(@"SQLHOST\TEST"));
+    }
+
+    [Theory]
+    // Ola's shape, and common hand-rolled variants.
+    [InlineData("Sales_FULL_COPY_ONLY_20260804_120000_1.bak", true)]
+    [InlineData("Sales_FULL_COPY_ONLY_20260804_120000.bak", true)]
+    [InlineData("Sales-full-copy-only-20260804.bak", true)]
+    [InlineData("Sales_copyonly_20260804_120000.bak", true)]
+    [InlineData("Sales_FULL_20260804_120000_1.bak", false)]
+    // The false-positive trap that bit ContainsDiffIndicator, where a bare "diff" substring
+    // classified DiffusionDb's full backups as differentials. A database whose NAME contains
+    // the words must not be treated as copy-only.
+    [InlineData("CopyOnlyArchive_FULL_20260804_120000_1.bak", false)]
+    [InlineData("Copy_Only_Archive_FULL_20260804_120000_1.bak", false)]
+    public void IsCopyOnlyFileName_DetectsDelimitedMarkerOnly(string fileName, bool expectedCopyOnly)
+        => Assert.Equal(expectedCopyOnly, BlobStorageService.IsCopyOnlyFileName(fileName));
+
+    [Fact]
+    public void GroupIntoBackupSets_CarriesCopyOnlyOntoTheSet()
+    {
+        var files = new List<BackupFileInfo>
+        {
+            File("FULL/SRV01/Sales/Sales_FULL_COPY_ONLY_20260804_120000_1.bak",
+                 db: "Sales", server: "SRV01", copyOnly: true)
+        };
+
+        Assert.True(Assert.Single(_service.GroupIntoBackupSets(files)).IsCopyOnly);
+    }
+
+    [Fact]
+    public void GroupIntoBackupSets_CopyOnlyAndRegularAtSameTimestamp_StaySeparate()
+    {
+        // AG naming derives the setId from the timestamp alone, so without the copy-only
+        // component in the key these would merge into one mixed set.
+        var files = new List<BackupFileInfo>
+        {
+            File("Sales_FULL_20260804_120000_1.bak", db: "Sales", server: "SRV01", agSetId: "20260804_120000"),
+            File("Sales_FULL_COPY_ONLY_20260804_120000_1.bak", db: "Sales", server: "SRV01", agSetId: "20260804_120000", copyOnly: true),
+        };
+
+        var sets = _service.GroupIntoBackupSets(files);
+
+        Assert.Equal(2, sets.Count);
+        Assert.Contains(sets, s => s.IsCopyOnly);
+        Assert.Contains(sets, s => !s.IsCopyOnly);
     }
 
     [Fact]
