@@ -385,31 +385,75 @@ public class BlobStorageService
         };
     }
 
-    private static BackupType InferBackupTypeFromExtension(string blobName)
+    /// <summary>
+    /// Last-resort type inference from the filename, reached only when the path structure did not
+    /// say what a backup is.
+    ///
+    /// Getting this wrong is not cosmetic. A log misread as a full enters the fulls collection in
+    /// BackupChainBuilder and becomes a chain root, so the timeline offers a log file as a
+    /// restorable Full point and every earlier log is dropped from the chain (#44). A full misread
+    /// as a differential never enters that collection at all, and if it is the only full in the
+    /// container the database gets no restore points whatsoever (#45).
+    /// </summary>
+    internal static BackupType InferBackupTypeFromExtension(string blobName)
     {
         var name = blobName.ToLowerInvariant();
 
         if (name.EndsWith(".trn") || name.EndsWith(".log"))
             return BackupType.TransactionLog;
 
-        if (name.EndsWith(".bak") || name.EndsWith(".bkp"))
-        {
-            if (ContainsDiffIndicator(name))
-                return BackupType.Differential;
-            return BackupType.Full;
-        }
-
         if (name.EndsWith(".diff"))
             return BackupType.Differential;
+
+        if (name.EndsWith(".bak") || name.EndsWith(".bkp"))
+        {
+            // Indicators are read from the filename only, never the folders above it - those are
+            // the primary path's job, and a container called "logs" should not retype every file
+            // underneath it.
+            var fileName = name[(name.LastIndexOf('/') + 1)..];
+
+            if (ContainsDiffIndicator(fileName))
+                return BackupType.Differential;
+
+            // A log written as .bak used to land here as Full. Ola and maintenance plans both emit
+            // .trn so this needs a hand-rolled job, but the failure was bad enough to be worth
+            // catching (#44).
+            if (ContainsLogIndicator(fileName))
+                return BackupType.TransactionLog;
+
+            return BackupType.Full;
+        }
 
         return BackupType.Unknown;
     }
 
-    private static bool ContainsDiffIndicator(string name)
-    {
-        string[] diffIndicators = ["diff", "differential", "_diff", "-diff", ".diff"];
-        return diffIndicators.Any(name.Contains);
-    }
+    // Delimited, not a bare substring. The old version tested name.Contains("diff"), which made
+    // every other entry in its list redundant and classified DiffusionDb's FULL backups as
+    // differentials (#45). Same anchoring as CopyOnlyRegex above.
+    private static readonly Regex DiffIndicatorRegex = new(
+        @"(?:^|[_\-.])(?:diff|differential)(?:$|[_\-.])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Deliberately delimited for the same reason, and more sharply here: a bare "log" substring
+    // would retype CatalogDb, BlogDb and DialogDb backups as transaction logs.
+    private static readonly Regex LogIndicatorRegex = new(
+        @"(?:^|[_\-.])(?:log|tlog|trn|translog|transactionlog)(?:$|[_\-.])",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>True when a filename carries a delimited differential marker. Public for testing.</summary>
+    public static bool ContainsDiffIndicator(string fileName)
+        => !string.IsNullOrEmpty(fileName) && DiffIndicatorRegex.IsMatch(fileName);
+
+    /// <summary>
+    /// True when a filename carries a delimited transaction-log marker. Public for testing.
+    ///
+    /// Known limitation: a database actually named "Log" or "Diff" would match on its own name.
+    /// Nothing in a filename can settle that, and the alternative - a bare substring - is the bug
+    /// being fixed. Path-based typing takes precedence anyway, so this only bites a flat container
+    /// holding a database with one of those names.
+    /// </summary>
+    public static bool ContainsLogIndicator(string fileName)
+        => !string.IsNullOrEmpty(fileName) && LogIndicatorRegex.IsMatch(fileName);
 
     /// <summary>
     /// For path-based AG files, extract backup set id from the filename segment (e.g. 20260226_200032_1.bak → 20260226_200032).
