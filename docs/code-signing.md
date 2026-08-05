@@ -25,57 +25,72 @@ consult Sigstore; it looks for an Authenticode signature. Provenance answers "di
 the source I think it did", which is the question a careful reviewer asks. SmartScreen asks "does
 Windows recognise the publisher", and only a certificate answers that.
 
-## Options for the certificate
+## The constraint that decides this
 
-### SignPath — free for open source
+**Nine Lives is a free tool with no revenue behind it. There is no budget for a recurring
+subscription.** That rules out the managed signing services regardless of how convenient they are,
+and it is not a detail to be traded away because a monthly figure looks small — small recurring
+costs on an unfunded project are exactly the ones that accumulate.
 
-The route the issue proposed, and what several OSS .NET projects use. SignPath issues the
-certificate; there is nothing to buy or store.
+So the order below is by cost, and anything with a monthly fee is out.
 
-- **Cost:** free, subject to their OSS eligibility review.
-- **Effort:** register the project, define a signing policy and an artifact configuration, add
-  `signpath/github-action-submit-signing-request@v2` to the release job, store the API token as a
-  repository secret.
-- **Catch:** signing is a submit-and-poll round trip through their service, so the release job gets
-  slower. Worth confirming their upload size limit up front — `NineLives.exe` is ~166 MB, which is
-  large for a signing submission.
+## SignPath Foundation — free, and the route to take
 
-### Azure Trusted Signing — ~$10/month
+SignPath's Foundation programme issues free code signing certificates to open source projects, and
+runs the signing service too, so there is no private key to buy, store or protect. It is what a
+number of OSS .NET projects use.
 
-Microsoft's managed signing service. Short-lived certificates, no private key to look after, and
-because it is Microsoft's own CA it carries SmartScreen reputation well.
+- **Cost:** free, subject to their review that the project qualifies as open source.
+- **Effort:** apply to the Foundation programme, then define a signing policy and an artifact
+  configuration, add `signpath/github-action-submit-signing-request@v2` to the release job, and
+  store the API token as a repository secret.
+- **Worth checking up front:**
+  - **Artifact size.** `NineLives.exe` is ~146 MB, which is large for a signing submission. Confirm
+    their limit before building the workflow around it. If it is a problem, signing the contents of
+    the zip rather than the single-file exe is the usual way out.
+  - **Certificate type.** A standard OV certificate removes the "unrecognised publisher" wording and
+    shows a real name, but SmartScreen reputation still builds with download volume — so warnings
+    may not vanish on day one. Ask them what they issue and set expectations from the answer rather
+    than from this document.
+  - **Turnaround.** Signing is a submit-and-poll round trip through their service, so the release
+    job gets slower.
 
-- **Cost:** Basic tier, around $9.99/month.
-- **Effort:** likely the least of the three — there is already an Azure tenant here, and
-  `azure/trusted-signing-action` is a single step.
-- **Catch:** identity validation, and eligibility rules that have included a minimum trading
-  history for organisations. **Check whether Blackcat Data Solutions Ltd qualifies before
-  committing to this route** — that is the deciding factor, not the price.
+## If SignPath declines
 
-### A traditional OV certificate — £200–400/year
+**Certum Open Source Code Signing** is the cheap paid fallback — priced specifically for open
+source, in the region of €25–30 per year rather than per month, on a hardware token. Verify current
+pricing and terms directly; the figure moves. It is a real annual cost, so only worth considering if
+the free route is closed.
 
-Buy from a CA, keep it on a hardware token or in a KMS. Full control, most work, and an OV
-certificate builds SmartScreen reputation slowly by download volume. Hard to recommend over the
-other two.
+## Ruled out
 
-## Recommendation
+- **Azure Trusted Signing** — around $10/month. Convenient, and Microsoft's own CA, but a
+  subscription this project cannot justify. Not an option unless that changes.
+- **A traditional OV/EV certificate from a CA** — £200–400/year. Same objection, more work.
 
-Try **Azure Trusted Signing** first — the tenant already exists, the wiring is one action, and it
-gives the best SmartScreen outcome. Fall back to **SignPath** if the eligibility check fails.
+## Free things that help without a certificate
+
+- **Build provenance attestation** — already shipping, see above.
+- **Submitting the binary to Microsoft for analysis.** Developers can submit software through
+  Microsoft's file submission portal to have a false positive reviewed. It does not put a publisher
+  name on the exe, but it is free and can reduce warnings. Worth doing per release if SmartScreen
+  proves stubborn.
 
 ## What still needs a human
 
-Both routes need an account created and an identity verified by the project owner. That part
-cannot be automated or delegated. Once the account exists, wiring it up is a small PR:
+Applying to the Foundation programme and verifying identity has to be done by the project owner.
+That part cannot be automated or delegated. Once the account exists, wiring it up is a small PR:
 
 ```yaml
 # after "Package release assets", before "Attest build provenance"
 - name: Sign
-  uses: azure/trusted-signing-action@v0   # or signpath/github-action-submit-signing-request@v2
+  uses: signpath/github-action-submit-signing-request@v2
   with:
-    files-folder: releases
-    files-folder-filter: exe
-    # ...plus the account/profile inputs from the service
+    api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+    organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+    project-slug: nine-lives
+    signing-policy-slug: release-signing
+    # ...plus the artifact configuration and github-artifact-id inputs
 ```
 
 Attestation should stay, and should run **after** signing so it covers the signed bytes. Repackage
