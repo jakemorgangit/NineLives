@@ -356,7 +356,13 @@ public class SqlServerService
     //
     // It also broke benignly: an IPv6-literal endpoint such as https://[fe80::1]:10000/... is a
     // legal URL containing ']' and failed with an opaque syntax error.
-    public async Task EnsureCredentialExistsAsync(
+    //
+    // An existing credential is now ALTERed rather than dropped and recreated. A credential is
+    // server-scoped shared state: dropping it, even for the moment between two statements,
+    // breaks anything else relying on it at that instant - a backup job writing to the same
+    // container, most obviously. ALTER updates the secret in place with no such window, and
+    // leaves create_date intact, which is how the tests tell the two apart.
+    public async Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
         CancellationToken ct = default)
     {
@@ -371,20 +377,17 @@ public class SqlServerService
         checkCmd.Parameters.AddWithValue("@name", credentialName);
         var exists = (int)(await checkCmd.ExecuteScalarAsync(ct))! > 0;
 
-        if (exists)
-        {
-            await using var dropCmd = conn.CreateCommand();
-            dropCmd.CommandText = $"DROP CREDENTIAL {quotedName}";
-            await dropCmd.ExecuteNonQueryAsync(ct);
-        }
-
+        // ALTER also resets IDENTITY, so a credential that exists under some other identity is
+        // converted rather than left in place to fail the restore later.
         var cleanSas = sasToken.TrimStart('?');
-        await using var createCmd = conn.CreateCommand();
-        createCmd.CommandText = $@"
-            CREATE CREDENTIAL {quotedName}
+        await using var writeCmd = conn.CreateCommand();
+        writeCmd.CommandText = $@"
+            {(exists ? "ALTER" : "CREATE")} CREDENTIAL {quotedName}
             WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
             SECRET = '{TSql.EscapeLiteral(cleanSas)}'";
-        await createCmd.ExecuteNonQueryAsync(ct);
+        await writeCmd.ExecuteNonQueryAsync(ct);
+
+        return exists ? CredentialChange.Updated : CredentialChange.Created;
     }
 
     public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(

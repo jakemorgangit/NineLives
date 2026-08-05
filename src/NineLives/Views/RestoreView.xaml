@@ -766,15 +766,31 @@
                                         </Border>
                                         <TextBlock Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
                                                    Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
-                                            <Run Text="Restore from URL requires a SQL credential (SHARED ACCESS SIGNATURE) for the container. Creating it is optional: you can create it from here or ensure it exists on the server before running the script. The SAS token is never included in the generated script." />
+                                            <Run Text="Restore from URL requires a SQL credential (SHARED ACCESS SIGNATURE) for the container. You can create it from here, or create it on the server yourself before running the script. Execute will create it for you if it is missing. The SAS token is never included in the generated script." />
                                         </TextBlock>
-                                        <Button Content="Create credential on server"
-                                                Command="{Binding CreateCredentialOnServerCommand}"
-                                                Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                        <!-- Stays available once the credential is valid, because "valid" only means a SAS
+                                             credential of that name exists. SQL Server will not return its secret, so a
+                                             rotated or expired token is indistinguishable from a working one, and this is
+                                             the only way to push a fresh one. -->
+                                        <TextBlock Visibility="{Binding CredentialIsValidSas, Converter={StaticResource BoolToVis}}"
+                                                   Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
+                                            <Run Text="Execute will leave this credential alone. If the SAS token has been rotated or has expired since the credential was created, the restore will fail on blob access - refresh it below to push the token currently stored for this container." />
+                                        </TextBlock>
+                                        <Button Command="{Binding CreateCredentialOnServerCommand}"
                                                 Margin="0,0,0,0" Padding="10,6"
-                                                Style="{StaticResource SecondaryButton}"
-                                                ToolTip="Creates or updates a SQL Server credential for this blob container URL so that RESTORE FROM URL can access the backups. Optional; the credential can also be created manually on the server. The SAS token is not included in the generated script."
-                                                HorizontalAlignment="Left" />
+                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one with the SAS token currently stored for the container, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. The SAS token is not included in the generated script."
+                                                HorizontalAlignment="Left">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                                                    <Setter Property="Content" Value="Create credential on server" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CredentialIsValidSas}" Value="True">
+                                                            <Setter Property="Content" Value="Refresh credential with stored SAS token" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>

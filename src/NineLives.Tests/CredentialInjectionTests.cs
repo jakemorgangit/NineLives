@@ -98,7 +98,7 @@ public class CredentialInjectionTests
     [RequiresSqlFact]
     public async Task EnsureCredentialExists_IsIdempotentForAwkwardNames()
     {
-        // Second call takes the DROP-then-CREATE path, which is the other interpolation site.
+        // Second call takes the ALTER path, which is the other interpolation site.
         const string name = "ninelives-test]awkward]name";
         try
         {
