@@ -56,8 +56,13 @@ public class RestoreScriptGenerator
 
     private static void AppendDisconnectSessions(StringBuilder sb, string dbName)
     {
+        // DB_ID takes the name as DATA, so unwrap the brackets and escape it as a string
+        // literal. Stripping every ']' (the previous approach) corrupted a name that legitimately
+        // contained one and left an embedded apostrophe free to terminate the literal.
+        var dbNameLiteral = TSql.EscapeLiteral(TSql.UnquoteName(dbName));
+
         sb.AppendLine("-- Disconnect all active sessions");
-        sb.AppendLine($"IF DB_ID('{dbName.Replace("[", "").Replace("]", "")}') IS NOT NULL");
+        sb.AppendLine($"IF DB_ID('{dbNameLiteral}') IS NOT NULL");
         sb.AppendLine("BEGIN");
         sb.AppendLine($"    ALTER DATABASE {dbName} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
         sb.AppendLine("END");
@@ -128,7 +133,7 @@ public class RestoreScriptGenerator
             var url = BlobUrlEncoder.Encode(file.BlobUrl);
             var prefix = i == 0 ? "    FROM" : "        ";
             var suffix = i < set.Files.Count - 1 ? "," : "";
-            sb.AppendLine($"{prefix} URL = N'{url.Replace("'", "''")}'{suffix}");
+            sb.AppendLine($"{prefix} URL = N'{TSql.EscapeLiteral(url)}'{suffix}");
         }
 
         sb.AppendLine("    WITH");
@@ -140,7 +145,12 @@ public class RestoreScriptGenerator
         {
             if (!string.IsNullOrWhiteSpace(move.NewPhysicalName))
             {
-                sb.AppendLine($"         MOVE N'{move.LogicalName}' TO N'{move.NewPhysicalName}',");
+                // Both are string literals, not identifiers. LogicalName comes from
+                // RESTORE FILELISTONLY (sysname, so an apostrophe is legal) and NewPhysicalName
+                // is a user-editable path.
+                sb.AppendLine(
+                    $"         MOVE N'{TSql.EscapeLiteral(move.LogicalName)}' " +
+                    $"TO N'{TSql.EscapeLiteral(move.NewPhysicalName)}',");
             }
         }
     }
@@ -177,15 +187,15 @@ public class RestoreScriptGenerator
         {
             RecoveryMode.Recovery => "RECOVERY",
             RecoveryMode.NoRecovery => "NORECOVERY",
-            RecoveryMode.Standby => $"STANDBY = '{options.StandbyFilePath}'",
+            RecoveryMode.Standby => $"STANDBY = '{TSql.EscapeLiteral(options.StandbyFilePath)}'",
             _ => "RECOVERY"
         };
     }
 
+    // Delegates to TSql so identifier quoting lives in exactly one place. The previous
+    // implementation added brackets without doubling an embedded ']', and returned any
+    // already-bracketed value untouched - so a database named My]DB produced the invalid
+    // RESTORE DATABASE [My]DB].
     private static string EscapeName(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return "[DatabaseName]";
-        if (name.StartsWith('[')) return name;
-        return $"[{name}]";
-    }
+        => TSql.QuoteName(name, fallback: "DatabaseName");
 }
