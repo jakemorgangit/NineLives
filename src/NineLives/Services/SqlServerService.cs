@@ -296,6 +296,83 @@ public class SqlServerService
         };
     }
 
+    /// <summary>
+    /// RESTORE VERIFYONLY across the files of one backup set, striped or not.
+    ///
+    /// This is the check a DBA runs before committing to a long restore: it reads the backup and
+    /// reports whether it is complete and readable, in seconds rather than after an hour of
+    /// restoring. It does NOT check the data inside - that needs a restore and DBCC CHECKDB.
+    ///
+    /// A failure is returned rather than thrown, so one unreadable member of a chain does not
+    /// abort verification of the rest. Cancellation still propagates.
+    /// </summary>
+    /// <param name="withChecksum">
+    /// Adds WITH CHECKSUM. Left off, SQL Server applies its own default; a backup taken without
+    /// checksums FAILS this rather than skipping the check, so it is the caller's choice.
+    /// </param>
+    public async Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
+        ServerConnection server,
+        IReadOnlyList<string> blobUrls,
+        bool withChecksum = false,
+        CancellationToken ct = default)
+    {
+        if (blobUrls.Count == 0)
+            return new VerifyOnlyResult(false, "No files to verify.");
+
+        var messages = new List<string>();
+
+        await using var conn = CreateConnection(server);
+
+        // VERIFYONLY says what it found through info messages - "The backup set on file 1 is
+        // valid." - and reports a bad backup by throwing. Both halves are wanted.
+        conn.InfoMessage += (_, e) => messages.Add(e.Message);
+
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+
+        cmd.CommandText = BuildVerifyOnlyStatement(blobUrls, withChecksum);
+
+        try
+        {
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (SqlException) when (ct.IsCancellationRequested)
+        {
+            // Same trap as the restore path: a cancelled command surfaces as SqlException, and
+            // reporting that as a verification failure would tell the user their backup is bad.
+            throw new OperationCanceledException("Verification was cancelled.", ct);
+        }
+        catch (SqlException ex)
+        {
+            return new VerifyOnlyResult(false, ex.Message);
+        }
+
+        return new VerifyOnlyResult(
+            true,
+            messages.Count > 0
+                ? string.Join(" ", messages.Select(m => m.Trim()))
+                : "The backup set is valid.");
+    }
+
+    /// <summary>
+    /// The exact T-SQL a verification runs. Every file of a striped set goes into one statement -
+    /// a stripe on its own is not a readable backup, so verifying them one at a time would report
+    /// failures that are not there.
+    ///
+    /// No WITH CREDENTIAL clause: SQL Server rejects that for SAS credentials with Msg 3225, and
+    /// it matches the credential by URL anyway (#60).
+    /// </summary>
+    public static string BuildVerifyOnlyStatement(IReadOnlyList<string> blobUrls, bool withChecksum)
+    {
+        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
+
+        // Omitted rather than set to NO_CHECKSUM when off, so SQL Server's own default applies.
+        return withChecksum
+            ? $"RESTORE VERIFYONLY FROM {urlClauses} WITH CHECKSUM"
+            : $"RESTORE VERIFYONLY FROM {urlClauses}";
+    }
+
     private static string? GetStringFromReader(SqlDataReader reader, string columnName)
     {
         var ordinal = reader.GetOrdinal(columnName);

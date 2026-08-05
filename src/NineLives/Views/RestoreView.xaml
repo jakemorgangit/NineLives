@@ -366,6 +366,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
@@ -406,7 +407,39 @@
                             </Button.Content>
                         </Button>
 
+                        <!-- A different question from Validate Chain: that one reads headers and
+                             checks the LSNs line up, this one reads each backup end to end and
+                             checks it is intact. A truncated blob passes the first and fails this. -->
                         <Button Grid.Column="2"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding VerifyChainCommand}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                ToolTip="Run RESTORE VERIFYONLY over every backup in the chain to check each one reads back intact, before committing to the restore. Requires a connected server.">
+                            <Button.Content>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Verify Backups" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsVerifyingChain}" Value="True">
+                                                    <Setter Property="Text" Value="Verifying..." />
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding HasVerifyResults}" Value="True" />
+                                                        <Condition Binding="{Binding HasVerifyFailures}" Value="False" />
+                                                        <Condition Binding="{Binding IsVerifyingChain}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Text" Value="Backups Verified" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+
+                        <Button Grid.Column="3"
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">
@@ -426,6 +459,59 @@
                             </Button.Content>
                         </Button>
                     </Grid>
+
+                    <!-- Per-set VERIFYONLY results. Green while everything reads back, red the
+                         moment one does not - a failed member here means the chain cannot restore,
+                         whatever the timeline and the LSNs say about it. -->
+                    <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                            Visibility="{Binding HasVerifyResults, Converter={StaticResource BoolToVis}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#1A2A1E" />
+                                <Setter Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasVerifyFailures}" Value="True">
+                                        <Setter Property="Background" Value="#3A1E1E" />
+                                        <Setter Property="BorderBrush" Value="#A33F3F" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="RESTORE VERIFYONLY" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                            <ItemsControl ItemsSource="{Binding ChainVerifyResults}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,8">
+                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold">
+                                                <Run Text="{Binding TypeDisplay, Mode=OneWay}" />
+                                                <Run Text=" " />
+                                                <Run Text="{Binding SetId, Mode=OneWay}" />
+                                                <Run Text="  " />
+                                                <Run Text="{Binding StatusDisplay, Mode=OneWay}">
+                                                    <Run.Style>
+                                                        <Style TargetType="Run">
+                                                            <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsValid}" Value="False">
+                                                                    <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Run.Style>
+                                                </Run>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Message}"
+                                                       Style="{StaticResource SecondaryText}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
 
                     <!-- Chain gap detection: always visible when something is wrong, so a missing
                          stripe or a hole in the log sequence is seen BEFORE the script is run,
@@ -577,6 +663,25 @@
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="Creates a new Service Broker identifier." />
+
+                            <CheckBox Content="CHECKSUM"
+                                      IsChecked="{Binding WithChecksum}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,12"
+                                      ToolTip="Verify backup checksums while restoring. Only works if the backup was taken WITH CHECKSUM - against one that was not, SQL Server fails the restore rather than skipping the check." />
+
+                            <CheckBox Content="CONTINUE_AFTER_ERROR"
+                                      IsChecked="{Binding ContinueAfterError}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,4"
+                                      ToolTip="Keep restoring past a damaged page or a failed checksum instead of stopping. The database this produces may be corrupt." />
+
+                            <TextBlock Style="{StaticResource SecondaryText}"
+                                       FontSize="10" TextWrapping="Wrap"
+                                       Foreground="{StaticResource WarningBrush}"
+                                       Margin="0,0,0,12"
+                                       Visibility="{Binding ContinueAfterError, Converter={StaticResource BoolToVis}}"
+                                       Text="A restore that finishes despite errors can leave a corrupt database. Run DBCC CHECKDB on the result before trusting it." />
 
                             <CheckBox Content="WITH MOVE (relocate files)"
                                       IsChecked="{Binding UseWithMove}"
