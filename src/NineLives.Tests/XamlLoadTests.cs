@@ -509,6 +509,66 @@ public class XamlLoadTests(WpfFixture wpf)
         });
     }
 
+    /// <summary>
+    /// The restore history view (#31). Populated, because its rows colour the outcome through a
+    /// Style on a Run and the detail pane only exists once something is selected - none of which
+    /// is built when the list is empty.
+    /// </summary>
+    [Fact]
+    public void TheHistoryViewShowsWhatEachRestoreDid()
+    {
+        wpf.Invoke(() =>
+        {
+            var history = new FakeRestoreHistoryStore();
+            history.Append(new RestoreHistoryEntry
+            {
+                StartedAt = new DateTime(2026, 1, 10, 22, 0, 0),
+                CompletedAt = new DateTime(2026, 1, 10, 22, 4, 30),
+                ServerName = "SRV01",
+                TargetDatabase = "MyDb_Restored",
+                ChainSummary = "1 Full + 2 Log(s)",
+                Outcome = RestoreOutcome.Failed,
+                ErrorMessage = "RESTORE terminating abnormally.",
+                Script = "RESTORE DATABASE [MyDb_Restored] FROM URL = N'https://mystorageaccount.blob.core.windows.net/backups/x.bak'",
+                Log = "Beginning restore execution..."
+            });
+
+            var view = new HistoryView { DataContext = new HistoryViewModel(history) };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.True(
+                    texts.Any(t => t.Contains("RESTORE terminating abnormally.", StringComparison.Ordinal)),
+                    "The detail pane did not render. TextBlocks found: " +
+                    string.Join(" | ", texts.Where(t => !string.IsNullOrWhiteSpace(t))));
+
+                var runs = FindAll<TextBlock>(view)
+                    .SelectMany(t => t.Inlines.OfType<System.Windows.Documents.Run>())
+                    .Select(r => r.Text)
+                    .ToList();
+                Assert.Contains("Failed", runs);
+
+                // The script and the log are what someone came here for.
+                var boxes = FindAll<System.Windows.Controls.TextBox>(view).Select(b => b.Text).ToList();
+                Assert.Contains(boxes, t => t.Contains("RESTORE DATABASE", StringComparison.Ordinal));
+
+                listener.AssertNone("HistoryView");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    [Fact]
+    public void TheHistoryViewLoadsWithNothingRecorded()
+        => Check("HistoryView (empty)", () =>
+            new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
+
     // ── helpers ─────────────────────────────────────────────────────────────────
 
     private RestoreViewModel NewRestoreViewModel()
@@ -520,7 +580,8 @@ public class XamlLoadTests(WpfFixture wpf)
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
             store,
-            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))));
+            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))),
+            new FakeRestoreHistoryStore());
     }
 
     /// <summary>

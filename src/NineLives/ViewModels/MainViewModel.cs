@@ -13,6 +13,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
+    private readonly IRestoreHistoryStore _historyStore;
 
     [ObservableProperty]
     private ViewModelBase? _currentView;
@@ -48,6 +49,7 @@ public partial class MainViewModel : ViewModelBase
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
     public RestoreViewModel Restore { get; }
+    public HistoryViewModel History { get; }
     public AboutViewModel About { get; }
 
     /// <summary>
@@ -79,7 +81,14 @@ public partial class MainViewModel : ViewModelBase
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
         BlobBrowser = new BlobBrowserViewModel(_blobService, _credentialStore);
-        Restore = new RestoreViewModel(_blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore);
+        // One store, shared: the Restore screen writes to it and the History screen reads it back,
+        // and two instances pointed at the same file would be a way to lose an entry.
+        _historyStore = new RestoreHistoryStore();
+
+        Restore = new RestoreViewModel(
+            _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
+            log: null, history: _historyStore);
+        History = new HistoryViewModel(_historyStore);
         About = new AboutViewModel();
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
@@ -199,6 +208,7 @@ public partial class MainViewModel : ViewModelBase
             "SQL Servers" => ServerManager,
             "Browse Backups" => BlobBrowser,
             "Restore" => Restore,
+            "History" => History,
             "About" => About,
             _ => BlobConfig
         };
@@ -208,6 +218,10 @@ public partial class MainViewModel : ViewModelBase
             BlobBrowser.RefreshContainers();
         else if (viewName is "Restore")
             Restore.RefreshContainers();
+        else if (viewName is "History")
+            // Re-read on every visit: a restore run since the last look must be here, and the
+            // history is written by the Restore screen rather than by this one.
+            History.Refresh();
     }
 }
 

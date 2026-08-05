@@ -47,13 +47,15 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
 
     /// <summary>Loads one full backup and arms the execute button, ready to fire.</summary>
     private static async Task<(RestoreViewModel vm, FakeSqlServerService sql)> ReadyToExecute(
-        ServerConnection connected, FakeCredentialStore store)
+        ServerConnection connected, FakeCredentialStore store,
+        FakeRestoreHistoryStore? history = null)
     {
         var blob = new FakeBlobStorageService { Files = [FullBackup()] };
         var sql = new FakeSqlServerService();
 
         var vm = new RestoreViewModel(
-            blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store, ThrowawayLog())
+            blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
+            ThrowawayLog(), history ?? new FakeRestoreHistoryStore())
         {
             SelectedContainer = Container()
         };
@@ -202,6 +204,87 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         });
 
         Assert.True(hasError, "A restore that threw was not reported as a failure.");
+    }
+
+    /// <summary>
+    /// Every execution is filed, so the record exists after the app closes (#31).
+    /// </summary>
+    [Fact]
+    public void ASuccessfulRestoreIsRecordedWithEnoughToPutInATicket()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        var history = new FakeRestoreHistoryStore();
+
+        RunOnUi(async () =>
+        {
+            var (vm, _) = await ReadyToExecute(server, new FakeCredentialStore(), history);
+            await vm.ExecuteScriptCommand.ExecuteAsync(null);
+        });
+
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal(RestoreOutcome.Succeeded, entry.Outcome);
+        Assert.Equal("SRV01", entry.ServerName);
+        Assert.Equal("MyDb_Restored", entry.TargetDatabase);
+        Assert.Contains("RESTORE DATABASE [MyDb_Restored]", entry.Script);
+
+        // The log is captured AFTER the console flush, so it is the whole thing rather than
+        // whatever had escaped the batching buffer at the moment the run ended.
+        Assert.Contains("Restore completed successfully", entry.Log);
+        Assert.True(entry.CompletedAt >= entry.StartedAt);
+    }
+
+    [Fact]
+    public void AFailedRestoreIsRecordedAsFailedWithTheReason()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        var history = new FakeRestoreHistoryStore();
+
+        RunOnUi(async () =>
+        {
+            var (vm, sql) = await ReadyToExecute(server, new FakeCredentialStore(), history);
+            sql.ExecuteThrows = new InvalidOperationException("RESTORE terminating abnormally.");
+            await vm.ExecuteScriptCommand.ExecuteAsync(null);
+        });
+
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal(RestoreOutcome.Failed, entry.Outcome);
+        Assert.Contains("terminating abnormally", entry.ErrorMessage);
+    }
+
+    /// <summary>
+    /// Pressing Execute once only arms the button. Nothing ran, so nothing belongs in the history -
+    /// otherwise it fills with entries for restores that never happened.
+    /// </summary>
+    [Fact]
+    public void ArmingTheButtonRecordsNothing()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        var history = new FakeRestoreHistoryStore();
+
+        RunOnUi(async () =>
+        {
+            await ReadyToExecute(server, new FakeCredentialStore(), history);
+        });
+
+        Assert.Empty(history.Entries);
     }
 
     /// <summary>
