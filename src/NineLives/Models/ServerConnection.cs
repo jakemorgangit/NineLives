@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 
 namespace Blackcat.NineLives.Models;
@@ -16,7 +18,17 @@ public enum EncryptMode
     Strict
 }
 
-public class ServerConnection
+/// <summary>
+/// A saved SQL Server connection.
+///
+/// Implements INotifyPropertyChanged specifically so the DERIVED tag members notify. Tags were
+/// made an ObservableCollection so in-place edits update the UI, but TagChips is computed from
+/// Tags and AutoTags - a CollectionChanged on Tags says nothing about TagChips, so the pill list
+/// went stale again and only refreshed when the row happened to be rebuilt. Raising
+/// PropertyChanged for the computed members whenever their inputs change fixes the whole class
+/// of problem rather than one instance of it.
+/// </summary>
+public class ServerConnection : INotifyPropertyChanged
 {
     public string Name { get; set; } = string.Empty;
     public string ServerName { get; set; } = string.Empty;
@@ -26,22 +38,68 @@ public class ServerConnection
     public bool TrustServerCertificate { get; set; } = true;
     public EncryptMode Encrypt { get; set; } = EncryptMode.Yes;
 
+    private ObservableCollection<string> _tags = [];
+
     /// <summary>
     /// Free-text labels shown as coloured pills. Absent from older config files, which
     /// deserialise to an empty collection - no migration needed.
     ///
-    /// ObservableCollection, and callers MUST mutate it in place rather than assigning a new
-    /// one: these models are plain serialised objects with no PropertyChanged, so a reassignment
-    /// is invisible to a bound ItemsControl and the pills only appear after navigating away and
-    /// back. Mutating in place raises CollectionChanged, which the binding does see.
+    /// Editing in place or replacing wholesale both work now: the setter re-subscribes and the
+    /// collection's own changes are forwarded on to the derived members.
     /// </summary>
-    public ObservableCollection<string> Tags { get; set; } = [];
+    public ObservableCollection<string> Tags
+    {
+        get => _tags;
+        set
+        {
+            if (ReferenceEquals(_tags, value)) return;
+            _tags.CollectionChanged -= OnTagsCollectionChanged;
+            _tags = value ?? [];
+            _tags.CollectionChanged += OnTagsCollectionChanged;
+            RaiseTagMembersChanged();
+        }
+    }
+
+    public ServerConnection()
+    {
+        _tags.CollectionChanged += OnTagsCollectionChanged;
+    }
+
+    private string? _detectedVersion;
 
     /// <summary>
     /// Product name detected on the last successful connection, e.g. "SQL Server 2022". Shown as
     /// an automatic tag. Persisted so it survives a restart and is available before reconnecting.
     /// </summary>
-    public string? DetectedVersion { get; set; }
+    public string? DetectedVersion
+    {
+        get => _detectedVersion;
+        set
+        {
+            if (_detectedVersion == value) return;
+            _detectedVersion = value;
+            OnPropertyChanged(nameof(DetectedVersion));
+            RaiseTagMembersChanged();
+        }
+    }
+
+    private void OnTagsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => RaiseTagMembersChanged();
+
+    /// <summary>Everything computed from Tags or DetectedVersion, notified together.</summary>
+    private void RaiseTagMembersChanged()
+    {
+        OnPropertyChanged(nameof(Tags));
+        OnPropertyChanged(nameof(TagChips));
+        OnPropertyChanged(nameof(AutoTags));
+        OnPropertyChanged(nameof(HasAutoTags));
+        OnPropertyChanged(nameof(IsProductionTagged));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     /// <summary>
     /// Tags derived from observed facts rather than typed by the user. Rendered distinctly so a

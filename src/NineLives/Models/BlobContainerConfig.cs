@@ -1,4 +1,7 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Text.Json.Serialization;
 using System.Web;
 
 namespace Blackcat.NineLives.Models;
@@ -15,7 +18,11 @@ public enum BackupSourceType
     Mixed
 }
 
-public class BlobContainerConfig
+/// <summary>
+/// A saved blob container. Implements INotifyPropertyChanged so the derived TagChips member
+/// notifies when Tags changes - see the note on Tags.
+/// </summary>
+public class BlobContainerConfig : INotifyPropertyChanged
 {
     public string Name { get; set; } = string.Empty;
     public string ContainerUrl { get; set; } = string.Empty;
@@ -38,22 +45,54 @@ public class BlobContainerConfig
     /// </summary>
     public string? AgPathPattern { get; set; }
 
+    private ObservableCollection<string> _tags = [];
+
     /// <summary>
     /// Free-text labels shown as coloured pills. Absent from older config files, which
     /// deserialise to an empty collection - no migration needed.
     ///
-    /// ObservableCollection, and callers MUST mutate it in place rather than assigning a new
-    /// one: these models are plain serialised objects with no PropertyChanged, so a reassignment
-    /// is invisible to a bound ItemsControl and the pills only appear after navigating away and
-    /// back. Mutating in place raises CollectionChanged, which the binding does see.
+    /// Editing in place or replacing wholesale both work: the setter re-subscribes, and the
+    /// collection's own changes are forwarded to the derived TagChips so the pill list refreshes
+    /// on save rather than when the row is next rebuilt.
     /// </summary>
-    public ObservableCollection<string> Tags { get; set; } = [];
+    public ObservableCollection<string> Tags
+    {
+        get => _tags;
+        set
+        {
+            if (ReferenceEquals(_tags, value)) return;
+            _tags.CollectionChanged -= OnTagsCollectionChanged;
+            _tags = value ?? [];
+            _tags.CollectionChanged += OnTagsCollectionChanged;
+            RaiseTagMembersChanged();
+        }
+    }
+
+    public BlobContainerConfig()
+    {
+        _tags.CollectionChanged += OnTagsCollectionChanged;
+    }
 
     /// <summary>
     /// Tags as chips, matching the server list. Containers have no automatic tags yet, but going
     /// through the same shape keeps one rendering path.
     /// </summary>
+    [JsonIgnore]
     public IEnumerable<TagChip> TagChips => Tags.Select(TagChip.Manual);
+
+    private void OnTagsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => RaiseTagMembersChanged();
+
+    private void RaiseTagMembersChanged()
+    {
+        OnPropertyChanged(nameof(Tags));
+        OnPropertyChanged(nameof(TagChips));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     /// <summary>
     /// Key used to look up SAS token in Windows Credential Manager.
