@@ -137,14 +137,10 @@ public class BlobStorageService
 
     public List<string> GetDiscoveredServers(List<BackupFileInfo> files)
     {
+        // Same formatter the filters match against, so the values offered in the dropdown and
+        // the values compared against a set can never drift apart.
         return files
-            .Select(f =>
-            {
-                var parts = new List<string>();
-                if (!string.IsNullOrEmpty(f.InferredServerName)) parts.Add(f.InferredServerName);
-                if (!string.IsNullOrEmpty(f.InferredInstanceName)) parts.Add(f.InferredInstanceName);
-                return parts.Count > 0 ? string.Join("\\", parts) : null;
-            })
+            .Select(f => f.ServerDisplay)
             .Where(s => s != null)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
@@ -179,7 +175,25 @@ public class BlobStorageService
             var (setId, _) = file.IsAgDefaultNaming && !string.IsNullOrEmpty(file.InferredSetId)
                 ? (file.InferredSetId!, 0)
                 : BackupSet.ParseFileName(file.FileName);
-            var key = $"{file.Type}|{file.InferredDatabaseName ?? ""}|{setId}";
+
+            // The key must identify ONE backup operation on ONE server. Type + database + setId
+            // alone does not: two servers writing a same-named database to one container in the
+            // same second collapse into a single "striped" set, which would generate one
+            // RESTORE ... FROM URL = a, URL = b spanning both - and silently drop the second
+            // server's backup from its own timeline. Log backups make this realistic: every
+            // 5-15 minutes across two servers is hundreds of chances a day.
+            //
+            // The parent directory is included as well as server/instance because it survives an
+            // unconfigured or partial path pattern: with no pattern InferredServerName is null on
+            // both sides and would not separate them, whereas FULL/SRV01/Sales and
+            // FULL/SRV02/Sales still differ. Every stripe of one backup shares both.
+            var key = string.Join("|",
+                file.Type,
+                file.InferredServerName ?? "",
+                file.InferredInstanceName ?? "",
+                file.InferredDatabaseName ?? "",
+                BlobDirectory(file.BlobName),
+                setId);
 
             if (!groups.TryGetValue(key, out var list))
             {
@@ -203,11 +217,19 @@ public class BlobStorageService
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
                 Timestamp = timestamp,
                 DatabaseName = first.InferredDatabaseName,
-                ServerName = first.InferredServerName
+                ServerName = first.InferredServerName,
+                InstanceName = first.InferredInstanceName
             });
         }
 
         return sets.OrderBy(s => s.Timestamp).ToList();
+    }
+
+    /// <summary>Parent folder of a blob name, or empty for a flat name. Scopes set grouping.</summary>
+    private static string BlobDirectory(string blobName)
+    {
+        var idx = blobName.LastIndexOf('/');
+        return idx >= 0 ? blobName[..idx] : string.Empty;
     }
 
     public string BuildBlobUrlWithSas(BlobContainerConfig config, string blobName)
