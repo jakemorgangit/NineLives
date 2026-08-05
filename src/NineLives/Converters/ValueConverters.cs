@@ -5,6 +5,59 @@ using System.Windows.Media;
 
 namespace Blackcat.NineLives.Converters;
 
+/// <summary>
+/// Renders a tag name as a GitHub-style pill brush.
+///
+/// GitHub's LIGHT theme fills a label with the raw swatch and picks black or white text. Against
+/// this app's dark background a solid #B60205 is punishing to look at, so this follows GitHub's
+/// DARK theme treatment instead: a low-alpha fill of the colour, a coloured border, and a
+/// lightened version of the colour as the text. Same palette, appropriate rendering.
+///
+/// ConverterParameter selects which part: "fill", "border", or text (the default).
+/// </summary>
+public class TagBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var hex = Services.TagPalette.ColorFor(value as string);
+        var baseColor = (Color)ColorConverter.ConvertFromString(hex);
+
+        return (parameter as string)?.ToLowerInvariant() switch
+        {
+            "fill" => new SolidColorBrush(Color.FromArgb(0x33, baseColor.R, baseColor.G, baseColor.B)),
+            "border" => new SolidColorBrush(Color.FromArgb(0x99, baseColor.R, baseColor.G, baseColor.B)),
+            _ => new SolidColorBrush(Lighten(baseColor, 0.55))
+        };
+    }
+
+    /// <summary>
+    /// Mixes toward white so the text clears a sensible contrast floor on a dark background. The
+    /// darker swatches (#0052CC, #5319E7) are close to unreadable at full saturation here.
+    /// </summary>
+    private static Color Lighten(Color c, double amount)
+        => Color.FromRgb(
+            (byte)(c.R + (255 - c.R) * amount),
+            (byte)(c.G + (255 - c.G) * amount),
+            (byte)(c.B + (255 - c.B) * amount));
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Turns the comma-separated tag text being typed into the parsed list, so the edit form can
+/// show a live preview of the actual pills. Uses the same parser as save, so what is previewed
+/// is exactly what is stored.
+/// </summary>
+public class TagPreviewConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => Services.TagPalette.ParseTags(value as string);
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 public class BoolToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)

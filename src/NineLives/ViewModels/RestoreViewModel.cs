@@ -184,6 +184,13 @@ public partial class RestoreViewModel : ViewModelBase
 
     public ServerConnection? ConnectedServer { get; set; }
 
+    /// <summary>Tags of the connected server, shown on the execute confirmation.</summary>
+    [ObservableProperty]
+    private ObservableCollection<string> _connectedServerTags = [];
+
+    [ObservableProperty]
+    private bool _hasConnectedServerTags;
+
     partial void OnUseWithMoveChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowMoveOptions));
@@ -973,6 +980,10 @@ public partial class RestoreViewModel : ViewModelBase
 
     partial void OnIsConnectedToServerChanged(bool value)
     {
+        var tags = value ? ConnectedServer?.Tags ?? [] : [];
+        ConnectedServerTags = new ObservableCollection<string>(tags);
+        HasConnectedServerTags = ConnectedServerTags.Count > 0;
+
         ValidateChainCommand.NotifyCanExecuteChanged();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
