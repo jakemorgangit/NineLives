@@ -8,6 +8,20 @@
          instance, so both work. -->
     <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
 
+    <!-- Terminal console. Darker than the cards on purpose, so the console reads as a separate
+         surface the way a real terminal does rather than as another panel in the form. -->
+    <SolidColorBrush x:Key="ConsoleBackgroundBrush" Color="#0C0E14" />
+    <SolidColorBrush x:Key="ConsoleBorderBrush" Color="#2A3040" />
+    <SolidColorBrush x:Key="ConsoleChromeBrush" Color="#161A24" />
+    <SolidColorBrush x:Key="ConsoleTextBrush" Color="#C9D1D9" />
+    <SolidColorBrush x:Key="ConsoleMutedBrush" Color="#6E7681" />
+    <SolidColorBrush x:Key="ConsoleStepBrush" Color="#79C0FF" />
+    <SolidColorBrush x:Key="ConsoleSuccessBrush" Color="#3FB950" />
+    <SolidColorBrush x:Key="ConsoleWarningBrush" Color="#D29922" />
+    <SolidColorBrush x:Key="ConsoleErrorBrush" Color="#F85149" />
+
+    <FontFamily x:Key="ConsoleFont">Cascadia Code, Cascadia Mono, Consolas, Courier New</FontFamily>
+
     <!-- Color Palette -->
     <Color x:Key="WindowBackgroundColor">#1B1E2B</Color>
     <Color x:Key="SidebarBackgroundColor">#141722</Color>

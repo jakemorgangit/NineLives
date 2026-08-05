@@ -936,45 +936,140 @@
                                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
                                Margin="0,0,0,12" TextWrapping="Wrap" />
 
-                    <!-- Script Output (hidden during execution) -->
+                    <!-- The generated script. Stays visible during and after execution: it used to
+                         be hidden the moment Execute was pressed, so the script and the console
+                         shared one slot and you could not see what was running while it ran. -->
                     <Border Background="{StaticResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="0">
-                        <Border.Style>
-                            <Style TargetType="Border">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <MultiDataTrigger>
-                                        <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding HasScript}" Value="True" />
-                                            <Condition Binding="{Binding IsExecuting}" Value="False" />
-                                            <Condition Binding="{Binding ExecutionComplete}" Value="False" />
-                                        </MultiDataTrigger.Conditions>
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </MultiDataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Border.Style>
-                        <TextBox Text="{Binding GeneratedScript, Mode=OneWay}"
-                                 Style="{StaticResource DarkTextBox}"
-                                 IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto" MaxHeight="400"
-                                 FontFamily="Cascadia Code, Consolas, Courier New" FontSize="12" />
+                            CornerRadius="4" Padding="0"
+                            Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <Grid Margin="12,8,12,4">
+                                <TextBlock Text="GENERATED SCRIPT" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="updates as you change options"
+                                           Style="{StaticResource SecondaryText}"
+                                           FontSize="11"
+                                           HorizontalAlignment="Right" />
+                            </Grid>
+                            <TextBox Text="{Binding GeneratedScript, Mode=OneWay}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     MaxHeight="320"
+                                     FontFamily="{StaticResource ConsoleFont}" FontSize="12" />
+                        </StackPanel>
                     </Border>
 
-                    <!-- Execution Log -->
-                    <Border Background="{StaticResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="0" Margin="0,12,0,0"
-                            Visibility="{Binding ExecutionLog, Converter={StaticResource NullToVis}}">
-                        <StackPanel>
-                            <TextBlock Text="EXECUTION LOG" Style="{StaticResource LabelText}" Margin="12,8,0,4" />
-                            <TextBox x:Name="ExecutionLogBox"
-                                     Text="{Binding ExecutionLog, Mode=OneWay}"
-                                     Style="{StaticResource DarkTextBox}"
-                                     IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
-                                     VerticalScrollBarVisibility="Auto" MaxHeight="300"
-                                     FontFamily="Cascadia Code, Consolas, Courier New" FontSize="12"
-                                     TextChanged="ExecutionLogBox_TextChanged" />
-                        </StackPanel>
+                    <!-- Execution console.
+                         Its own surface, darker than the cards, so it reads as a terminal rather
+                         than another form panel. Lines come from a collection rather than one
+                         growing string: appending to a bound string re-rendered the whole control
+                         on every message, which is why progress arrived in bursts. -->
+                    <Border CornerRadius="6" Margin="0,12,0,0"
+                            Background="{StaticResource ConsoleBackgroundBrush}"
+                            BorderBrush="{StaticResource ConsoleBorderBrush}"
+                            BorderThickness="1"
+                            Visibility="{Binding HasConsoleOutput, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Chrome strip: title, live indicator, copy. -->
+                            <Border Grid.Row="0"
+                                    Background="{StaticResource ConsoleChromeBrush}"
+                                    CornerRadius="5,5,0,0"
+                                    BorderBrush="{StaticResource ConsoleBorderBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="12,7">
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Ellipse Width="9" Height="9" Margin="0,0,7,0">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{StaticResource ConsoleMutedBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExecuting}" Value="True">
+                                                            <Setter Property="Fill" Value="{StaticResource ConsoleSuccessBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="restore console"
+                                                   Foreground="{StaticResource ConsoleMutedBrush}"
+                                                   FontFamily="{StaticResource ConsoleFont}"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding ConsoleLines.Count, StringFormat='{}{0} lines'}"
+                                                   Foreground="{StaticResource ConsoleMutedBrush}"
+                                                   FontFamily="{StaticResource ConsoleFont}"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,12,0" />
+                                        <Button Content="Copy output"
+                                                Command="{Binding CopyConsoleCommand}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="8,2" FontSize="11"
+                                                ToolTip="Copies the whole console, which is what to attach to a bug report." />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Virtualised so a long restore stays responsive. Auto-follows the
+                                 last line unless the user has scrolled up to read something. -->
+                            <ScrollViewer Grid.Row="1"
+                                          x:Name="ConsoleScroller"
+                                          ScrollChanged="ConsoleScroller_ScrollChanged"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Auto"
+                                          MaxHeight="360"
+                                          Padding="12,8,12,10">
+                                <ItemsControl ItemsSource="{Binding ConsoleLines}"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <VirtualizingStackPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Text}"
+                                                       FontFamily="{StaticResource ConsoleFont}"
+                                                       FontSize="12"
+                                                       TextWrapping="NoWrap"
+                                                       LineHeight="17">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource ConsoleTextBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Kind}" Value="Step">
+                                                                <Setter Property="Foreground" Value="{StaticResource ConsoleStepBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Kind}" Value="Success">
+                                                                <Setter Property="Foreground" Value="{StaticResource ConsoleSuccessBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Kind}" Value="Warning">
+                                                                <Setter Property="Foreground" Value="{StaticResource ConsoleWarningBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Kind}" Value="Error">
+                                                                <Setter Property="Foreground" Value="{StaticResource ConsoleErrorBrush}" />
+                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
                     </Border>
 
                     <!-- What a failed restore left behind, and how to undo it (#14). A chain that

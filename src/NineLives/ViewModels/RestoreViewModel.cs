@@ -215,6 +215,18 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _loadProgressText = string.Empty;
 
+    // ── Execution console ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The console, one line per entry. A collection rather than one growing string so appending
+    /// costs the same on the thousandth line as on the first.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ConsoleLine> _consoleLines = [];
+
+    [ObservableProperty]
+    private bool _hasConsoleOutput;
+
     /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
     private void RefreshCancelState()
     {
@@ -386,9 +398,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isExecuting;
-
-    [ObservableProperty]
-    private string _executionLog = string.Empty;
 
     [ObservableProperty]
     private bool _executionComplete;
@@ -873,6 +882,12 @@ public partial class RestoreViewModel : ViewModelBase
 
     private void UpdateRestoreSummary()
     {
+        // Every option change already funnels through here, so it is also where the script is kept
+        // in step. It used to be built only when Generate Script was pressed, which meant the
+        // script on screen could quietly disagree with the settings above it - and the script is
+        // the thing people read before running a restore against production.
+        RegenerateScript();
+
         if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
         {
             RestoreSummaryText = string.Empty;
@@ -1126,6 +1141,10 @@ public partial class RestoreViewModel : ViewModelBase
         CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>
+    /// Explicit Generate. Same work as the live rebuild, but it says why nothing was produced -
+    /// the live path stays silent because reporting an error on every keystroke would be noise.
+    /// </summary>
     [RelayCommand]
     private void GenerateScript()
     {
@@ -1146,6 +1165,35 @@ public partial class RestoreViewModel : ViewModelBase
         if (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
         {
             SetError($"Point-in-time target is not valid. {PointInTimeMessage}");
+            return;
+        }
+
+        RegenerateScript();
+        if (HasScript) SetStatus("Script generated successfully.");
+    }
+
+    /// <summary>
+    /// Rebuilds the script from the current settings, silently.
+    ///
+    /// Called from UpdateRestoreSummary, so every option change keeps the script in step. It used
+    /// to be built only when Generate Script was pressed, which meant the script on screen could
+    /// quietly disagree with the settings above it - and that script is what people read before
+    /// running a restore against production.
+    ///
+    /// When the settings cannot produce a valid script the script is cleared rather than left
+    /// stale. A stale script is worse than none: it looks authoritative and is not.
+    /// </summary>
+    private void RegenerateScript()
+    {
+        // Leave the script alone mid-restore - it is the record of what is actually running.
+        if (IsExecuting) return;
+
+        if (RestoreChain == null
+            || string.IsNullOrWhiteSpace(TargetDatabaseName)
+            || (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null))
+        {
+            GeneratedScript = string.Empty;
+            HasScript = false;
             return;
         }
 
@@ -1192,7 +1240,6 @@ public partial class RestoreViewModel : ViewModelBase
 
         GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
         HasScript = true;
-        SetStatus("Script generated successfully.");
     }
 
     /// <summary>Create or update the blob credential on the connected server (optional; not included in generated script).</summary>
@@ -1432,7 +1479,8 @@ public partial class RestoreViewModel : ViewModelBase
         var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
         ExecutionComplete = false;
-        ExecutionLog = string.Empty;
+        ConsoleLines.Clear();
+        HasConsoleOutput = false;
         RecoveryActions = [];
         HasRecoveryActions = false;
         RefreshCancelState();
@@ -1511,7 +1559,12 @@ public partial class RestoreViewModel : ViewModelBase
             await _sqlService.ExecuteRestoreWithProgressAsync(
                 server,
                 GeneratedScript,
-                msg => Application.Current.Dispatcher.Invoke(() => AppendLog(msg)),
+                // InvokeAsync, not Invoke. This callback runs on the connection's thread when SQL
+                // Server sends an info message, and a synchronous Invoke BLOCKS that thread until
+                // the UI has finished handling it. With the UI busy re-rendering, progress backed
+                // up and then arrived in bursts - which is precisely what "not live" looked like.
+                // Posting instead lets the restore keep streaming while the UI catches up.
+                msg => Application.Current.Dispatcher.InvokeAsync(() => AppendLog(msg)),
                 executeToken);
 
             ExecutionSuccess = true;
@@ -1652,11 +1705,30 @@ public partial class RestoreViewModel : ViewModelBase
     /// restore that ends with the window being closed still leaves a record of how far it got.
     /// Redaction happens inside the log, not here (#40).
     /// </summary>
+    /// <summary>
+    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
+    /// drift from what the user was shown.
+    ///
+    /// Writes to a COLLECTION rather than concatenating a bound string. Appending to a bound string
+    /// rebuilds it and re-renders the whole TextBox on every message - O(n^2) - which was a large
+    /// part of why a restore reporting progress every few percent looked like it arrived in bursts
+    /// rather than live.
+    /// </summary>
     private void AppendLog(string message)
     {
-        ExecutionLog += message + "\n";
+        foreach (var line in message.Split('\n'))
+            ConsoleLines.Add(ConsoleLine.From(line));
+
+        HasConsoleOutput = true;
         App.Log.Info($"[execute] {message.Trim()}");
     }
+
+    /// <summary>The console as plain text, for copying into a bug report.</summary>
+    public string ConsoleText => string.Join(Environment.NewLine, ConsoleLines.Select(l => l.Text));
+
+    [RelayCommand]
+    private void CopyConsole()
+        => TryCopyToClipboard(ConsoleText, "Execution log copied to clipboard.");
 
     private async Task RunArmCountdownAsync(CancellationToken ct)
     {

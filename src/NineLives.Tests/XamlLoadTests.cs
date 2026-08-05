@@ -260,6 +260,54 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         });
     }
 
+    /// <summary>
+    /// The execution console renders its lines, colours them by kind, and no longer shares a slot
+    /// with the generated script - both are visible at once.
+    /// </summary>
+    [Fact]
+    public void TheConsoleAndTheScriptAreBothVisibleTogether()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.BackupsLoaded = true;
+            vm.HasScript = true;
+            vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
+            vm.ConsoleLines =
+            [
+                new ConsoleLine("Beginning restore execution...", ConsoleLineKind.Step),
+                new ConsoleLine("50 percent processed."),
+                new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
+            ];
+            vm.HasConsoleOutput = true;
+            vm.IsExecuting = true;
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.Contains(texts, t => t.Contains("50 percent processed", StringComparison.Ordinal));
+                Assert.Contains(texts, t => t.Contains("Beginning restore execution", StringComparison.Ordinal));
+
+                // The script pane used to be hidden the moment execution started, so the two
+                // shared one slot. Both must now be on screen at the same time.
+                var script = FindAll<TextBox>(view)
+                    .Select(b => b.Text)
+                    .FirstOrDefault(t => t.Contains("RESTORE DATABASE [MyDb]", StringComparison.Ordinal));
+                Assert.NotNull(script);
+
+                listener.AssertNone("RestoreView console");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
     /// <summary>The inventory warnings panel added with #46 - separate from the chain issues one.</summary>
     [Fact]
     public void TheInventoryPanelShowsItsFindings()
