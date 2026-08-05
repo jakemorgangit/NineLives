@@ -34,14 +34,21 @@ public class RestoreOptions
     /// the case where a partial recovery beats none, and is not something to leave switched on.
     /// </summary>
     public bool ContinueAfterError { get; set; }
-    public string? CredentialName { get; set; }
 
     public List<FileMoveOption> FileMoves { get; set; } = [];
 
-    // The SAS credential name to use in SQL Server
-    public string SqlCredentialName { get; set; } = "BlobRestoreCredential";
-    public string? SasToken { get; set; }
-    public string? StorageAccountUrl { get; set; }
+    // Deliberately no credential fields here (#42).
+    //
+    // CredentialName, SqlCredentialName, SasToken and StorageAccountUrl used to live on this
+    // object. Every one of them was written by the ViewModel and read by nothing: the generated
+    // script carries no WITH CREDENTIAL clause, because SQL Server rejects that for a SAS
+    // credential and matches by URL instead (#60).
+    //
+    // SasToken was the one that mattered - it copied a live SAS token into an options object whose
+    // whole purpose is to be handed to a text generator. Nothing was leaking it, but nothing
+    // needed it either, and a secret sitting one careless AppendLine away from a script is not
+    // worth keeping for a field no code reads. The credential name the app does use lives on the
+    // ViewModel, which is what talks to the server about it.
 }
 
 public class FileMoveOption

@@ -443,15 +443,15 @@ public class RestoreScriptGeneratorTests
     [Fact]
     public void Generate_NeverEmbedsCredentials()
     {
-        var script = _generator.Generate(FullDiffLogChain(), Options(o =>
-        {
-            o.SasToken = "sv=2026&sig=SECRET";
-            o.CredentialName = "MyCred";
-        }));
+        // The options object no longer carries a SAS token or a credential name at all (#42), so
+        // the strongest thing left to assert is the contract itself: nothing that could carry a
+        // secret reaches the script. WITH CREDENTIAL is separately wrong for a SAS credential -
+        // SQL Server rejects it with Msg 3225 and matches by URL instead (#60).
+        var script = _generator.Generate(FullDiffLogChain(), Options());
 
-        // The generator's contract: no credential or SAS material in the script, ever.
-        Assert.DoesNotContain("SECRET", script);
         Assert.DoesNotContain("CREDENTIAL", script);
+        Assert.DoesNotContain("sig=", script);
+        Assert.DoesNotContain("sv=", script);
     }
 
     private static int CountOccurrences(string haystack, string needle)
