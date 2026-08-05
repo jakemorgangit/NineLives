@@ -211,7 +211,64 @@ public class BackupChainValidatorTests
             Set(BackupType.TransactionLog, T(1, 27))
         };
 
-        Assert.Empty(_validator.Validate(Chain(Set(BackupType.Full, T(0)), null, logs)));
+        // Full immediately before the first log, so this test isolates jitter between logs and
+        // does not accidentally describe a coverage gap after the full.
+        Assert.Empty(_validator.Validate(Chain(Set(BackupType.Full, T(0, 57)), null, logs)));
+    }
+
+    // ── log coverage reaching back to the data backup ────────────────────────────
+
+    [Fact]
+    public void Validate_FirstLogLongAfterTheDifferential_IsWarned()
+    {
+        // The retention shape found on real data: logs kept for days, fulls and differentials for
+        // weeks, so the oldest surviving log sits long after the differential and cannot connect
+        // to it. The chain looks complete - regular hourly logs - but will fail with 4305.
+        var chain = Chain(
+            Set(BackupType.Full, T(0)),
+            [Set(BackupType.Differential, T(1))],
+            [
+                Set(BackupType.TransactionLog, T(14)),
+                Set(BackupType.TransactionLog, T(15)),
+                Set(BackupType.TransactionLog, T(16)),
+                Set(BackupType.TransactionLog, T(17))
+            ]);
+
+        var issue = Assert.Single(_validator.Validate(chain));
+
+        Assert.False(issue.IsError);
+        Assert.Contains("may not reach back", issue.Title);
+        Assert.Contains("4305", issue.Detail);
+    }
+
+    [Fact]
+    public void Validate_FirstLogShortlyAfterTheFull_IsClean()
+    {
+        // A full at 00:00 with hourly logs starting at 01:00 is entirely normal.
+        var chain = Chain(
+            Set(BackupType.Full, T(0)),
+            null,
+            [
+                Set(BackupType.TransactionLog, T(1)),
+                Set(BackupType.TransactionLog, T(2)),
+                Set(BackupType.TransactionLog, T(3)),
+                Set(BackupType.TransactionLog, T(4))
+            ]);
+
+        Assert.Empty(_validator.Validate(chain));
+    }
+
+    [Fact]
+    public void Validate_TooFewLogsToJudgeCoverage_ProducesNoWarning()
+    {
+        // With one log there is no cadence to compare against - only the LSN check can tell,
+        // and claiming otherwise would be guessing.
+        var chain = Chain(
+            Set(BackupType.Full, T(0)),
+            [Set(BackupType.Differential, T(1))],
+            [Set(BackupType.TransactionLog, T(20))]);
+
+        Assert.Empty(_validator.Validate(chain));
     }
 
     // ── ordering ─────────────────────────────────────────────────────────────────

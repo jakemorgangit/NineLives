@@ -46,7 +46,19 @@ public class BackupFileInfo
     public int? BackupTypeCode { get; set; }
     public decimal? FirstLsn { get; set; }
     public decimal? LastLsn { get; set; }
+
+    /// <summary>
+    /// For a differential, the CheckpointLSN of the full backup it is based on. Comparing this
+    /// against a candidate full's CheckpointLSN is the authoritative test of whether the pair
+    /// actually belongs together - timestamps only suggest it.
+    /// </summary>
     public decimal? DatabaseBackupLsn { get; set; }
+
+    /// <summary>
+    /// LSN of the checkpoint taken during this backup. A differential's DatabaseBackupLSN must
+    /// equal its base full's CheckpointLSN.
+    /// </summary>
+    public decimal? CheckpointLsn { get; set; }
 
     public bool HasDetailedMetadata => BackupStartDate.HasValue;
 
