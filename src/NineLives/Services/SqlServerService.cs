@@ -239,6 +239,22 @@ public class SqlServerService
         };
     }
 
+    // DO NOT set conn.FireInfoMessageEventOnUserErrors = true on these connections.
+    //
+    // That flag routes every error of severity <= 16 to the InfoMessage event INSTEAD of
+    // throwing SqlException - and severity 16 is where SQL Server reports essentially every
+    // real restore failure: 3201 (cannot open backup device, i.e. a bad or expired SAS),
+    // 3013 (RESTORE terminating abnormally), 4305 (log too recent), 3136 (differential base
+    // mismatch), 3154 (backup set is for a different database).
+    //
+    // With the flag on, nothing threw, the GO-split statement loop below ran the rest of the
+    // chain against a database that was never created, and the caller reported
+    // "Restore completed successfully!" over a total failure - the worst possible outcome for
+    // a restore tool. Progress output does NOT depend on the flag: STATS "X percent processed"
+    // and PRINT are severity <= 10 and arrive through InfoMessage either way.
+    //
+    // Pinned by SqlExecutionFailureTests (live SQL, gated on NINELIVES_TEST_SQL).
+
     public async Task ExecuteNonQueryAsync(
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
@@ -248,7 +264,6 @@ public class SqlServerService
         {
             conn.InfoMessage += (_, e) => messageCallback(e.Message);
         }
-        conn.FireInfoMessageEventOnUserErrors = true;
         await conn.OpenAsync(ct);
 
         await using var cmd = conn.CreateCommand();
@@ -266,23 +281,41 @@ public class SqlServerService
         {
             conn.InfoMessage += (_, e) => messageCallback(e.Message);
         }
-        conn.FireInfoMessageEventOnUserErrors = true;
         await conn.OpenAsync(ct);
 
         var statements = SplitGoStatements(sql);
-        foreach (var statement in statements)
+        var executable = statements.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+
+        for (int i = 0; i < executable.Count; i++)
         {
-            if (string.IsNullOrWhiteSpace(statement)) continue;
+            var statement = executable[i];
             ct.ThrowIfCancellationRequested();
 
-            messageCallback?.Invoke($"Executing: {statement[..Math.Min(80, statement.Length)].Trim()}...");
+            messageCallback?.Invoke(
+                $"Executing statement {i + 1} of {executable.Count}: {Summarize(statement)}...");
 
             await using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 0;
             cmd.CommandText = statement;
-            await cmd.ExecuteNonQueryAsync(ct);
+
+            try
+            {
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+            catch (SqlException)
+            {
+                // Say WHICH step of the chain failed before it propagates. Without this the
+                // user sees a bare SQL error and has to work out whether the full, a
+                // differential, or a log restore was the one that died.
+                messageCallback?.Invoke(
+                    $"FAILED on statement {i + 1} of {executable.Count}: {Summarize(statement)}");
+                throw;
+            }
         }
     }
+
+    private static string Summarize(string statement)
+        => statement[..Math.Min(80, statement.Length)].Trim();
 
     /// <summary>Checks if a credential with the given name exists on the server and has identity SHARED ACCESS SIGNATURE (for blob URL restores).</summary>
     public async Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(

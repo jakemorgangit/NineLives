@@ -41,6 +41,24 @@ jobs:
       - name: Build
         run: dotnet build NineLives.sln -c Release --no-restore -warnaserror
 
+      # SqlExecutionFailureTests pin the "a failed restore must not report success" contract and
+      # need a real instance. windows-latest ships SQL Server Express LocalDB; if it starts, point
+      # the suite at it. Best effort by design — if LocalDB is ever absent from the image those
+      # tests skip and the rest of the suite is unaffected, rather than the build breaking on an
+      # environment detail.
+      - name: Start SQL Server LocalDB (best effort)
+        shell: pwsh
+        run: |
+          sqllocaldb create MSSQLLocalDB 2>$null
+          sqllocaldb start MSSQLLocalDB
+          if ($LASTEXITCODE -eq 0) {
+            "NINELIVES_TEST_SQL=(localdb)\MSSQLLocalDB" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::notice title=Live SQL tests enabled::LocalDB started; SqlExecutionFailureTests will run."
+          } else {
+            Write-Host "::warning title=Live SQL tests skipped::LocalDB unavailable on this runner."
+          }
+          exit 0
+
       - name: Run tests
         run: dotnet test src/NineLives.Tests/NineLives.Tests.csproj -c Release --no-build --verbosity normal
 
