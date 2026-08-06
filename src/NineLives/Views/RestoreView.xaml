@@ -821,43 +821,43 @@
                                      ToolTip="The name of the database to restore to." />
 
                             <CheckBox Content="WITH REPLACE"
-                                      IsChecked="{Binding WithReplace}"
+                                      IsChecked="{Binding Options.WithReplace}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="Overwrite the existing database even if it already exists." />
 
                             <CheckBox Content="Disconnect Sessions"
-                                      IsChecked="{Binding DisconnectSessions}"
+                                      IsChecked="{Binding Options.DisconnectSessions}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="SET SINGLE_USER WITH ROLLBACK IMMEDIATE before restore." />
 
                             <CheckBox Content="KEEP_REPLICATION"
-                                      IsChecked="{Binding KeepReplication}"
+                                      IsChecked="{Binding Options.KeepReplication}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="Preserves replication settings during restore." />
 
                             <CheckBox Content="ENABLE_BROKER"
-                                      IsChecked="{Binding EnableBroker}"
+                                      IsChecked="{Binding Options.EnableBroker}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="Enables Service Broker with the existing contract." />
 
                             <CheckBox Content="NEW_BROKER"
-                                      IsChecked="{Binding NewBroker}"
+                                      IsChecked="{Binding Options.NewBroker}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="Creates a new Service Broker identifier." />
 
                             <CheckBox Content="CHECKSUM"
-                                      IsChecked="{Binding WithChecksum}"
+                                      IsChecked="{Binding Options.WithChecksum}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
                                       ToolTip="Verify backup checksums while restoring. Only works if the backup was taken WITH CHECKSUM - against one that was not, SQL Server fails the restore rather than skipping the check." />
 
                             <CheckBox Content="CONTINUE_AFTER_ERROR"
-                                      IsChecked="{Binding ContinueAfterError}"
+                                      IsChecked="{Binding Options.ContinueAfterError}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,4"
                                       ToolTip="Keep restoring past a damaged page or a failed checksum instead of stopping. The database this produces may be corrupt." />
@@ -866,7 +866,7 @@
                                        FontSize="10" TextWrapping="Wrap"
                                        Foreground="{DynamicResource WarningBrush}"
                                        Margin="0,0,0,12"
-                                       Visibility="{Binding ContinueAfterError, Converter={StaticResource BoolToVis}}"
+                                       Visibility="{Binding Options.ContinueAfterError, Converter={StaticResource BoolToVis}}"
                                        Text="A restore that finishes despite errors can leave a corrupt database. Run DBCC CHECKDB on the result before trusting it." />
 
                             <CheckBox Content="WITH MOVE (relocate files)"
@@ -1013,27 +1013,27 @@
                             <StackPanel Margin="0,4,0,16">
                                 <RadioButton Content="RECOVERY"
                                              Style="{StaticResource DarkRadioButton}"
-                                             IsChecked="{Binding RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=Recovery}"
+                                             IsChecked="{Binding Options.RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=Recovery}"
                                              Margin="0,0,0,6" GroupName="RecoveryMode"
                                              ToolTip="Database is fully recovered and ready for use." />
                                 <RadioButton Content="NORECOVERY"
                                              Style="{StaticResource DarkRadioButton}"
-                                             IsChecked="{Binding RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=NoRecovery}"
+                                             IsChecked="{Binding Options.RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=NoRecovery}"
                                              Margin="0,0,0,6" GroupName="RecoveryMode"
                                              ToolTip="Leaves database in restoring state for additional restores." />
                                 <RadioButton Content="STANDBY"
                                              Style="{StaticResource DarkRadioButton}"
-                                             IsChecked="{Binding RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=Standby}"
+                                             IsChecked="{Binding Options.RecoveryMode, Converter={StaticResource EnumToBool}, ConverterParameter=Standby}"
                                              GroupName="RecoveryMode"
                                              ToolTip="Read-only with undo file." />
                             </StackPanel>
 
                             <TextBlock Text="STANDBY FILE PATH" Style="{StaticResource LabelText}"
-                                       Visibility="{Binding IsStandbyMode, Converter={StaticResource BoolToVis}}" />
-                            <TextBox Text="{Binding StandbyFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                       Visibility="{Binding Options.IsStandbyMode, Converter={StaticResource BoolToVis}}" />
+                            <TextBox Text="{Binding Options.StandbyFilePath, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,16"
-                                     Visibility="{Binding IsStandbyMode, Converter={StaticResource BoolToVis}}" />
+                                     Visibility="{Binding Options.IsStandbyMode, Converter={StaticResource BoolToVis}}" />
 
                             <!-- Point-in-time (STOPAT): only shown for a log restore point, where
                                  stopping partway through the log is meaningful. -->
@@ -1069,7 +1069,7 @@
                             </StackPanel>
 
                             <TextBlock Text="STATS PERCENT" Style="{StaticResource LabelText}" />
-                            <TextBox Text="{Binding StatsPercent, UpdateSourceTrigger=PropertyChanged}"
+                            <TextBox Text="{Binding Options.StatsPercent, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Width="80" HorizontalAlignment="Left"
                                      Margin="0,0,0,16" />
