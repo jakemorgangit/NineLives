@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,9 +27,9 @@ public partial class ExecutionWindow : Window
         InitializeComponent();
         DataContext = _viewModel = viewModel;
 
-        viewModel.ConsoleLines.CollectionChanged += OnConsoleLinesChanged;
+        viewModel.Console.Lines.CollectionChanged += OnConsoleLinesChanged;
         ConsoleList.Loaded += (_, _) => HookScroller();
-        Closed += (_, _) => viewModel.ConsoleLines.CollectionChanged -= OnConsoleLinesChanged;
+        Closed += (_, _) => viewModel.Console.Lines.CollectionChanged -= OnConsoleLinesChanged;
     }
 
     private void HookScroller()

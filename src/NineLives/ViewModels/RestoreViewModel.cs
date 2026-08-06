@@ -242,16 +242,6 @@ public partial class RestoreViewModel : ViewModelBase
     // ── Execution console ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// The console, one line per entry. A collection rather than one growing string so appending
-    /// costs the same on the thousandth line as on the first.
-    /// </summary>
-    [ObservableProperty]
-    private ObservableCollection<ConsoleLine> _consoleLines = [];
-
-    [ObservableProperty]
-    private bool _hasConsoleOutput;
-
-    /// <summary>
     /// True while the console is showing in its own window.
     ///
     /// The inline console hides itself for the duration, so the output is only ever in one place.
@@ -658,6 +648,10 @@ public partial class RestoreViewModel : ViewModelBase
         // without it, running the execute path in a test appends real restore lines to the user's
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
+
+        // Every console message is written to the log file as it arrives, so the file cannot drift
+        // from what was on screen.
+        Console = new ConsoleBuffer(message => _log.Info($"[execute] {message.Trim()}"));
 
         // IsBusy and TargetDatabaseName live on the base class, so they cannot have a generated
         // partial hook - but the busy strip is computed from them.
@@ -2190,13 +2184,13 @@ public partial class RestoreViewModel : ViewModelBase
 
         var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
+        Console.IsRunning = true;
         // Reset alongside ExecutionComplete. Left over from a previous run it could combine with an
         // early bail-out to show the success banner - and write "Outcome: Succeeded" into a saved
         // log - for a restore that never ran.
         ExecutionSuccess = false;
         ExecutionComplete = false;
-        ConsoleLines.Clear();
-        HasConsoleOutput = false;
+        Console.Clear();
         RecoveryActions = [];
         HasRecoveryActions = false;
         RefreshCancelState();
@@ -2326,8 +2320,9 @@ public partial class RestoreViewModel : ViewModelBase
         {
             _executeCancellation.End();
             IsExecuting = false;
+            Console.IsRunning = false;
             ExecutionComplete = true;
-            FlushConsole();   // nothing buffered may outlive the run
+            Console.Flush();   // nothing buffered may outlive the run
             RefreshCancelState();
 
             // After the flush, so the recorded log is the whole console rather than whatever had
@@ -2356,7 +2351,7 @@ public partial class RestoreViewModel : ViewModelBase
             Outcome = outcome,
             ErrorMessage = failure,
             Script = GeneratedScript,
-            Log = ConsoleText
+            Log = Console.Text
         });
     }
 
@@ -2476,85 +2471,22 @@ public partial class RestoreViewModel : ViewModelBase
     /// Redaction happens inside the log, not here (#40).
     /// </summary>
     /// <summary>
-    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
-    /// drift from what the user was shown.
-    ///
-    /// Writes to a COLLECTION rather than concatenating a bound string. Appending to a bound string
-    /// rebuilds it and re-renders the whole TextBox on every message - O(n^2) - which was a large
-    /// part of why a restore reporting progress every few percent looked like it arrived in bursts
-    /// rather than live.
+    /// The execution console. Its batching and line handling live in ConsoleBuffer (#115) - this
+    /// screen only feeds it and shows it.
     /// </summary>
-    private void AppendLog(string message)
-    {
-        foreach (var raw in message.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-
-            // Messages routinely arrive with a leading or trailing newline for spacing, and SQL
-            // Server's own output has its own blank lines. Left alone that produced a gap between
-            // almost every line. One blank line is allowed as a separator; runs of them are not.
-            if (line.Trim().Length == 0)
-            {
-                if (_pending.Count > 0 && _pending[^1].Text.Length == 0) continue;
-                if (_pending.Count == 0 && (ConsoleLines.Count == 0 || ConsoleLines[^1].Text.Length == 0)) continue;
-                _pending.Add(new ConsoleLine(string.Empty));
-                continue;
-            }
-
-            _pending.Add(ConsoleLine.From(line));
-        }
-
-        _log.Info($"[execute] {message.Trim()}");
-        ScheduleConsoleFlush();
-    }
+    public ConsoleBuffer Console { get; }
 
     /// <summary>
-    /// Moves buffered lines onto the bound collection on a timer rather than as they arrive.
-    ///
-    /// SQL Server emits progress in clusters - several messages within a millisecond, then nothing
-    /// for a second. Adding each one individually meant a layout pass and a scroll per message, in
-    /// bursts, which is what made the console judder. Flushing on a fixed tick turns any arrival
-    /// pattern into a steady redraw, and a whole cluster costs one layout pass instead of ten.
+    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
+    /// drift from what the user was shown.
     /// </summary>
-    private void ScheduleConsoleFlush()
-    {
-        if (_consoleFlushTimer != null) return;
+    private void AppendLog(string message) => Console.Append(message);
 
-        _consoleFlushTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(60)
-        };
-        _consoleFlushTimer.Tick += (_, _) => FlushConsole();
-        _consoleFlushTimer.Start();
-    }
 
-    private void FlushConsole()
-    {
-        if (_pending.Count == 0)
-        {
-            // Nothing arriving and nothing running - stop ticking rather than spin forever.
-            if (!IsExecuting)
-            {
-                _consoleFlushTimer?.Stop();
-                _consoleFlushTimer = null;
-            }
-            return;
-        }
-
-        foreach (var line in _pending) ConsoleLines.Add(line);
-        _pending.Clear();
-        HasConsoleOutput = true;
-    }
-
-    private readonly List<ConsoleLine> _pending = [];
-    private DispatcherTimer? _consoleFlushTimer;
-
-    /// <summary>The console as plain text, for copying into a bug report.</summary>
-    public string ConsoleText => string.Join(Environment.NewLine, ConsoleLines.Select(l => l.Text));
 
     [RelayCommand]
     private void CopyConsole()
-        => TryCopyToClipboard(ConsoleText, "Execution log copied to clipboard.");
+        => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
 
     /// <summary>
     /// Writes the console to a file, with a header saying what it was (#31). The clipboard is fine
@@ -2564,7 +2496,7 @@ public partial class RestoreViewModel : ViewModelBase
     [RelayCommand]
     private void SaveConsole()
     {
-        if (string.IsNullOrEmpty(ConsoleText))
+        if (string.IsNullOrEmpty(Console.Text))
         {
             SetError("There is no execution log to save yet.");
             return;
@@ -2612,7 +2544,7 @@ public partial class RestoreViewModel : ViewModelBase
         header.AppendLine(new string('-', 60));
         header.AppendLine();
 
-        return LogRedactor.Redact(header + ConsoleText);
+        return LogRedactor.Redact(header + Console.Text);
     }
 
     private async Task RunArmCountdownAsync(CancellationToken ct)

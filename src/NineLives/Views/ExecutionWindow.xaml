@@ -66,7 +66,7 @@
                                        FontSize="11" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <TextBlock Text="{Binding ConsoleLines.Count, StringFormat='{}{0} lines'}"
+                            <TextBlock Text="{Binding Console.Lines.Count, StringFormat='{}{0} lines'}"
                                        Foreground="{DynamicResource ConsoleMutedBrush}"
                                        FontFamily="{StaticResource ConsoleFont}"
                                        FontSize="11" VerticalAlignment="Center" Margin="0,0,12,0" />
@@ -87,7 +87,7 @@
                      unbounded height realises every row and virtualisation silently does nothing.
                      A ListBox brings its own virtualising scroll viewer. -->
                 <ListBox Grid.Row="1" x:Name="ConsoleList"
-                         ItemsSource="{Binding ConsoleLines}"
+                         ItemsSource="{Binding Console.Lines}"
                          Style="{StaticResource ConsoleListBox}" />
             </Grid>
         </Border>
