@@ -147,7 +147,8 @@ public partial class BlobBrowserViewModel : ViewModelBase
         try
         {
             _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer, ct);
-            _allSets = _blobService.GroupIntoBackupSets(_allFiles);
+            _allSets = _blobService.GroupIntoBackupSets(
+                _allFiles, SelectedContainer?.BackupServerTimeZoneId);
             HasFiles = _allFiles.Count > 0;
 
             var servers = _blobService.GetDiscoveredServers(_allFiles);

@@ -372,6 +372,20 @@
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
 
+                            <!-- The only thing that genuinely reconciles the two clocks a backup
+                                 time can come from: a filename is the backup server's local time,
+                                 a blob's LastModified is UTC. Optional, and "not known" behaves
+                                 exactly as the app did before it existed (#102). -->
+                            <TextBlock Text="BACKUP SERVER TIME ZONE" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Only needed when some backups here have no timestamp in their filename. Setting it lets those be sorted correctly against the rest instead of being marked approximate."
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                            <ComboBox ItemsSource="{Binding TimeZones}"
+                                      SelectedItem="{Binding EditBackupServerTimeZone}"
+                                      DisplayMemberPath="Name"
+                                      Style="{StaticResource DarkComboBox}"
+                                      Margin="0,0,0,16" />
+
                             <TextBlock>
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource LabelText}">

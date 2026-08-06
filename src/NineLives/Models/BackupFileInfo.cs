@@ -30,7 +30,18 @@ public enum BackupTimestampSource
     /// Fallback: the blob's LastModified, which is UTC, and additionally records when the file
     /// finished uploading rather than when the backup was taken.
     /// </summary>
-    BlobLastModified
+    BlobLastModified,
+
+    /// <summary>
+    /// The blob's LastModified, converted into the backup server's own time zone because the
+    /// container says which one that is (#102).
+    ///
+    /// This is on the SAME clock as a filename or header reading, so it sorts correctly against
+    /// them - the skew is gone. What remains is that LastModified records when the upload
+    /// FINISHED rather than when the backup was taken, which no time zone can fix, so it is still
+    /// shown as approximate.
+    /// </summary>
+    BlobLastModifiedConverted
 }
 
 /// <summary>
@@ -50,11 +61,52 @@ public static class BackupTime
     public static DateTime WallClock(DateTimeOffset value)
         => DateTime.SpecifyKind(value.UtcDateTime, DateTimeKind.Unspecified);
 
+    /// <summary>
+    /// Converts a blob's LastModified into the backup server's own local time.
+    ///
+    /// This is the only thing that genuinely reconciles the two clocks: a filename says what the
+    /// backup server's clock read, and the blob says UTC. Given the server's zone the second can
+    /// be expressed as the first, and the two become comparable rather than merely labelled.
+    ///
+    /// A zone the machine does not know - a config edited by hand, an IANA id on an older Windows
+    /// build - returns null rather than throwing, and the caller falls back to the unconverted
+    /// reading. A wrong time is worse than an honest one, but refusing to open the container over
+    /// it would be worse still.
+    /// </summary>
+    public static DateTime? ToBackupServerTime(DateTimeOffset value, string? timeZoneId)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId)) return null;
+
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+
+            // From the instant, not from the wall clock: this is what makes DST correct. A backup
+            // taken in July and one taken in December convert with different offsets, which a
+            // fixed number could never do.
+            return DateTime.SpecifyKind(
+                TimeZoneInfo.ConvertTime(value, zone).DateTime, DateTimeKind.Unspecified);
+        }
+        catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Explains an approximate reading. Shown as a tooltip wherever one is displayed.</summary>
     public const string ApproximateNote =
         "Approximate. This file's name carries no timestamp, so the time shown is when the blob "
         + "was last modified (UTC), not when the backup was taken on the server. It may sit hours "
         + "away from the other entries.";
+
+    /// <summary>
+    /// Explains a converted reading: on the right clock now, but still the upload time.
+    /// </summary>
+    public const string ConvertedNote =
+        "Approximate. This file's name carries no timestamp, so the time shown is when the blob "
+        + "was last modified - converted into the backup server's time zone, so it sorts correctly "
+        + "against the others. It is still when the upload finished rather than when the backup "
+        + "was taken.";
 
     /// <summary>Prefix marking a displayed time as approximate.</summary>
     public const string ApproximateMarker = "~";
@@ -176,11 +228,27 @@ public class BackupSet
     /// True when the time had to be taken from the blob rather than the filename, which puts it
     /// on a different clock (UTC) from its neighbours and can sort it hours out of position.
     /// </summary>
-    public bool IsTimestampApproximate => TimestampSource == BackupTimestampSource.BlobLastModified;
+    public bool IsTimestampApproximate =>
+        TimestampSource is BackupTimestampSource.BlobLastModified
+                        or BackupTimestampSource.BlobLastModifiedConverted;
+
+    /// <summary>
+    /// True when the reading is not only approximate but on a DIFFERENT clock from its
+    /// neighbours - which is what makes it sort out of position rather than merely be imprecise.
+    /// Converting it into the backup server's zone (#102) removes this while leaving the
+    /// approximation.
+    /// </summary>
+    public bool IsTimestampOnAnotherClock =>
+        TimestampSource == BackupTimestampSource.BlobLastModified;
 
     public string TimestampDisplay => BackupTime.Format(Timestamp, IsTimestampApproximate);
 
-    public string? TimestampNote => IsTimestampApproximate ? BackupTime.ApproximateNote : null;
+    public string? TimestampNote => TimestampSource switch
+    {
+        BackupTimestampSource.BlobLastModified => BackupTime.ApproximateNote,
+        BackupTimestampSource.BlobLastModifiedConverted => BackupTime.ConvertedNote,
+        _ => null
+    };
 
     public string? DatabaseName { get; set; }
     public string? ServerName { get; set; }

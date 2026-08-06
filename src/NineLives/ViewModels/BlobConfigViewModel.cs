@@ -49,6 +49,37 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private string? _editAgPathPattern;
 
+    /// <summary>
+    /// The backup server's time zone, or null for "not known" (#102). Selected from
+    /// <see cref="TimeZones"/>.
+    /// </summary>
+    [ObservableProperty]
+    private TimeZoneOption? _editBackupServerTimeZone;
+
+    private string? _originalTimeZoneId;
+
+    /// <summary>
+    /// Every zone this machine knows, with an explicit "not known" first. Read once - the list
+    /// does not change while the app is running, and enumerating it is not free.
+    /// </summary>
+    public static IReadOnlyList<TimeZoneOption> TimeZones { get; } = BuildTimeZones();
+
+    private static IReadOnlyList<TimeZoneOption> BuildTimeZones()
+    {
+        var options = new List<TimeZoneOption> { TimeZoneOption.Unknown };
+        try
+        {
+            options.AddRange(TimeZoneInfo.GetSystemTimeZones()
+                .Select(z => new TimeZoneOption(z.Id, z.DisplayName)));
+        }
+        catch
+        {
+            // A machine with an unreadable zone database still gets "not known", which is the
+            // behaviour the app had before this existed.
+        }
+        return options;
+    }
+
     [ObservableProperty]
     private ObservableCollection<PathElement> _activePathElements = [];
 
@@ -168,6 +199,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         CheckForUnsavedChanges();
     }
     partial void OnEditAgPathPatternChanged(string? value) => CheckForUnsavedChanges();
+    partial void OnEditBackupServerTimeZoneChanged(TimeZoneOption? value) => CheckForUnsavedChanges();
 
     // Tags are saved like every other field, so editing only the tags has to count as an unsaved
     // change - otherwise the guard that protects unsaved edits lets them be discarded silently.
@@ -186,7 +218,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             EditPathPattern != _originalPattern ||
             EditBackupSourceType != _originalBackupSourceType ||
             EditAgPathPattern != _originalAgPathPattern ||
-            EditTags != _originalTags;
+            EditTags != _originalTags ||
+            EditBackupServerTimeZone?.Id != _originalTimeZoneId;
     }
 
     /// <summary>
@@ -200,6 +233,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         var pattern = container.PathPattern;
         var sourceType = container.BackupSourceType;
         var agPattern = container.AgPathPattern;
+        var timeZoneId = container.BackupServerTimeZoneId;
         var tags = container.Tags.ToList();
 
         return () =>
@@ -209,6 +243,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             container.PathPattern = pattern;
             container.BackupSourceType = sourceType;
             container.AgPathPattern = agPattern;
+            container.BackupServerTimeZoneId = timeZoneId;
             ReplaceTags(container.Tags, tags);
         };
     }
@@ -222,6 +257,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         _originalBackupSourceType = EditBackupSourceType;
         _originalAgPathPattern = EditAgPathPattern;
         _originalTags = EditTags;
+        _originalTimeZoneId = EditBackupServerTimeZone?.Id;
         HasUnsavedChanges = false;
     }
 
@@ -386,6 +422,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
         EditBackupSourceType = BackupSourceType.Standalone;
         EditAgPathPattern = null;
+        EditBackupServerTimeZone = TimeZoneOption.Unknown;
         SyncPathElementsFromPattern();
         SyncAgPathElementsFromPattern();
         HasStoredSasToken = false;
@@ -409,6 +446,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditSasToken = string.Empty; // Never show stored token; user can only replace it
         EditPathPattern = SelectedContainer.PathPattern;
         EditBackupSourceType = SelectedContainer.BackupSourceType;
+        EditBackupServerTimeZone = TimeZoneOption.For(SelectedContainer.BackupServerTimeZoneId, TimeZones);
         EditAgPathPattern = SelectedContainer.AgPathPattern;
         SyncPathElementsFromPattern();
         SyncAgPathElementsFromPattern();
@@ -466,6 +504,7 @@ public partial class BlobConfigViewModel : ViewModelBase
                 PathPattern = EditPathPattern,
                 BackupSourceType = EditBackupSourceType,
                 AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim(),
+                BackupServerTimeZoneId = EditBackupServerTimeZone?.Id,
                 Tags = [.. TagPalette.ParseTags(EditTags)]
             };
             Containers.Add(container);
@@ -485,6 +524,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
             container.PathPattern = EditPathPattern;
             container.BackupSourceType = EditBackupSourceType;
+            container.BackupServerTimeZoneId = EditBackupServerTimeZone?.Id;
             var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
             container.AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim();
         }
@@ -572,6 +612,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasStoredSasToken = true; // Still have a token; user will replace it
         EditSasToken = string.Empty;
         EditPathPattern = SelectedContainer.PathPattern;
+        EditBackupServerTimeZone = TimeZoneOption.For(SelectedContainer.BackupServerTimeZoneId, TimeZones);
         EditBackupSourceType = SelectedContainer.BackupSourceType;
         EditAgPathPattern = SelectedContainer.AgPathPattern;
 
