@@ -50,8 +50,11 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
 
+      # Through the publish PROFILE, not a hand-repeated flag list. The two had drifted - the
+      # profile asked for ReadyToRun and this line did not - and nothing compares them, so the
+      # difference went unnoticed through three releases (#39).
       - name: Publish single-file exe
-        run: dotnet publish src/NineLives/NineLives.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+        run: dotnet publish src/NineLives/NineLives.csproj -p:PublishProfile=SingleFileExe -o publish
 
       - name: Package release assets
         shell: pwsh
