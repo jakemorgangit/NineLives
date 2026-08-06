@@ -210,6 +210,80 @@ public class RestoreViewModelTests
         Assert.False(vm.IsExecuteArmed);
     }
 
+    // ── point in time (#115 seam 3) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// The wiring between the STOPAT box and the script. The rules themselves are pinned in
+    /// PointInTimeViewModelTests; this is the part that has to reach the RESTORE that runs.
+    /// </summary>
+    [Fact]
+    public async Task ATickedPointInTimeTargetReachesTheGeneratedScript()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(3);
+        vm.SelectedContainer = Container();
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+        vm.TargetDatabaseName = "MyDb_Restored";
+
+        // The latest point is a log, so stopping partway through it is meaningful.
+        Assert.True(vm.PointInTime.CanUse);
+        Assert.DoesNotContain("STOPAT", vm.GeneratedScript);
+
+        vm.PointInTime.Use = true;
+        vm.PointInTime.StopAtText = T0.AddHours(2).AddMinutes(30).ToString("yyyy-MM-dd HH:mm:ss");
+
+        Assert.Contains("STOPAT = '2026-01-11T00:30:00'", vm.GeneratedScript);
+    }
+
+    /// <summary>
+    /// A ticked box over a rejected target leaves no script at all. Falling back to the whole log
+    /// would restore past the moment someone explicitly asked to stop at, which is the failure that
+    /// matters - and a script that quietly ignores the box above it is exactly the stale-script
+    /// problem.
+    /// </summary>
+    [Fact]
+    public async Task ATickedButInvalidPointInTimeTargetLeavesNoScript()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(3);
+        vm.SelectedContainer = Container();
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+        vm.TargetDatabaseName = "MyDb_Restored";
+        Assert.NotEmpty(vm.GeneratedScript);
+
+        vm.PointInTime.Use = true;
+        vm.PointInTime.StopAtText = "well after the end of the log";
+
+        Assert.Empty(vm.GeneratedScript);
+        Assert.False(vm.HasScript);
+    }
+
+    /// <summary>
+    /// Selecting a full or differential point takes the STOPAT box away with it - there is no log
+    /// to stop partway through - and the script must lose the STOPAT too.
+    /// </summary>
+    [Fact]
+    public async Task MovingToANonLogPointDropsThePointInTimeTarget()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(3);
+        vm.SelectedContainer = Container();
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+        vm.TargetDatabaseName = "MyDb_Restored";
+
+        vm.PointInTime.Use = true;
+        vm.PointInTime.StopAtText = T0.AddHours(2).AddMinutes(30).ToString("yyyy-MM-dd HH:mm:ss");
+        Assert.Contains("STOPAT", vm.GeneratedScript);
+
+        vm.Timeline.SelectedPoint = vm.Timeline.Points.First(p => p.Type == BackupType.Full);
+
+        Assert.False(vm.PointInTime.CanUse);
+        Assert.False(vm.PointInTime.Use);
+        Assert.Null(vm.PointInTime.Effective);
+        Assert.NotEmpty(vm.GeneratedScript);
+        Assert.DoesNotContain("STOPAT", vm.GeneratedScript);
+    }
+
     // ── changing database ───────────────────────────────────────────────────────
 
     /// <summary>

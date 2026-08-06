@@ -121,34 +121,11 @@ public partial class RestoreViewModel : ViewModelBase
     // 14:30. The target is bounded to within the selected log's window; to stop earlier the
     // user picks an earlier restore point, which keeps the generated chain correct.
 
-    /// <summary>True when the selected restore point is a log, so STOPAT applies.</summary>
-    [ObservableProperty]
-    private bool _canUsePointInTime;
-
-    [ObservableProperty]
-    private bool _usePointInTime;
-
-    /// <summary>User-entered target time, parsed into <see cref="StopAtDateTime"/>.</summary>
-    [ObservableProperty]
-    private string _stopAtText = string.Empty;
-
-    /// <summary>Parsed and validated target, or null when unusable.</summary>
-    [ObservableProperty]
-    private DateTime? _stopAtDateTime;
-
-    /// <summary>Exclusive lower bound: the end of the previous set in the chain.</summary>
-    [ObservableProperty]
-    private DateTime? _stopAtEarliest;
-
-    /// <summary>Inclusive upper bound: the end of the selected log backup.</summary>
-    [ObservableProperty]
-    private DateTime? _stopAtLatest;
-
-    [ObservableProperty]
-    private string _pointInTimeMessage = string.Empty;
-
-    [ObservableProperty]
-    private bool _hasPointInTimeError;
+    /// <summary>
+    /// The STOPAT target and the window it has to fall inside (#115 seam 3). The window itself is
+    /// chain reasoning, so this class works it out and hands it down.
+    /// </summary>
+    public PointInTimeViewModel PointInTime { get; } = new();
 
     // ── Chain gap detection ──────────────────────────────────────────────────────
     // Structural validation of the selected chain, run at selection time. The app otherwise
@@ -609,6 +586,14 @@ public partial class RestoreViewModel : ViewModelBase
                 OnSelectedRestorePointChanged(Timeline.SelectedPoint);
         };
 
+        // The STOPAT target feeds the generated script, so any change to it has to reach the
+        // script (#115 seam 3). Skipped while SetWindow is rewriting several properties at once -
+        // the caller updates once at the end rather than four times through a half-built state.
+        PointInTime.PropertyChanged += (_, _) =>
+        {
+            if (!PointInTime.IsUpdating) UpdateRestoreSummary();
+        };
+
         RefreshContainers();
     }
 
@@ -992,7 +977,7 @@ public partial class RestoreViewModel : ViewModelBase
         parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
         parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
 
-        if (EffectiveStopAt is DateTime stopAt)
+        if (PointInTime.Effective is DateTime stopAt)
             parts.Add($"Stop at {stopAt:yyyy-MM-dd HH:mm:ss} (point-in-time recovery).");
         else if (Timeline.SelectedPoint is { Type: BackupType.TransactionLog } logPoint)
             parts.Add($"Restore to end of log backup at {logPoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
@@ -1026,35 +1011,15 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Recomputes the STOPAT window for the selected restore point. The window itself is
-    /// <see cref="BackupChain.StopAtWindow"/>; this only projects it onto the UI state.
+    /// Points the STOPAT box at the selected restore point's window, or turns it off.
+    ///
+    /// STOPAT only applies to a log restore, and only inside the LAST log's window - which is what
+    /// <see cref="BackupChain.StopAtWindow"/> works out. Deciding whether there is a window is
+    /// chain reasoning and stays here; validating against it does not.
     /// </summary>
     private void UpdatePointInTimeWindow(RestorePoint? point)
-    {
-        var window = point?.Type == BackupType.TransactionLog
-            ? RestoreChain?.StopAtWindow
-            : null;
-
-        if (window == null)
-        {
-            CanUsePointInTime = false;
-            UsePointInTime = false;
-            StopAtEarliest = null;
-            StopAtLatest = null;
-            StopAtText = string.Empty;
-            StopAtDateTime = null;
-            PointInTimeMessage = string.Empty;
-            HasPointInTimeError = false;
-            return;
-        }
-
-        CanUsePointInTime = true;
-        StopAtEarliest = window.Value.Earliest;
-        StopAtLatest = window.Value.Latest;
-        UsePointInTime = false;
-        StopAtText = window.Value.Latest.ToString(StopAtFormat);
-        ValidatePointInTime();
-    }
+        => PointInTime.SetWindow(
+            point?.Type == BackupType.TransactionLog ? RestoreChain?.StopAtWindow : null);
 
     /// <summary>
     /// Reads RESTORE HEADERONLY for every member of the selected chain and validates the LSN
@@ -1279,81 +1244,6 @@ public partial class RestoreViewModel : ViewModelBase
                 : $"{warnings} warning(s) about this chain";
     }
 
-    private const string StopAtFormat = "yyyy-MM-dd HH:mm:ss";
-
-    private static readonly string[] StopAtAcceptedFormats =
-    [
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-ddTHH:mm:ss",
-        "yyyy-MM-dd HH:mm",
-        "yyyy-MM-ddTHH:mm"
-    ];
-
-    private void ValidatePointInTime()
-    {
-        if (!CanUsePointInTime)
-        {
-            StopAtDateTime = null;
-            PointInTimeMessage = string.Empty;
-            HasPointInTimeError = false;
-            return;
-        }
-
-        if (!DateTime.TryParseExact(
-                StopAtText?.Trim(), StopAtAcceptedFormats,
-                CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-        {
-            StopAtDateTime = null;
-            HasPointInTimeError = UsePointInTime;
-            PointInTimeMessage = $"Enter a time as {StopAtFormat}.";
-            UpdateRestoreSummary();
-            return;
-        }
-
-        // Exclusive lower bound: at exactly the previous set's time nothing from this log has
-        // been applied yet, which is the earlier restore point, not this one.
-        if (parsed <= StopAtEarliest)
-        {
-            StopAtDateTime = null;
-            HasPointInTimeError = UsePointInTime;
-            PointInTimeMessage =
-                $"Must be after {StopAtEarliest:yyyy-MM-dd HH:mm:ss} — to stop earlier, " +
-                "select an earlier restore point on the timeline.";
-            UpdateRestoreSummary();
-            return;
-        }
-
-        if (parsed > StopAtLatest)
-        {
-            StopAtDateTime = null;
-            HasPointInTimeError = UsePointInTime;
-            PointInTimeMessage =
-                $"Must be at or before {StopAtLatest:yyyy-MM-dd HH:mm:ss} — to stop later, " +
-                "select a later restore point on the timeline.";
-            UpdateRestoreSummary();
-            return;
-        }
-
-        StopAtDateTime = parsed;
-        HasPointInTimeError = false;
-        PointInTimeMessage = UsePointInTime
-            ? $"Recovery will stop at {parsed:yyyy-MM-dd HH:mm:ss}; later transactions in this log are discarded."
-            : $"Valid range: after {StopAtEarliest:yyyy-MM-dd HH:mm:ss} up to {StopAtLatest:yyyy-MM-dd HH:mm:ss}.";
-        UpdateRestoreSummary();
-    }
-
-    /// <summary>The STOPAT value to generate, or null to restore the whole log chain.</summary>
-    private DateTime? EffectiveStopAt =>
-        CanUsePointInTime && UsePointInTime && !HasPointInTimeError ? StopAtDateTime : null;
-
-    partial void OnStopAtTextChanged(string value) => ValidatePointInTime();
-
-    partial void OnUsePointInTimeChanged(bool value)
-    {
-        ValidatePointInTime();
-        UpdateRestoreSummary();
-    }
-
     partial void OnWithReplaceChanged(bool value) => UpdateRestoreSummary();
     partial void OnDisconnectSessionsChanged(bool value) => UpdateRestoreSummary();
     partial void OnRecoveryModeChanged(RecoveryMode oldValue, RecoveryMode newValue)
@@ -1469,9 +1359,9 @@ public partial class RestoreViewModel : ViewModelBase
 
         // Refuse to silently fall back to a full-chain restore when the user asked to stop at a
         // time we could not use - that would replay exactly the transactions they meant to skip.
-        if (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
+        if (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
         {
-            SetError($"Point-in-time target is not valid. {PointInTimeMessage}");
+            SetError($"Point-in-time target is not valid. {PointInTime.Message}");
             return;
         }
 
@@ -1556,7 +1446,7 @@ public partial class RestoreViewModel : ViewModelBase
 
         if (RestoreChain == null
             || string.IsNullOrWhiteSpace(TargetDatabaseName)
-            || (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
+            || (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
             || !HasStandbyFileIfNeeded)
         {
             GeneratedScript = string.Empty;
@@ -1574,7 +1464,7 @@ public partial class RestoreViewModel : ViewModelBase
             StandbyFilePath = string.IsNullOrWhiteSpace(StandbyFilePath) ? null : StandbyFilePath,
             DisconnectSessions = DisconnectSessions,
             StatsPercent = StatsPercent,
-            StopAt = EffectiveStopAt,
+            StopAt = PointInTime.Effective,
             KeepReplication = KeepReplication,
             EnableBroker = EnableBroker,
             NewBroker = NewBroker,
@@ -1942,7 +1832,7 @@ public partial class RestoreViewModel : ViewModelBase
             _log.ServerChange(server.ServerName,
                 $"restore starting: target [{TargetDatabaseName}], " +
                 $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
-                $"recovery={RecoveryMode}, stopAt={EffectiveStopAt?.ToString("s") ?? "none"}");
+                $"recovery={RecoveryMode}, stopAt={PointInTime.Effective?.ToString("s") ?? "none"}");
 
             AppendLog("Beginning restore execution...\n");
 

@@ -1037,22 +1037,35 @@
 
                             <!-- Point-in-time (STOPAT): only shown for a log restore point, where
                                  stopping partway through the log is meaningful. -->
-                            <StackPanel Visibility="{Binding CanUsePointInTime, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Visibility="{Binding PointInTime.CanUse, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Text="POINT IN TIME" Style="{StaticResource LabelText}" />
                                 <CheckBox Content="Stop at a specific time (STOPAT)"
-                                          IsChecked="{Binding UsePointInTime}"
+                                          IsChecked="{Binding PointInTime.Use}"
                                           Style="{StaticResource DarkCheckBox}"
                                           Margin="0,4,0,8"
                                           ToolTip="Recover to an exact moment inside the selected log backup instead of restoring the whole log." />
-                                <TextBox Text="{Binding StopAtText, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Text="{Binding PointInTime.StopAtText, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource DarkTextBox}"
-                                         IsEnabled="{Binding UsePointInTime}"
+                                         IsEnabled="{Binding PointInTime.Use}"
                                          Width="180" HorizontalAlignment="Left"
                                          ToolTip="yyyy-MM-dd HH:mm:ss" />
-                                <TextBlock Text="{Binding PointInTimeMessage}"
-                                           Style="{StaticResource SecondaryText}"
+                                <!-- "Must be after 14:15" is a rejection, not a hint, and it was
+                                     drawn in the same muted grey as "Valid range: ...". Execute is
+                                     already blocked at that point, so the message is the only thing
+                                     saying why. -->
+                                <TextBlock Text="{Binding PointInTime.Message}"
                                            TextWrapping="Wrap"
-                                           Margin="0,4,0,16" />
+                                           Margin="0,4,0,16">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PointInTime.HasError}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
 
                             <TextBlock Text="STATS PERCENT" Style="{StaticResource LabelText}" />
