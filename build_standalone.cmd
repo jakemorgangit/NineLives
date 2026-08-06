@@ -6,8 +6,11 @@ set "PUBLISH_OUT=%SCRIPT_DIR%publish"
 echo Close Nine Lives (NineLives.exe) if it is running, then press any key to publish...
 pause >nul
 
+REM Through the publish profile, so this produces the same binary the release workflow does.
+REM The flags used to be repeated here and in release.yml, and they had already drifted apart
+REM from the profile - see the note in Properties\PublishProfiles\SingleFileExe.pubxml (#39).
 cd /d "%SCRIPT_DIR%src\NineLives"
-dotnet publish -c Release -o "%PUBLISH_OUT%" -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+dotnet publish -p:PublishProfile=SingleFileExe -o "%PUBLISH_OUT%"
 
 set "EXIT_CODE=%ERRORLEVEL%"
 if %EXIT_CODE% equ 0 (
