@@ -222,12 +222,14 @@ public class BlobStorageService : IBlobStorageService
     {
         // Same formatter the filters match against, so the values offered in the dropdown and
         // the values compared against a set can never drift apart.
+        // OfType rather than Where(s => s != null) + a ! at the end: it drops the nulls AND tells
+        // the compiler so, instead of filtering in a way it cannot follow and then overruling it.
         return files
             .Select(f => f.ServerDisplay)
-            .Where(s => s != null)
+            .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList()!;
+            .ToList();
     }
 
     public ContainerSummary GetSetBasedSummary(List<BackupSet> sets)

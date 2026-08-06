@@ -1795,10 +1795,15 @@ public partial class RestoreViewModel : ViewModelBase
         IsBusy = true;
         RefreshCancelState();
         BackupMetadataSummary = null;
+        // Captured BEFORE the await. Selecting a different restore point sets RestoreChain to null
+        // on the UI thread, and it can do that while this call is in flight - in which case the
+        // catch below would itself throw, replacing the error explaining why FILELISTONLY failed
+        // with a bare "Nine Lives hit an unexpected error".
+        // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
+        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+
         try
         {
-            // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-            var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
             var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls, ct);
 
             var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? @"C:\SQL\Data";
@@ -1821,9 +1826,8 @@ public partial class RestoreViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            var urlList = RestoreChain!.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var urlPreview = urlList.Count > 0 ? urlList[0] : "(no URL)";
-            if (urlList.Count > 1) urlPreview += $" (+{urlList.Count - 1} more)";
+            var urlPreview = urls.Count > 0 ? urls[0] : "(no URL)";
+            if (urls.Count > 1) urlPreview += $" (+{urls.Count - 1} more)";
             SetError($"RESTORE FILELISTONLY failed: {ex.Message}. URL used: {urlPreview}. Run the same RESTORE FILELISTONLY in SSMS to confirm credential/network.");
             FetchedFileMoves = [];
             HasFetchedFileMoves = false;
@@ -1847,10 +1851,12 @@ public partial class RestoreViewModel : ViewModelBase
         var ct = _queryCancellation.Begin();
         IsBusy = true;
         RefreshCancelState();
+        // Captured before the await - see the note on FetchLogicalNamesAsync.
+        // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
+        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+
         try
         {
-            // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-            var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
             var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
 
             if (header == null)
@@ -1872,9 +1878,8 @@ public partial class RestoreViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            var urlList = RestoreChain!.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var urlPreview = urlList.Count > 0 ? urlList[0] : "(no URL)";
-            if (urlList.Count > 1) urlPreview += $" (+{urlList.Count - 1} more)";
+            var urlPreview = urls.Count > 0 ? urls[0] : "(no URL)";
+            if (urls.Count > 1) urlPreview += $" (+{urls.Count - 1} more)";
             SetError($"RESTORE HEADERONLY failed: {ex.Message}. URL used: {urlPreview}. Run the same RESTORE HEADERONLY in SSMS to confirm credential/network.");
             BackupMetadataSummary = null;
         }
