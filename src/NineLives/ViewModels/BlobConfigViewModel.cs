@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.Text;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -741,8 +742,13 @@ public partial class BlobConfigViewModel : ViewModelBase
         catch (Exception ex)
         {
             TestSuccess = false;
-            TestResult = $"Connection failed: {ex.Message}";
             ContainerSummary = null;
+
+            // Azure's own message is accurate and useless in equal measure - a permission failure
+            // arrives with a request id, the original XML and eleven headers, and says nothing
+            // about what to change. Same instinct as the recovery guidance after a failed restore
+            // (#14): the moment it fails is the moment to say what to do about it.
+            TestResult = await ExplainFailureAsync(ex, config, ct);
         }
         finally
         {
@@ -750,6 +756,51 @@ public partial class BlobConfigViewModel : ViewModelBase
             IsBusy = false;
             CanCancelTest = false;
         }
+    }
+
+    /// <summary>
+    /// The failure, then who was refused, then what to do about it.
+    ///
+    /// The identity comes first among the details because it is the fact that settles the most
+    /// common confusion: a permission error against an account that demonstrably has access
+    /// usually means a different account was used than the one being thought about.
+    /// </summary>
+    private async Task<string> ExplainFailureAsync(
+        Exception ex, BlobContainerConfig config, CancellationToken ct)
+    {
+        var message = new StringBuilder($"Connection failed: {FirstLine(ex.Message)}");
+
+        if (config.AuthMode.IsEntra())
+        {
+            string? identity = null;
+            try
+            {
+                identity = await _blobService.DescribeSignedInIdentityAsync(config, ct);
+            }
+            catch
+            {
+                // Explaining a failure must not produce one.
+            }
+
+            if (identity != null)
+                message.Append($"{Environment.NewLine}{Environment.NewLine}Signed in as: {identity}");
+        }
+
+        var guidance = BlobFailureExplainer.Explain(ex, config);
+        if (guidance != null)
+            message.Append($"{Environment.NewLine}{Environment.NewLine}{guidance}");
+
+        return message.ToString();
+    }
+
+    /// <summary>
+    /// Azure appends the request id, the timestamp, the original XML and every response header to
+    /// its exception message. The first line is the part a human reads; the rest buries it.
+    /// </summary>
+    private static string FirstLine(string message)
+    {
+        var end = message.IndexOfAny(['\r', '\n']);
+        return end < 0 ? message : message[..end].TrimEnd();
     }
 
     /// <summary>Stops an in-progress connection test.</summary>

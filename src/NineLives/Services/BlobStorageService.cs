@@ -76,6 +76,36 @@ public class BlobStorageService : IBlobStorageService
 
     internal static TokenCredential CredentialForTests(BlobAuthMode mode) => CredentialFor(mode);
 
+    /// <summary>
+    /// Asks the credential for a token purely so the account behind it can be named.
+    ///
+    /// Only called after something has already failed, so the extra round trip costs nothing on the
+    /// happy path - and by then it is usually the single most useful fact available, because a 403
+    /// from Azure never says which identity it refused.
+    /// </summary>
+    public async Task<string?> DescribeSignedInIdentityAsync(
+        BlobContainerConfig config, CancellationToken ct = default)
+    {
+        if (!config.AuthMode.IsEntra()) return null;
+
+        try
+        {
+            var token = await CredentialFor(config.AuthMode).GetTokenAsync(
+                new TokenRequestContext([StorageScope]), ct);
+
+            return EntraIdentity.Describe(token.Token);
+        }
+        catch
+        {
+            // This exists to explain a failure. It must not create one.
+            return null;
+        }
+    }
+
+    /// <summary>What a token for blob data is asked for. The credential normally handles this
+    /// itself; it is only spelled out here because the diagnostic asks directly.</summary>
+    private const string StorageScope = "https://storage.azure.com/.default";
+
     public async Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
         var client = CreateClient(config);

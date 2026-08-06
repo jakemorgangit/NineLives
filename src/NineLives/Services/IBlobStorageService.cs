@@ -12,6 +12,14 @@ public interface IBlobStorageService
 {
     Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default);
 
+    /// <summary>
+    /// Who the Entra sign-in actually is, for putting in a permission error. Null when the
+    /// container does not use Entra, or when it cannot be determined - it only ever improves a
+    /// message, so failing to answer must never become an error of its own (#29).
+    /// </summary>
+    Task<string?> DescribeSignedInIdentityAsync(
+        BlobContainerConfig config, CancellationToken ct = default);
+
     Task<List<string>> ListTopLevelFoldersAsync(BlobContainerConfig config, CancellationToken ct = default);
 
     Task<List<BackupFileInfo>> ListBackupFilesAsync(BlobContainerConfig config, CancellationToken ct = default);
