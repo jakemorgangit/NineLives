@@ -1075,7 +1075,7 @@
                                      Margin="0,0,0,16" />
 
                             <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}" />
-                            <TextBox Text="{Binding SqlCredentialName, UpdateSourceTrigger=PropertyChanged}"
+                            <TextBox Text="{Binding Credential.Name, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,8"
                                      ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
@@ -1083,7 +1083,7 @@
                             <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
                             <Border Background="{DynamicResource InputBackgroundBrush}"
                                     CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
-                                    Visibility="{Binding CredentialSectionVisible, Converter={StaticResource BoolToVis}}">
+                                    Visibility="{Binding Credential.SectionVisible, Converter={StaticResource BoolToVis}}">
                                 <StackPanel>
                                     <TextBlock Text="BLOB CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
                                     <!-- Not connected: verify credential by connecting -->
@@ -1101,14 +1101,14 @@
                                                     <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
                                                     <Setter Property="BorderThickness" Value="0" />
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding CredentialIsUsable}" Value="True">
+                                                        <DataTrigger Binding="{Binding Credential.IsUsable}" Value="True">
                                                             <Setter Property="Background" Value="{DynamicResource SuccessPanelBackgroundBrush}" />
                                                             <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
                                                             <Setter Property="BorderThickness" Value="1" />
                                                             <Setter Property="CornerRadius" Value="4" />
                                                             <Setter Property="Padding" Value="8,6,8,6" />
                                                         </DataTrigger>
-                                                        <DataTrigger Binding="{Binding CredentialExistsOnServer}" Value="False">
+                                                        <DataTrigger Binding="{Binding Credential.ExistsOnServer}" Value="False">
                                                             <Setter Property="Background" Value="{DynamicResource DangerPanelBackgroundBrush}" />
                                                             <Setter Property="BorderBrush" Value="{DynamicResource ErrorBrush}" />
                                                             <Setter Property="BorderThickness" Value="1" />
@@ -1117,8 +1117,8 @@
                                                         </DataTrigger>
                                                         <MultiDataTrigger>
                                                             <MultiDataTrigger.Conditions>
-                                                                <Condition Binding="{Binding CredentialExistsOnServer}" Value="True" />
-                                                                <Condition Binding="{Binding CredentialIsUsable}" Value="False" />
+                                                                <Condition Binding="{Binding Credential.ExistsOnServer}" Value="True" />
+                                                                <Condition Binding="{Binding Credential.IsUsable}" Value="False" />
                                                             </MultiDataTrigger.Conditions>
                                                             <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
                                                             <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
@@ -1129,11 +1129,11 @@
                                                     </Style.Triggers>
                                                 </Style>
                                             </Border.Style>
-                                            <TextBlock Text="{Binding CredentialStatusMessage}"
+                                            <TextBlock Text="{Binding Credential.StatusMessage}"
                                                        Style="{StaticResource SecondaryText}"
                                                        TextWrapping="Wrap" />
                                         </Border>
-                                        <TextBlock Visibility="{Binding CredentialIsUsable, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                        <TextBlock Visibility="{Binding Credential.IsUsable, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
                                                    Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
                                             <Run Text="Restore from URL needs a SQL credential for the container, holding either a SHARED ACCESS SIGNATURE or - on SQL Server 2022 and later - the instance's Managed Identity. You can create the SAS kind from here, or create either on the server yourself before running the script. Execute will create one for you only if there is nothing of that name: a credential that already exists is never rewritten behind your back. The SAS token is never included in the generated script." />
                                         </TextBlock>
@@ -1141,18 +1141,18 @@
                                              credential of that name exists. SQL Server will not return its secret, so a
                                              rotated or expired token is indistinguishable from a working one, and this is
                                              the only way to push a fresh one. -->
-                                        <TextBlock Visibility="{Binding CredentialIsSharedAccessSignature, Converter={StaticResource BoolToVis}}"
+                                        <TextBlock Visibility="{Binding Credential.IsSharedAccessSignature, Converter={StaticResource BoolToVis}}"
                                                    Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
                                             <Run Text="Execute will leave this credential alone. If the SAS token has been rotated or has expired since the credential was created, the restore will fail on blob access - refresh it below to push the token currently stored for this container." />
                                         </TextBlock>
                                         <!-- A managed identity is somebody else's deliberate setup: this app cannot create
                                              one, and the button below would ALTER it into a SAS credential, which is a
                                              change to how the whole instance authenticates to that container (#145). -->
-                                        <TextBlock Visibility="{Binding CredentialIsManagedIdentity, Converter={StaticResource BoolToVis}}"
+                                        <TextBlock Visibility="{Binding Credential.IsManagedIdentity, Converter={StaticResource BoolToVis}}"
                                                    Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
                                             <Run Text="Execute will leave this credential alone and no SAS token is sent to the server. The instance authenticates to the container as itself, so the restore depends on its identity holding a role on the storage account rather than on anything stored here. The button below would replace that with a SAS credential - which would also change how anything else on this instance reaches the same container." />
                                         </TextBlock>
-                                        <Button Command="{Binding CreateCredentialOnServerCommand}"
+                                        <Button Command="{Binding Credential.CreateOnServerCommand}"
                                                 Margin="0,0,0,0" Padding="10,6"
                                                 ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one with the SAS token currently stored for the container, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. The SAS token is not included in the generated script."
                                                 HorizontalAlignment="Left">
@@ -1160,13 +1160,13 @@
                                                 <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
                                                     <Setter Property="Content" Value="Create credential on server" />
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding CredentialIsSharedAccessSignature}" Value="True">
+                                                        <DataTrigger Binding="{Binding Credential.IsSharedAccessSignature}" Value="True">
                                                             <Setter Property="Content" Value="Refresh credential with stored SAS token" />
                                                         </DataTrigger>
                                                         <!-- Says what the press would actually do. The same button under the
                                                              old label read as a harmless refresh while it converted the
                                                              instance's managed identity to a SAS token (#145). -->
-                                                        <DataTrigger Binding="{Binding CredentialIsManagedIdentity}" Value="True">
+                                                        <DataTrigger Binding="{Binding Credential.IsManagedIdentity}" Value="True">
                                                             <Setter Property="Content" Value="Replace Managed Identity with stored SAS token" />
                                                         </DataTrigger>
                                                     </Style.Triggers>

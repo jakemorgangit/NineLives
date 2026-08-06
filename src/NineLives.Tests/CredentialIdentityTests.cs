@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Services;
+﻿using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
 
@@ -66,7 +66,7 @@ public class CredentialIdentityTests
     [Fact]
     public void AManagedIdentityIsDescribedAsValid()
     {
-        var message = RestoreViewModel.DescribeCredential(
+        var message = ServerCredentialViewModel.Describe(
             new BlobCredentialStatus(BlobCredentialIdentity.ManagedIdentity, "Managed Identity"));
 
         Assert.Contains("valid", message, StringComparison.OrdinalIgnoreCase);
@@ -81,7 +81,7 @@ public class CredentialIdentityTests
     [Fact]
     public void AnUnusableCredentialIsNamedRatherThanJustRejected()
     {
-        var message = RestoreViewModel.DescribeCredential(
+        var message = ServerCredentialViewModel.Describe(
             new BlobCredentialStatus(BlobCredentialIdentity.Other, "MYDOMAIN\\svc_sql"));
 
         Assert.Contains("MYDOMAIN\\svc_sql", message);
@@ -90,7 +90,7 @@ public class CredentialIdentityTests
     [Fact]
     public void AMissingCredentialSaysSo()
     {
-        var message = RestoreViewModel.DescribeCredential(BlobCredentialStatus.Missing);
+        var message = ServerCredentialViewModel.Describe(BlobCredentialStatus.Missing);
 
         Assert.Contains("not present", message, StringComparison.OrdinalIgnoreCase);
     }
