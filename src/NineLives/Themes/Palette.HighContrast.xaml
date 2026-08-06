@@ -44,7 +44,14 @@
     <Color x:Key="AccentPressedColor">#CCCC00</Color>
 
     <!-- Black text on the yellow fill. White on yellow is unreadable. -->
+    <!--
+      Text ON a filled surface. White on this theme's yellow is 1.07:1 - not "hard to read",
+      unreadable. Black scores 6.68-19.56:1 across the four fills.
+    -->
     <Color x:Key="AccentForegroundColor">#000000</Color>
+    <Color x:Key="SuccessForegroundColor">#000000</Color>
+    <Color x:Key="ErrorForegroundColor">#000000</Color>
+    <Color x:Key="WarningForegroundColor">#000000</Color>
 
     <!-- ── status ────────────────────────────────────────────────────────────── -->
     <Color x:Key="SuccessColor">#00FF00</Color>
@@ -83,6 +90,9 @@
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}" />
     <SolidColorBrush x:Key="AccentForegroundBrush" Color="{StaticResource AccentForegroundColor}" />
+    <SolidColorBrush x:Key="SuccessForegroundBrush" Color="{StaticResource SuccessForegroundColor}" />
+    <SolidColorBrush x:Key="ErrorForegroundBrush" Color="{StaticResource ErrorForegroundColor}" />
+    <SolidColorBrush x:Key="WarningForegroundBrush" Color="{StaticResource WarningForegroundColor}" />
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}" />
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
@@ -143,7 +153,7 @@
     <Color x:Key="SuccessHoverColor">#66FF66</Color>
     <Color x:Key="SuccessPressedColor">#00CC00</Color>
     <Color x:Key="ErrorHoverColor">#FF8888</Color>
-    <Color x:Key="ErrorPressedColor">#CC0000</Color>
+    <Color x:Key="ErrorPressedColor">#FF8080</Color>
     <Color x:Key="AlternatingRowBackgroundColor">#1A1A1A</Color>
 
     <SolidColorBrush x:Key="SuccessHoverBrush" Color="{StaticResource SuccessHoverColor}" />

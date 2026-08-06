@@ -219,7 +219,7 @@
                                             HorizontalAlignment="Left"
                                             Opacity="0.85">
                                         <TextBlock Text="{Binding TypeDisplay}"
-                                                   Foreground="White"
+                                                   Foreground="{StaticResource BadgeTextBrush}"
                                                    FontSize="11"
                                                    FontWeight="SemiBold" />
                                     </Border>

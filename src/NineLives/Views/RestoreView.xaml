@@ -87,19 +87,19 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal">
                             <Border Background="{DynamicResource AccentBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
-                                <TextBlock Text="{Binding FullCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="{Binding FullCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Full Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
                             <Border Background="{DynamicResource WarningBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
-                                <TextBlock Text="{Binding DiffCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="{Binding DiffCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Diff Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Horizontal">
                             <Border Background="{DynamicResource SuccessBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
-                                <TextBlock Text="{Binding LogCount}" Foreground="White" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="{Binding LogCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Log Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
@@ -414,7 +414,7 @@
                                     <DataTemplate>
                                         <Border Background="{Binding Type, Converter={StaticResource TypeToColor}}"
                                                 CornerRadius="3" Padding="6,2" HorizontalAlignment="Left" Opacity="0.85">
-                                            <TextBlock Text="{Binding Type}" Foreground="White"
+                                            <TextBlock Text="{Binding Type}" Foreground="{StaticResource BadgeTextBrush}"
                                                        FontSize="11" FontWeight="SemiBold" />
                                         </Border>
                                     </DataTemplate>
@@ -443,7 +443,7 @@
                                     <DataTemplate>
                                         <Border Background="{Binding Type, Converter={StaticResource TypeToColor}}"
                                                 CornerRadius="3" Padding="6,2" HorizontalAlignment="Left" Opacity="0.85">
-                                            <TextBlock Text="{Binding TypeDisplay}" Foreground="White"
+                                            <TextBlock Text="{Binding TypeDisplay}" Foreground="{StaticResource BadgeTextBrush}"
                                                        FontSize="11" FontWeight="SemiBold" />
                                         </Border>
                                     </DataTemplate>
@@ -740,7 +740,7 @@
                                             </Grid.ColumnDefinitions>
                                             <Border Background="{Binding Type, Converter={StaticResource TypeToColor}}"
                                                     CornerRadius="3" Padding="6,2" HorizontalAlignment="Left" Opacity="0.85">
-                                                <TextBlock Text="{Binding TypeDisplay}" Foreground="White"
+                                                <TextBlock Text="{Binding TypeDisplay}" Foreground="{StaticResource BadgeTextBrush}"
                                                            FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
                                             </Border>
                                             <TextBlock Grid.Column="1" Text="{Binding BlobName}"

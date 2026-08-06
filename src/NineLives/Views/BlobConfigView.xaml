@@ -438,7 +438,7 @@
                                                     <Border CornerRadius="4" Padding="10,5" Cursor="Hand"
                                                             Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                            <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                        FontSize="12" FontWeight="SemiBold"
                                                                        VerticalAlignment="Center" />
                                                             <Button Content="  x" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11"
@@ -481,9 +481,9 @@
                                                             BorderBrush="{DynamicResource CardBorderBrush}"
                                                             Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="+" Foreground="White" FontWeight="Bold"
+                                                            <TextBlock Text="+" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}" FontWeight="Bold"
                                                                        FontSize="12" Margin="0,0,4,0" />
-                                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                            <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                        FontSize="12" />
                                                         </StackPanel>
                                                     </Border>
@@ -549,7 +549,7 @@
                                                             <Border CornerRadius="4" Padding="10,5" Cursor="Hand"
                                                                     Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                                 <StackPanel Orientation="Horizontal">
-                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                                FontSize="12" FontWeight="SemiBold"
                                                                                VerticalAlignment="Center" />
                                                                     <Button Content="  x" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11"
@@ -590,9 +590,9 @@
                                                                     BorderBrush="{DynamicResource CardBorderBrush}"
                                                                     Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                                 <StackPanel Orientation="Horizontal">
-                                                                    <TextBlock Text="+" Foreground="White" FontWeight="Bold"
+                                                                    <TextBlock Text="+" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}" FontWeight="Bold"
                                                                                FontSize="12" Margin="0,0,4,0" />
-                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                                FontSize="12" />
                                                                 </StackPanel>
                                                             </Border>

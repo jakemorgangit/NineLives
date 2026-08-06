@@ -32,11 +32,18 @@
     <!-- ── accent ────────────────────────────────────────────────────────────── -->
     <Color x:Key="AccentColor">#3B83E9</Color>
     <Color x:Key="AccentHoverColor">#5195F5</Color>
-    <Color x:Key="AccentPressedColor">#2A6DCC</Color>
+    <Color x:Key="AccentPressedColor">#3A80E4</Color>
 
-    <!-- Text ON an accent-filled surface. Not always white: a light theme's accent fill still
-         wants white, but a high-contrast one may not. -->
-    <Color x:Key="AccentForegroundColor">#FFFFFF</Color>
+    <!--
+      Text ON a filled surface. Measured, not assumed: white on this theme's fills scores 2.19-3.82:1,
+      all of which fail WCAG AA for normal text, while near-black scores 4.85-8.46:1. The buttons had
+      Foreground="White" hardcoded in the control styles, which is what made the Connect button hard
+      to read (#126).
+    -->
+    <Color x:Key="AccentForegroundColor">#0F131E</Color>
+    <Color x:Key="SuccessForegroundColor">#0F131E</Color>
+    <Color x:Key="ErrorForegroundColor">#0F131E</Color>
+    <Color x:Key="WarningForegroundColor">#0F131E</Color>
 
     <!-- ── status ────────────────────────────────────────────────────────────── -->
     <Color x:Key="SuccessColor">#27AE60</Color>
@@ -76,6 +83,9 @@
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}" />
     <SolidColorBrush x:Key="AccentForegroundBrush" Color="{StaticResource AccentForegroundColor}" />
+    <SolidColorBrush x:Key="SuccessForegroundBrush" Color="{StaticResource SuccessForegroundColor}" />
+    <SolidColorBrush x:Key="ErrorForegroundBrush" Color="{StaticResource ErrorForegroundColor}" />
+    <SolidColorBrush x:Key="WarningForegroundBrush" Color="{StaticResource WarningForegroundColor}" />
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}" />
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
@@ -135,9 +145,9 @@
          literals in the control styles, which meant a light theme drew a dark stripe through every
          grid and a success button that jumped several shades on hover. -->
     <Color x:Key="SuccessHoverColor">#2ECC71</Color>
-    <Color x:Key="SuccessPressedColor">#1E8449</Color>
+    <Color x:Key="SuccessPressedColor">#22A05A</Color>
     <Color x:Key="ErrorHoverColor">#F05B4B</Color>
-    <Color x:Key="ErrorPressedColor">#C0392B</Color>
+    <Color x:Key="ErrorPressedColor">#E14E40</Color>
     <Color x:Key="AlternatingRowBackgroundColor">#12161F</Color>
 
     <SolidColorBrush x:Key="SuccessHoverBrush" Color="{StaticResource SuccessHoverColor}" />
