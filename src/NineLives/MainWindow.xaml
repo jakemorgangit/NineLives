@@ -244,6 +244,29 @@
 
             <!-- Main Content Area -->
             <DockPanel Grid.Column="1">
+                <!-- What the app is doing, in the one place that is always on screen. Every screen
+                     has its own status line, but they sit at the bottom of pages long enough to
+                     scroll - so "is it doing something?" depended on where you happened to be
+                     looking (#128). -->
+                <Border DockPanel.Dock="Top"
+                        Padding="16,6,16,0"
+                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+                    <Border Background="{DynamicResource CardBackgroundBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4" Padding="10,5">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Template="{StaticResource BusySpinner}"
+                                            Width="13" Height="13"
+                                            VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding BusyText}"
+                                       VerticalAlignment="Center"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource AccentBrush}" />
+                        </StackPanel>
+                    </Border>
+                </Border>
+
                 <!-- Persistent Connection Status Banner -->
                 <Border DockPanel.Dock="Top"
                         Padding="16,6"

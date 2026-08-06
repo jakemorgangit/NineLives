@@ -282,6 +282,46 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isVerifyingChain;
 
+    partial void OnIsVerifyingChainChanged(bool value) => RefreshCheckState();
+    partial void OnIsValidatingChainChanged(bool value) => RefreshCheckState();
+    partial void OnChainLsnVerifiedChanged(bool value) => RefreshCheckState();
+    partial void OnHasChainIssuesChanged(bool value) => RefreshCheckState();
+    partial void OnHasVerifyResultsChanged(bool value) => RefreshCheckState();
+    partial void OnHasVerifyFailuresChanged(bool value) => RefreshCheckState();
+    partial void OnHasTargetPathProblemChanged(bool value) => RefreshCheckState();
+
+    /// <summary>
+    /// Republishes the two "already passed" flags and re-queries the buttons that depend on them.
+    /// Everything they are computed from is a separate observable property, so without this the
+    /// tick appears and the button stays enabled - or worse, the other way round.
+    /// </summary>
+    private void RefreshCheckState()
+    {
+        OnPropertyChanged(nameof(ChainCheckPassed));
+        OnPropertyChanged(nameof(VerifyPassed));
+        OnPropertyChanged(nameof(BusyDescription));
+        OnPropertyChanged(nameof(IsBusyWithAnything));
+        ValidateChainCommand.NotifyCanExecuteChanged();
+        VerifyChainCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// What this screen is doing, for the strip at the top of the window - empty when idle (#128).
+    /// </summary>
+    public string BusyDescription
+    {
+        get
+        {
+            if (IsExecuting) return $"Restoring {TargetDatabaseName}...";
+            if (IsVerifyingChain) return "Verifying backups...";
+            if (IsValidatingChain) return "Checking the chain...";
+            if (IsBusy) return "Loading backups...";
+            return string.Empty;
+        }
+    }
+
+    public bool IsBusyWithAnything => BusyDescription.Length > 0;
+
     // ── restore point filters (#27) ─────────────────────────────────────────────
 
     /// <summary>True when the container holds any restore points at all.</summary>
@@ -618,6 +658,14 @@ public partial class RestoreViewModel : ViewModelBase
         // without it, running the execute path in a test appends real restore lines to the user's
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
+
+        // IsBusy and TargetDatabaseName live on the base class, so they cannot have a generated
+        // partial hook - but the busy strip is computed from them.
+        PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(IsBusy) or nameof(TargetDatabaseName))
+                RefreshCheckState();
+        };
 
         RefreshContainers();
     }
@@ -1399,8 +1447,14 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// True once the chain has been checked and came back clean. The result belongs to the chain
+    /// that was checked, so it clears with the selection (#128).
+    /// </summary>
+    public bool ChainCheckPassed => ChainLsnVerified && !HasChainIssues;
+
     private bool CanValidateChain() =>
-        IsConnectedToServer && RestoreChain != null && !IsValidatingChain;
+        IsConnectedToServer && RestoreChain != null && !IsValidatingChain && !ChainCheckPassed;
 
     /// <summary>
     /// Runs RESTORE VERIFYONLY over every set in the chain: does each backup actually read back,
@@ -1472,8 +1526,16 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// True once every backup in the chain read back intact AND the restore has somewhere to
+    /// write. Re-running VERIFYONLY on a large chain by accident is expensive, so once it has
+    /// passed for this selection the button is done.
+    /// </summary>
+    public bool VerifyPassed => HasVerifyResults && !HasVerifyFailures && !HasTargetPathProblem;
+
     private bool CanVerifyChain() =>
-        IsConnectedToServer && RestoreChain != null && !IsVerifyingChain && !IsExecuting;
+        IsConnectedToServer && RestoreChain != null && !IsVerifyingChain && !IsExecuting
+        && !VerifyPassed;
 
     /// <summary>
     /// Turns SQL Server's directory-lookup complaint into something that says what to do about it.
@@ -1648,6 +1710,7 @@ public partial class RestoreViewModel : ViewModelBase
     {
         VerifyChainCommand.NotifyCanExecuteChanged();
         RefreshExecuteBlockedReason();
+        RefreshCheckState();
     }
 
     /// <summary>

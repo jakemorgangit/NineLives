@@ -166,6 +166,55 @@
         change, so a switched theme would leave half the window in the old colours.
     -->
 
+    <!--
+        A small rotating arc, for anything that runs long enough to look stuck. Check chain and
+        Verify backups only changed their own label, and verify can run as long as the restore -
+        so on a large chain the app looked hung (#128).
+
+        The storyboard starts on IsVisible and stops when it goes away, rather than running
+        forever behind a collapsed element.
+    -->
+    <ControlTemplate x:Key="BusySpinner" TargetType="ContentControl">
+        <Grid x:Name="root" RenderTransformOrigin="0.5,0.5">
+            <Grid.RenderTransform>
+                <RotateTransform x:Name="spin" Angle="0" />
+            </Grid.RenderTransform>
+            <!-- An arc rather than a full ring: a complete circle rotating looks static. -->
+            <Ellipse Stroke="{DynamicResource AccentBrush}"
+                     StrokeThickness="2"
+                     StrokeDashArray="3 2"
+                     Opacity="0.9" />
+        </Grid>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsVisible" Value="True">
+                <Trigger.EnterActions>
+                    <BeginStoryboard x:Name="spinStory">
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetName="spin"
+                                             Storyboard.TargetProperty="Angle"
+                                             From="0" To="360"
+                                             Duration="0:0:1.1"
+                                             RepeatBehavior="Forever" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                    <StopStoryboard BeginStoryboardName="spinStory" />
+                </Trigger.ExitActions>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- The tick shown when a check has passed for the selected chain. -->
+    <Style x:Key="PassedTick" TargetType="TextBlock">
+        <Setter Property="Text" Value="&#x2713;" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
+
     <!-- TextBlock Styles -->
     <Style x:Key="HeaderText" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe UI" />

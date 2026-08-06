@@ -508,25 +508,29 @@
                                 Padding="12,6" Margin="0,0,8,0"
                                 ToolTip="Do these backups belong together? Reads each backup's header and compares the LSNs. Takes seconds. Requires a connected server.">
                             <Button.Content>
-                                <TextBlock>
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="Check chain (HEADERONLY)" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsValidatingChain}" Value="True">
-                                                    <Setter Property="Text" Value="Checking..." />
-                                                </DataTrigger>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding ChainLsnVerified}" Value="True" />
-                                                        <Condition Binding="{Binding HasChainIssues}" Value="False" />
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Text" Value="Chain checked" />
-                                                </MultiDataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
+                                <StackPanel Orientation="Horizontal">
+                                    <ContentControl Template="{StaticResource BusySpinner}"
+                                                    Width="13" Height="13" Margin="0,0,6,0"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="{Binding IsValidatingChain, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock Style="{StaticResource PassedTick}"
+                                               Visibility="{Binding ChainCheckPassed, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="Check chain (HEADERONLY)" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsValidatingChain}" Value="True">
+                                                        <Setter Property="Text" Value="Checking..." />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding ChainCheckPassed}" Value="True">
+                                                        <Setter Property="Text" Value="Chain checked" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
                             </Button.Content>
                         </Button>
 
@@ -540,26 +544,29 @@
                                 Padding="12,6" Margin="0,0,8,0"
                                 ToolTip="Is each backup actually readable? Runs RESTORE VERIFYONLY over every backup in the chain, reading every byte - this can take as long as the restore itself. Requires a connected server.">
                             <Button.Content>
-                                <TextBlock>
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="Verify backups (VERIFYONLY)" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsVerifyingChain}" Value="True">
-                                                    <Setter Property="Text" Value="Verifying..." />
-                                                </DataTrigger>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding HasVerifyResults}" Value="True" />
-                                                        <Condition Binding="{Binding HasVerifyFailures}" Value="False" />
-                                                        <Condition Binding="{Binding IsVerifyingChain}" Value="False" />
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Text" Value="Backups verified" />
-                                                </MultiDataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
+                                <StackPanel Orientation="Horizontal">
+                                    <ContentControl Template="{StaticResource BusySpinner}"
+                                                    Width="13" Height="13" Margin="0,0,6,0"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="{Binding IsVerifyingChain, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock Style="{StaticResource PassedTick}"
+                                               Visibility="{Binding VerifyPassed, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="Verify backups (VERIFYONLY)" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsVerifyingChain}" Value="True">
+                                                        <Setter Property="Text" Value="Verifying..." />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding VerifyPassed}" Value="True">
+                                                        <Setter Property="Text" Value="Backups verified" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
                             </Button.Content>
                         </Button>
 
