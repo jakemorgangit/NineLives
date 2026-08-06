@@ -33,9 +33,28 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private AuthMode _editAuthMode = AuthMode.WindowsAuth;
 
+    /// <summary>Whether to show the password box. Only SQL auth has a password to hold (#30).</summary>
     public bool IsSqlAuth => EditAuthMode == AuthMode.SqlAuth;
 
-    partial void OnEditAuthModeChanged(AuthMode value) => OnPropertyChanged(nameof(IsSqlAuth));
+    /// <summary>
+    /// Whether to show the username box. Interactive Entra takes one as an optional hint that
+    /// pre-selects the account, which is worth having on a machine signed in to several.
+    /// </summary>
+    public bool ShowsUsername => EditAuthMode.AcceptsUsername();
+
+    public bool IsEntraAuth => EditAuthMode.IsEntra();
+
+    public string UsernameLabel => EditAuthMode == AuthMode.EntraInteractive
+        ? "USERNAME (OPTIONAL - PRE-SELECTS THE ACCOUNT)"
+        : "USERNAME";
+
+    partial void OnEditAuthModeChanged(AuthMode value)
+    {
+        OnPropertyChanged(nameof(IsSqlAuth));
+        OnPropertyChanged(nameof(ShowsUsername));
+        OnPropertyChanged(nameof(IsEntraAuth));
+        OnPropertyChanged(nameof(UsernameLabel));
+    }
 
     [ObservableProperty]
     private string _editUsername = string.Empty;
@@ -225,7 +244,7 @@ public partial class ServerManagerViewModel : ViewModelBase
             return;
         }
 
-        if (EditAuthMode == AuthMode.SqlAuth && string.IsNullOrWhiteSpace(EditUsername))
+        if (EditAuthMode.RequiresUsername() && string.IsNullOrWhiteSpace(EditUsername))
         {
             SetError("Username is required for SQL Authentication.");
             return;
@@ -262,7 +281,9 @@ public partial class ServerManagerViewModel : ViewModelBase
         ReplaceTags(server.Tags, TagPalette.ParseTags(EditTags));
         server.ServerName = EditServerName;
         server.AuthMode = EditAuthMode;
-        server.Username = EditAuthMode == AuthMode.SqlAuth ? EditUsername : null;
+        server.Username = EditAuthMode.AcceptsUsername() && !string.IsNullOrWhiteSpace(EditUsername)
+            ? EditUsername
+            : null;
         server.ConnectionTimeoutSeconds = EditTimeout;
         server.TrustServerCertificate = EditTrustServerCert;
         server.Encrypt = EditEncrypt;
@@ -283,17 +304,31 @@ public partial class ServerManagerViewModel : ViewModelBase
             return;
         }
 
-        if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
+        if (EditAuthMode.NeedsStoredPassword())
         {
-            try
+            if (!string.IsNullOrWhiteSpace(EditPassword))
             {
-                _credentialStore.SaveSqlPassword(server, EditPassword);
+                try
+                {
+                    _credentialStore.SaveSqlPassword(server, EditPassword);
+                }
+                catch (Exception ex)
+                {
+                    SetError($"The server was saved, but the password could not be stored: {ex.Message}");
+                    return;
+                }
             }
-            catch (Exception ex)
-            {
-                SetError($"The server was saved, but the password could not be stored: {ex.Message}");
-                return;
-            }
+        }
+        else
+        {
+            // Switching away from SQL auth used to leave the password in Credential Manager - a
+            // live secret for a login nothing uses any more, outliving the only reason it was
+            // stored. Moving to Entra is usually done precisely to stop tools holding passwords,
+            // so leaving one behind defeats the point of the switch.
+            //
+            // After the config write, for the same reason Delete does it in that order: the
+            // password is only redundant once the mode change has actually landed on disk.
+            _credentialStore.DeleteSecret(server.CredentialKey);
         }
 
         SelectedServer = server;
@@ -308,7 +343,7 @@ public partial class ServerManagerViewModel : ViewModelBase
 
         // Same reasoning as deleting a container: a stored SQL password is removed from Credential
         // Manager and the app never displays it, so a single click should not be enough (#42).
-        var secretNote = SelectedServer.AuthMode == AuthMode.SqlAuth
+        var secretNote = SelectedServer.AuthMode.NeedsStoredPassword()
             ? "\n\nIts stored SQL password will be deleted from Windows Credential Manager."
             : string.Empty;
 
@@ -332,7 +367,7 @@ public partial class ServerManagerViewModel : ViewModelBase
             return;
         }
 
-        if (removed.AuthMode == AuthMode.SqlAuth)
+        if (removed.AuthMode.NeedsStoredPassword())
             _credentialStore.DeleteSecret(removed.CredentialKey);
 
         if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
@@ -487,9 +522,9 @@ public partial class ServerManagerViewModel : ViewModelBase
             // In memory only. This used to call SaveSqlPassword, which is a durable write to
             // Credential Manager - so testing a mistyped password overwrote the working one
             // before the user had agreed to anything, and Cancel could not undo it (#12).
-            if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
+            if (EditAuthMode.NeedsStoredPassword() && !string.IsNullOrWhiteSpace(EditPassword))
                 server.UnsavedPassword = EditPassword;
-            else if (EditAuthMode == AuthMode.SqlAuth && !IsNew)
+            else if (EditAuthMode.NeedsStoredPassword() && !IsNew)
                 // No new password typed: test against the one already saved for this entry.
                 server.Id = SelectedServer?.Id;
 

@@ -37,6 +37,7 @@ Nine Lives points at a container, discovers every backup, groups striped sets, c
 
 ### SQL Server Connectivity
 - Windows Authentication and SQL Server Authentication support
+- Entra ID authentication — interactive (MFA), integrated, and default — for Azure SQL Managed Instance and Entra-enabled estates ([see the caveat](#entra-id-authentication))
 - Configurable connection options (Encrypt, Trust Server Certificate, Timeout)
 - Persistent server configurations with secure password storage
 - Real-time connection status visible across all views
@@ -203,6 +204,28 @@ The executable will be created at `./publish/NineLives.exe`.
 5. Click **Test Connection** to verify
 6. Click **Save**
 7. Select the server and click **Connect** to establish a session
+
+#### Entra ID authentication
+
+> **Untested against a real tenant.** There is no Entra-enabled instance to develop this against, so
+> what is verified is the connection string handed to the driver, not that a sign-in succeeds. The
+> token flow itself belongs to `Microsoft.Data.SqlClient`. **Test Connection** will tell you honestly
+> whether it works — please open an issue either way.
+
+Three modes, all of which store nothing:
+
+| Mode | What it does | When to pick it |
+| --- | --- | --- |
+| **Interactive (MFA)** | Opens a browser to sign in | The mode that satisfies multi-factor authentication. Optionally give a username to pre-select the account |
+| **Integrated** | Uses the Windows account you are already signed in with, no prompt | Machine joined to the directory |
+| **Default** | Environment, then managed identity, then the signed-in account, then a prompt | SQL Server on an Azure VM, where the managed identity should be used |
+
+Switching a saved connection from SQL Authentication to any other mode deletes its stored password
+from Windows Credential Manager — a secret nothing uses any more should not outlive the reason it
+was stored.
+
+Note that this covers **the app's own connection to SQL Server**. Restoring `FROM URL` still needs a
+credential on the *instance* for the blob container, which is separate and configured on the server.
 
 ### 3. Browse Backups
 
