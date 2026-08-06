@@ -39,10 +39,26 @@
 
                         <StackPanel Grid.Column="0" Margin="0,0,12,0">
                             <TextBlock Text="BLOB CONTAINER" Style="{StaticResource LabelText}" />
+                            <!-- Tag pills here too, not only on the containers screen. This is the
+                                 dropdown where "which of these is production" actually gets
+                                 decided, and it was the one place the tags did not follow (#117
+                                 item 8). DisplayMemberPath cannot coexist with an item template,
+                                 so the name is spelled out. -->
                             <ComboBox ItemsSource="{Binding Containers}"
                                       SelectedItem="{Binding SelectedContainer}"
-                                      DisplayMemberPath="Name"
-                                      Style="{StaticResource DarkComboBox}" />
+                                      Style="{StaticResource DarkComboBox}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <ItemsControl ItemsSource="{Binding TagChips}"
+                                                          Style="{StaticResource TagChipList}"
+                                                          Margin="8,0,0,0"
+                                                          VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                         </StackPanel>
 
                         <Button Grid.Column="1"
@@ -1267,7 +1283,16 @@
                                 <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
                                 <Run Text="(" />
                                 <Run Text="{Binding ChainSummary, Mode=OneWay}" />
-                                <Run Text="). This operation cannot be undone." Foreground="{DynamicResource ErrorBrush}" />
+                                <Run Text=")." />
+                                <!-- The SOURCE, named on the last screen before an irreversible
+                                     write. Restoring the right chain from the wrong container is
+                                     as bad as restoring to the wrong server, and only one of the
+                                     two was on this banner (#117 item 8). -->
+                                <Run Text=" From:" />
+                                <Run Text="{Binding SelectedContainer.Name, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="/" />
+                                <Run Text="{Binding SelectedDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text=". This operation cannot be undone." Foreground="{DynamicResource ErrorBrush}" />
                             </TextBlock>
                         </StackPanel>
                     </Border>
