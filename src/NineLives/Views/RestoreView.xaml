@@ -1301,7 +1301,7 @@
                                 <Style.Triggers>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding HasConsoleOutput}" Value="True" />
+                                            <Condition Binding="{Binding Console.HasOutput}" Value="True" />
                                             <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
                                             <!-- Belt and braces. While a restore runs the console
                                                  is always in its own window, so the inline one
@@ -1350,7 +1350,7 @@
                                     </StackPanel>
 
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBlock Text="{Binding ConsoleLines.Count, StringFormat='{}{0} lines'}"
+                                        <TextBlock Text="{Binding Console.Lines.Count, StringFormat='{}{0} lines'}"
                                                    Foreground="{DynamicResource ConsoleMutedBrush}"
                                                    FontFamily="{StaticResource ConsoleFont}"
                                                    FontSize="11"
@@ -1374,7 +1374,7 @@
                             <!-- Virtualised so a long restore stays responsive. Auto-follows the
                                  last line unless the user has scrolled up to read something. -->
                             <ListBox Grid.Row="1" x:Name="ConsoleList"
-                                     ItemsSource="{Binding ConsoleLines}"
+                                     ItemsSource="{Binding Console.Lines}"
                                      Style="{StaticResource ConsoleListBox}"
                                      MaxHeight="360" />
                         </Grid>

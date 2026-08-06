@@ -304,13 +304,13 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.BackupsLoaded = true;
             vm.HasScript = true;
             vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
-            vm.ConsoleLines =
+            vm.Console.Lines =
             [
                 new ConsoleLine("Beginning restore execution...", ConsoleLineKind.Step),
                 new ConsoleLine("50 percent processed."),
                 new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
             ];
-            vm.HasConsoleOutput = true;
+            vm.Console.HasOutput = true;
             vm.IsExecuting = false;
             vm.ExecutionComplete = true;
 
@@ -354,8 +354,8 @@ public class XamlLoadTests(WpfFixture wpf)
         {
             var vm = NewRestoreViewModel();
             vm.BackupsLoaded = true;
-            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
-            vm.HasConsoleOutput = true;
+            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Console.HasOutput = true;
 
             var view = new RestoreView { DataContext = vm };
 
@@ -382,8 +382,8 @@ public class XamlLoadTests(WpfFixture wpf)
         {
             var vm = NewRestoreViewModel();
             vm.BackupsLoaded = true;
-            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
-            vm.HasConsoleOutput = true;
+            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Console.HasOutput = true;
             vm.IsConsoleDetached = false;   // as if the wiring failed
             vm.IsExecuting = true;
 

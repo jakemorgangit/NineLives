@@ -1,4 +1,4 @@
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 using System.Windows.Threading;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
@@ -145,7 +145,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
             store.SaveSasToken(vm.SelectedContainer!, "sv=2024-01-01&sig=x");
 
             await vm.ExecuteScriptCommand.ExecuteAsync(null);
-            log = vm.ConsoleText;
+            log = vm.Console.Text;
         });
 
         Assert.Contains("Server state not modified", log);
