@@ -185,13 +185,53 @@
                             Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                         <StackPanel>
                             <StackPanel Visibility="{Binding SelectedServer, Converter={StaticResource NullToVis}, ConverterParameter=Invert}">
-                                <TextBlock Text="No server selected"
-                                           Style="{StaticResource SecondaryText}"
-                                           HorizontalAlignment="Center"
-                                           Margin="0,40,0,8" />
-                                <TextBlock Text="Add a new server or select one from the list."
-                                           Style="{StaticResource SecondaryText}"
-                                           HorizontalAlignment="Center" />
+                                <!-- "Nothing selected" and "nothing exists yet" are different
+                                     questions; a fresh install only ever saw the first (#117 item 7). -->
+                                <StackPanel HorizontalAlignment="Center" MaxWidth="460" Margin="0,40,0,0">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Servers.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+
+                                    <TextBlock Text="Add the server you want to restore ONTO"
+                                               Style="{StaticResource SubHeaderText}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,0,0,8" />
+                                    <TextBlock Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center">
+                                        <Run Text="This is the instance the RESTORE runs on, which is not necessarily the one the backups came from." />
+                                        <LineBreak /><LineBreak />
+                                        <Run Text="Without one you can still browse backups and generate a script to run yourself. With one, the app can execute the restore for you." />
+                                    </TextBlock>
+                                </StackPanel>
+
+                                <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Servers.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+
+                                    <TextBlock Text="No server selected"
+                                               Style="{StaticResource SecondaryText}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,40,0,8" />
+                                    <TextBlock Text="Add a new server or select one from the list."
+                                               Style="{StaticResource SecondaryText}"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
                             </StackPanel>
 
                             <StackPanel Visibility="{Binding SelectedServer, Converter={StaticResource NullToVis}}">

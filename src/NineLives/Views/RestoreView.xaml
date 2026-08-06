@@ -24,6 +24,30 @@
                            Margin="0,4,0,0" />
             </StackPanel>
 
+            <!-- Nothing to restore from yet. An empty dropdown on the first screen somebody
+                 opens says nothing about which screen fixes it (#117 item 7). -->
+            <Border Background="{DynamicResource InputBackgroundBrush}"
+                    CornerRadius="6" Padding="16,14" Margin="0,0,0,16">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Containers.Count}" Value="0">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <TextBlock Text="No blob containers configured"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                        <Run Text="Add one on the Blob Storage screen and it will appear here. A restore also needs a SQL Server connection, on the SQL Servers screen, to run against." />
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
             <!-- Step 1: Container + Database -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>

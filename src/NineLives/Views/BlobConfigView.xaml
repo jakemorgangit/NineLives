@@ -147,15 +147,56 @@
                     <Border Style="{StaticResource CardBorder}"
                             Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                         <StackPanel>
-                            <!-- Empty state -->
+                            <!-- Empty state. Two of them: "nothing selected" and "nothing exists
+                                 yet" are different questions, and a fresh install only ever saw
+                                 the first, which answers a question nobody was asking (#117
+                                 item 7). -->
                             <StackPanel Visibility="{Binding SelectedContainer, Converter={StaticResource NullToVis}, ConverterParameter=Invert}">
-                                <TextBlock Text="No container selected"
-                                           Style="{StaticResource SecondaryText}"
-                                           HorizontalAlignment="Center"
-                                           Margin="0,40,0,8" />
-                                <TextBlock Text="Add a new container or select one from the list."
-                                           Style="{StaticResource SecondaryText}"
-                                           HorizontalAlignment="Center" />
+                                <StackPanel HorizontalAlignment="Center" MaxWidth="460" Margin="0,40,0,0">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Containers.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+
+                                    <TextBlock Text="Start here"
+                                               Style="{StaticResource SubHeaderText}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,0,0,8" />
+                                    <TextBlock Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center">
+                                        <Run Text="Add the blob container holding your backups - the URL, and either a SAS token or Entra ID sign-in." />
+                                        <LineBreak /><LineBreak />
+                                        <Run Text="A restore needs two things: this container, and a SQL Server connection on the SQL Servers screen to restore onto. You can browse backups with just the container." />
+                                    </TextBlock>
+                                </StackPanel>
+
+                                <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Containers.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+
+                                    <TextBlock Text="No container selected"
+                                               Style="{StaticResource SecondaryText}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,40,0,8" />
+                                    <TextBlock Text="Add a new container or select one from the list."
+                                               Style="{StaticResource SecondaryText}"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
                             </StackPanel>
 
                             <!-- Detail state -->
