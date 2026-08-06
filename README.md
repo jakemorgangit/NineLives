@@ -1,4 +1,4 @@
-# Nine Lives 🐈‍⬛
+﻿# Nine Lives 🐈‍⬛
 
 [![Build](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml/badge.svg)](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml)
 
@@ -28,7 +28,7 @@ Nine Lives points at a container, discovers every backup, groups striped sets, c
 ## Features
 
 ### Azure Blob Storage Integration
-- Connect to Azure Blob Storage containers using SAS tokens
+- Connect to Azure Blob Storage containers using SAS tokens, or Entra ID for organisations that prohibit long-lived SAS ([see the caveat](#entra-id-for-blob-storage))
 - Automatic discovery of backup files (Full, Differential, Transaction Log)
 - Intelligent parsing of blob path structures with customisable patterns
 - Support for striped backup sets (multiple files per backup)
@@ -186,7 +186,9 @@ The executable will be created at `./publish/NineLives.exe`.
 2. Click **+ Add Container**
 3. Enter a display name for the container
 4. Enter the full container URL (e.g., `https://mystorageaccount.blob.core.windows.net/sqlbackups`)
-5. Enter your SAS token (with at least `list` and `read` permissions)
+5. Choose how to authenticate:
+   - **SAS token** — paste one with at least `list` and `read` permissions
+   - **Entra ID** — nothing to paste, and nothing is stored ([caveat below](#entra-id-for-blob-storage))
 6. Configure the **Blob Path Structure** to match your backup folder layout:
    - Default: `{BackupType}/{ServerName}/{DatabaseName}/{FileName}`
    - Drag and drop components to rearrange
@@ -194,6 +196,30 @@ The executable will be created at `./publish/NineLives.exe`.
    - For Availability Group backups, select the AG source type (supports Ola Hallengren default AG naming and cluster/AG path tokens)
 7. Click **Test Connection** to verify access
 8. Click **Save**
+
+#### Entra ID for Blob Storage
+
+> **Untested against a real tenant.** There is no Entra-enabled storage account to develop this
+> against, so what is verified is which credential the app uses and what it stops storing — not that
+> a token is accepted. **Test Connection** will tell you honestly whether it works; please open an
+> issue either way.
+
+| Mode | What it does | When to pick it |
+| --- | --- | --- |
+| **Interactive (MFA)** | Opens a browser to sign in. The sign-in lasts as long as the app is running and is written nowhere | Any Entra-enabled account, including MFA |
+| **Default** | Environment, then managed identity, then Azure CLI / Visual Studio sign-in, then a prompt | Running the app on an Azure VM with a managed identity |
+
+Your account needs **Storage Blob Data Reader** on the container. Owner or Contributor on the
+subscription is not enough on its own — the data-plane roles are separate from the management-plane
+ones, which is the usual first surprise.
+
+Switching a container from SAS to Entra deletes its stored token from Windows Credential Manager. An
+organisation that has banned long-lived SAS has banned it wherever it is sitting.
+
+**This covers browsing only.** The RESTORE itself runs on SQL Server, which needs its own credential
+for the container URL — for Entra that is `CREATE CREDENTIAL ... WITH IDENTITY = 'Managed Identity'`
+on SQL Server 2022+ or Azure SQL MI. Entra on the client and a SAS credential on the server is a
+perfectly valid combination.
 
 ### 2. Configure SQL Server (Optional - for direct execution)
 

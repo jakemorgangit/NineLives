@@ -35,6 +35,17 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private string _editContainerUrl = string.Empty;
 
+    /// <summary>
+    /// How this container signs in (#29). Entra holds no secret of ours, which is the point:
+    /// many organisations now prohibit long-lived SAS tokens outright.
+    /// </summary>
+    [ObservableProperty]
+    private BlobAuthMode _editAuthMode = BlobAuthMode.SasToken;
+
+    public bool IsSasAuth => EditAuthMode.NeedsSasToken();
+
+    public bool IsEntraAuth => EditAuthMode.IsEntra();
+
     [ObservableProperty]
     private string _editSasToken = string.Empty;
 
@@ -138,6 +149,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     private string _originalName = "";
     private string _originalUrl = "";
     private string _originalSas = "";
+    private BlobAuthMode _originalAuthMode = BlobAuthMode.SasToken;
     private string _originalPattern = "";
     private BackupSourceType _originalBackupSourceType = BackupSourceType.Standalone;
     private string? _originalAgPathPattern;
@@ -191,6 +203,13 @@ public partial class BlobConfigViewModel : ViewModelBase
     partial void OnEditNameChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditContainerUrlChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditSasTokenChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditAuthModeChanged(BlobAuthMode value)
+    {
+        OnPropertyChanged(nameof(IsSasAuth));
+        OnPropertyChanged(nameof(IsEntraAuth));
+        if (SelectedContainer != null) UpdateSasExpiryStatus(SelectedContainer);
+        CheckForUnsavedChanges();
+    }
     partial void OnEditPathPatternChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditBackupSourceTypeChanged(BackupSourceType value)
     {
@@ -214,6 +233,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasUnsavedChanges =
             EditName != _originalName ||
             EditContainerUrl != _originalUrl ||
+            EditAuthMode != _originalAuthMode ||
             sasChanged ||
             EditPathPattern != _originalPattern ||
             EditBackupSourceType != _originalBackupSourceType ||
@@ -230,6 +250,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     {
         var name = container.Name;
         var url = container.ContainerUrl;
+        var authMode = container.AuthMode;
         var pattern = container.PathPattern;
         var sourceType = container.BackupSourceType;
         var agPattern = container.AgPathPattern;
@@ -240,6 +261,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         {
             container.Name = name;
             container.ContainerUrl = url;
+            container.AuthMode = authMode;
             container.PathPattern = pattern;
             container.BackupSourceType = sourceType;
             container.AgPathPattern = agPattern;
@@ -252,6 +274,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     {
         _originalName = EditName;
         _originalUrl = EditContainerUrl;
+        _originalAuthMode = EditAuthMode;
         _originalSas = HasStoredSasToken ? StoredSasSentinel : EditSasToken;
         _originalPattern = EditPathPattern;
         _originalBackupSourceType = EditBackupSourceType;
@@ -263,6 +286,15 @@ public partial class BlobConfigViewModel : ViewModelBase
 
     private void UpdateSasExpiryStatus(BlobContainerConfig container)
     {
+        // Entra has no token of ours to expire. Reporting "expired" against a container that never
+        // had a SAS would send someone hunting for a token that is not the problem.
+        if (EditAuthMode.IsEntra() || (!IsEditing && container.AuthMode.IsEntra()))
+        {
+            SasExpiryText = string.Empty;
+            IsSasExpired = false;
+            return;
+        }
+
         var expiry = _credentialStore.ReadSasTokenExpiry(container);
 
         if (expiry.CouldNotParse)
@@ -418,6 +450,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = string.Empty;
         EditTags = string.Empty;
         EditContainerUrl = string.Empty;
+        EditAuthMode = BlobAuthMode.SasToken;
         EditSasToken = string.Empty;
         EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
         EditBackupSourceType = BackupSourceType.Standalone;
@@ -441,6 +474,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = SelectedContainer.Name;
         EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        EditAuthMode = SelectedContainer.AuthMode;
         var storedToken = _credentialStore.GetSasToken(SelectedContainer);
         HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
         EditSasToken = string.Empty; // Never show stored token; user can only replace it
@@ -474,8 +508,8 @@ public partial class BlobConfigViewModel : ViewModelBase
             return;
         }
 
-        bool haveTokenToSave = !string.IsNullOrWhiteSpace(EditSasToken);
-        if (IsNew && !haveTokenToSave)
+        bool haveTokenToSave = IsSasAuth && !string.IsNullOrWhiteSpace(EditSasToken);
+        if (IsNew && IsSasAuth && !haveTokenToSave)
         {
             SetError("SAS Token is required.");
             return;
@@ -501,6 +535,7 @@ public partial class BlobConfigViewModel : ViewModelBase
                 Id = BlobContainerConfig.NewId(),
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
+                AuthMode = EditAuthMode,
                 PathPattern = EditPathPattern,
                 BackupSourceType = EditBackupSourceType,
                 AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim(),
@@ -522,6 +557,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             // Mutate in place - see ReplaceTags.
             ReplaceTags(container.Tags, TagPalette.ParseTags(EditTags));
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
+            container.AuthMode = EditAuthMode;
             container.PathPattern = EditPathPattern;
             container.BackupSourceType = EditBackupSourceType;
             container.BackupServerTimeZoneId = EditBackupServerTimeZone?.Id;
@@ -560,6 +596,15 @@ public partial class BlobConfigViewModel : ViewModelBase
                 SetError($"The container was saved, but the SAS token could not be stored: {ex.Message}");
                 return;
             }
+        }
+        else if (IsEntraAuth)
+        {
+            // Switching to Entra leaves no reason to keep the SAS token, and an organisation that
+            // has banned long-lived SAS has banned it wherever it is sitting - including in this
+            // machine's Credential Manager. After the config write, for the same reason the save
+            // itself is ordered that way.
+            _credentialStore.DeleteSecret(container.CredentialKey);
+            HasStoredSasToken = false;
         }
 
         SelectedContainer = container;

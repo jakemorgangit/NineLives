@@ -71,6 +71,62 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("BlobConfigView", () =>
             new BlobConfigView { DataContext = new BlobConfigViewModel(Store(), new BlobStorageService(Store())) });
 
+    /// <summary>
+    /// The container form under Entra: no SAS box, and the caveat panel on screen (#29).
+    ///
+    /// Worth its own case because the whole Entra section is collapsed in the default state the
+    /// plain load test exercises, so none of its bindings are ever evaluated there.
+    /// </summary>
+    [Theory]
+    [InlineData(BlobAuthMode.EntraInteractive)]
+    [InlineData(BlobAuthMode.EntraDefault)]
+    public void TheContainerFormHidesTheSasBoxUnderEntra(BlobAuthMode mode)
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = new BlobConfigViewModel(Store(), new BlobStorageService(Store()));
+            vm.AddNewCommand.Execute(null);
+            vm.EditName = "backups";
+            vm.EditContainerUrl = "https://mystorageaccount.blob.core.windows.net/backups";
+            vm.EditAuthMode = mode;
+
+            var view = new BlobConfigView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var labels = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+                Assert.DoesNotContain("SAS TOKEN", labels);
+                Assert.Contains(labels, t => t.Contains("has not been tested", StringComparison.Ordinal));
+                Assert.Contains(labels, t => t.Contains("Storage Blob Data Reader", StringComparison.Ordinal));
+
+                listener.AssertNone("BlobConfigView Entra");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    [Fact]
+    public void TheContainerFormShowsTheSasBoxUnderSasAuth()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = new BlobConfigViewModel(Store(), new BlobStorageService(Store()));
+            vm.AddNewCommand.Execute(null);
+
+            var view = new BlobConfigView { DataContext = vm };
+            Realise(view);
+
+            var labels = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+            Assert.Contains("SAS TOKEN", labels);
+            Assert.DoesNotContain(labels, t => t.Contains("has not been tested", StringComparison.Ordinal));
+        });
+    }
+
     [Fact]
     public void ServerManagerViewLoads()
         => Check("ServerManagerView", () =>

@@ -1,4 +1,6 @@
 ﻿using System.Text.RegularExpressions;
+using Azure.Core;
+using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Blackcat.NineLives.Models;
@@ -16,6 +18,13 @@ public class BlobStorageService : IBlobStorageService
 
     private BlobContainerClient CreateClient(BlobContainerConfig config)
     {
+        var baseUrl = config.ContainerUrl.TrimEnd('/');
+
+        // Entra: no secret of ours at all. Azure.Identity acquires and refreshes the token, and
+        // nothing is written to the credential store (#29).
+        if (config.AuthMode.IsEntra())
+            return new BlobContainerClient(new Uri(baseUrl), CredentialFor(config.AuthMode));
+
         // An unsaved token wins, so Test Connection can try one without it having to be persisted
         // first (#12). Null for every ordinary operation, which falls through to the stored token.
         var sasToken = config.UnsavedSasToken ?? _credentialStore.GetSasToken(config);
@@ -23,12 +32,49 @@ public class BlobStorageService : IBlobStorageService
             throw new InvalidOperationException(
                 "No SAS token found. Please configure the SAS token for this container.");
 
-        var baseUrl = config.ContainerUrl.TrimEnd('/');
         var cleanSas = sasToken.TrimStart('?');
         var separator = baseUrl.Contains('?') ? "&" : "?";
         var fullUri = new Uri($"{baseUrl}{separator}{cleanSas}");
         return new BlobContainerClient(fullUri);
     }
+
+    /// <summary>
+    /// One credential per mode for the life of the process.
+    ///
+    /// Deliberately shared rather than created per client. A credential holds the in-memory token
+    /// cache, so a fresh one per operation means a fresh sign-in per operation - which for
+    /// interactive mode is a browser window every time the container is listed, and for the rest is
+    /// a token request per call instead of one per hour.
+    ///
+    /// Static because the cache is genuinely process-wide: it belongs to the signed-in user, not to
+    /// whichever service instance happened to ask first.
+    /// </summary>
+    private static readonly Lock CredentialLock = new();
+    private static readonly Dictionary<BlobAuthMode, TokenCredential> Credentials = [];
+
+    private static TokenCredential CredentialFor(BlobAuthMode mode)
+    {
+        lock (CredentialLock)
+        {
+            if (Credentials.TryGetValue(mode, out var existing)) return existing;
+
+            TokenCredential created = mode == BlobAuthMode.EntraInteractive
+                ? new InteractiveBrowserCredential()
+                : new DefaultAzureCredential();
+
+            Credentials[mode] = created;
+            return created;
+        }
+    }
+
+    /// <summary>
+    /// Test hooks. Building a client makes no network call and acquires no token - a credential is
+    /// only exercised on the first request - so which credential the mode resolves to, and that a
+    /// SAS container still refuses without one, are both checkable offline (#29).
+    /// </summary>
+    internal BlobContainerClient CreateClientForTests(BlobContainerConfig config) => CreateClient(config);
+
+    internal static TokenCredential CredentialForTests(BlobAuthMode mode) => CredentialFor(mode);
 
     public async Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {

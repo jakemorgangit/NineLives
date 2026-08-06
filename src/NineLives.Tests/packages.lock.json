@@ -43,6 +43,14 @@
           "System.Memory.Data": "10.0.3"
         }
       },
+      "Azure.Identity": {
+        "type": "Transitive",
+        "resolved": "1.21.0",
+        "contentHash": "GeFv8sGwRKvDKwI2WFy8r0mhmlxEVZg24Sit2NogTjiSO8RVjllWM65OT6e1sKjOvG8V74y7hAbaELUUPjZQSw==",
+        "dependencies": {
+          "Azure.Core": "1.53.0"
+        }
+      },
       "Azure.Storage.Blobs": {
         "type": "Transitive",
         "resolved": "12.29.1",
@@ -352,6 +360,7 @@
       "ninelives": {
         "type": "Project",
         "dependencies": {
+          "Azure.Identity": "[1.21.0, )",
           "Azure.Storage.Blobs": "[12.29.1, )",
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Microsoft.Data.SqlClient": "[7.0.2, )"
