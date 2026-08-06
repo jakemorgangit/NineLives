@@ -8,9 +8,17 @@
          instance, so both work. -->
     <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
     <converters:NullToVisibilityConverter x:Key="NullToVis" />
+    <converters:ContrastingTextConverter x:Key="ContrastingText" />
 
     <!-- Terminal console. Darker than the cards on purpose, so the console reads as a separate
          surface the way a real terminal does rather than as another panel in the form. -->
+
+    <!--
+        Text on the backup-type badges and count chips. Those fills come from a converter rather
+        than the palette, so they are the same in every theme - and near-black clears 4.5:1 against
+        all four of them where white managed 2.19-3.34:1.
+    -->
+    <SolidColorBrush x:Key="BadgeTextBrush" Color="#0F131E" />
 
     <FontFamily x:Key="ConsoleFont">Cascadia Code, Cascadia Mono, Consolas, Courier New</FontFamily>
 
@@ -253,7 +261,9 @@
     <!-- Button Styles -->
     <Style x:Key="PrimaryButton" TargetType="Button">
         <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="Foreground" Value="White" />
+        <!-- From the palette, not hardcoded. White here is what made every primary button in high
+             contrast white-on-yellow at 1.07:1 (#126). -->
+        <Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}" />
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
@@ -323,6 +333,7 @@
 
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
         <Setter Property="Background" Value="{DynamicResource ErrorBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ErrorForegroundBrush}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -351,6 +362,7 @@
 
     <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
         <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -584,7 +596,7 @@
                                        Text="&#x2713;"
                                        FontSize="12"
                                        FontWeight="Bold"
-                                       Foreground="White"
+                                       Foreground="{DynamicResource AccentForegroundBrush}"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"
                                        Visibility="Collapsed" />

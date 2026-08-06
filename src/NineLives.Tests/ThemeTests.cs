@@ -144,6 +144,141 @@ public class ThemeTests(WpfFixture wpf)
         });
     }
 
+    /// <summary>
+    /// Text on a FILLED control - a button, a checked box, a selected radio - is readable (#126).
+    ///
+    /// This is the pair that was wrong: the palettes carried an on-fill foreground and the control
+    /// styles hardcoded `Foreground="White"` instead, which in high contrast put white on yellow at
+    /// 1.07:1. Every fill is checked, in every theme, so a fourth button style cannot reintroduce
+    /// it quietly.
+    /// </summary>
+    [Theory]
+    [InlineData(AppTheme.Dark)]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.HighContrast)]
+    public void TextOnAFilledControlIsReadable(AppTheme theme)
+    {
+        (string fill, string text)[] pairs =
+        [
+            ("AccentBrush", "AccentForegroundBrush"),
+            ("SuccessBrush", "SuccessForegroundBrush"),
+            ("ErrorBrush", "ErrorForegroundBrush"),
+            ("WarningBrush", "WarningForegroundBrush"),
+        ];
+
+        wpf.Invoke(() =>
+        {
+            var palette = ThemeManager.Load(theme);
+
+            foreach (var (fill, text) in pairs)
+            {
+                var background = ((SolidColorBrush)palette[fill]).Color;
+                var foreground = ((SolidColorBrush)palette[text]).Color;
+                var contrast = Contrast(foreground, background);
+
+                Assert.True(contrast >= 4.5,
+                    $"{theme}: {text} on {fill} is {contrast:F2}:1, below the 4.5:1 minimum.");
+            }
+        });
+    }
+
+    /// <summary>
+    /// The hover and pressed states of a filled button keep the same text readable - a button that
+    /// becomes illegible under the cursor is no better than one that starts that way.
+    /// </summary>
+    [Theory]
+    [InlineData(AppTheme.Dark)]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.HighContrast)]
+    public void TextStaysReadableWhileAButtonIsHovered(AppTheme theme)
+    {
+        (string fill, string text)[] pairs =
+        [
+            ("AccentHoverBrush", "AccentForegroundBrush"),
+            ("AccentPressedBrush", "AccentForegroundBrush"),
+            ("SuccessHoverBrush", "SuccessForegroundBrush"),
+            ("SuccessPressedBrush", "SuccessForegroundBrush"),
+            ("ErrorHoverBrush", "ErrorForegroundBrush"),
+            ("ErrorPressedBrush", "ErrorForegroundBrush"),
+        ];
+
+        wpf.Invoke(() =>
+        {
+            var palette = ThemeManager.Load(theme);
+
+            foreach (var (fill, text) in pairs)
+            {
+                var background = ((SolidColorBrush)palette[fill]).Color;
+                var foreground = ((SolidColorBrush)palette[text]).Color;
+                var contrast = Contrast(foreground, background);
+
+                Assert.True(contrast >= 4.5,
+                    $"{theme}: {text} on {fill} is {contrast:F2}:1, below the 4.5:1 minimum.");
+            }
+        });
+    }
+
+    /// <summary>
+    /// The backup-type badges. Their fills come from a converter rather than the palette, so they
+    /// are the same in every theme and one foreground has to work against all of them.
+    /// </summary>
+    [Fact]
+    public void TextOnTheBackupTypeBadgesIsReadable()
+    {
+        Color[] fills =
+        [
+            Color.FromRgb(0x4A, 0x90, 0xD9),   // Full
+            Color.FromRgb(0xF3, 0x9C, 0x12),   // Differential
+            Color.FromRgb(0x27, 0xAE, 0x60),   // Transaction log
+            Color.FromRgb(0x88, 0x90, 0xA4),   // Unknown
+        ];
+
+        wpf.Invoke(() =>
+        {
+            var badgeText = ((SolidColorBrush)Application.Current.FindResource("BadgeTextBrush")).Color;
+
+            foreach (var fill in fills)
+            {
+                var contrast = Contrast(badgeText, fill);
+                Assert.True(contrast >= 4.5,
+                    $"Badge text on {fill} is {contrast:F2}:1, below the 4.5:1 minimum.");
+            }
+        });
+    }
+
+    /// <summary>
+    /// The converter that picks text for a data-driven fill always picks the better of black and
+    /// white - checked against every tag swatch and every path-element colour, which is where the
+    /// unreadable pairs actually were.
+    /// </summary>
+    [Fact]
+    public void TheContrastingTextConverterAlwaysPicksTheReadableOne()
+    {
+        string[] fills =
+        [
+            // GitHub's label swatches, used for tags.
+            "#B60205", "#D93F0B", "#FBCA04", "#0E8A16", "#006B75", "#1D76DB", "#0052CC", "#5319E7",
+            // Path element pills.
+            "#4A90D9", "#F39C12", "#9B59B6", "#27AE60",
+        ];
+
+        var converter = new Blackcat.NineLives.Converters.ContrastingTextConverter();
+
+        wpf.Invoke(() =>
+        {
+            foreach (var hex in fills)
+            {
+                var fill = (Color)ColorConverter.ConvertFromString(hex)!;
+                var chosen = ((SolidColorBrush)converter.Convert(
+                    hex, typeof(Brush), null!, System.Globalization.CultureInfo.InvariantCulture)).Color;
+
+                var contrast = Contrast(chosen, fill);
+                Assert.True(contrast >= 4.5,
+                    $"{hex} got text at {contrast:F2}:1, below the 4.5:1 minimum.");
+            }
+        });
+    }
+
     /// <summary>WCAG relative luminance contrast ratio.</summary>
     private static double Contrast(Color a, Color b)
     {
