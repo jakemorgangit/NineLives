@@ -87,6 +87,34 @@ public partial class ServerManagerViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Captures a server's persisted fields and returns the action that puts them back. Used to
+    /// undo an in-place edit when the config write is refused.
+    /// </summary>
+    private static Action Snapshot(ServerConnection server)
+    {
+        var name = server.Name;
+        var serverName = server.ServerName;
+        var authMode = server.AuthMode;
+        var username = server.Username;
+        var timeout = server.ConnectionTimeoutSeconds;
+        var trust = server.TrustServerCertificate;
+        var encrypt = server.Encrypt;
+        var tags = server.Tags.ToList();
+
+        return () =>
+        {
+            server.Name = name;
+            server.ServerName = serverName;
+            server.AuthMode = authMode;
+            server.Username = username;
+            server.ConnectionTimeoutSeconds = timeout;
+            server.TrustServerCertificate = trust;
+            server.Encrypt = encrypt;
+            ReplaceTags(server.Tags, tags);
+        };
+    }
+
+    /// <summary>
     /// Persists the server list. Returns false and sets the error when the write failed, so
     /// callers do not go on to report success - the config save used to swallow everything and
     /// the UI said "saved successfully" whether or not anything reached the disk.
@@ -204,6 +232,10 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
 
         ServerConnection server;
+
+        // Undoes the edit if the save is refused. Null for a new server, which is removed instead.
+        Action? restore = null;
+
         if (IsNew)
         {
             if (Servers.Any(s => s.Name.Equals(EditName, StringComparison.OrdinalIgnoreCase)))
@@ -218,6 +250,10 @@ public partial class ServerManagerViewModel : ViewModelBase
         else
         {
             server = SelectedServer!;
+
+            // Snapshot before mutating, so a refused save can put the model back rather than
+            // leaving it showing values that were never persisted.
+            restore = Snapshot(server);
         }
 
         server.Name = EditName;
@@ -231,17 +267,33 @@ public partial class ServerManagerViewModel : ViewModelBase
         server.TrustServerCertificate = EditTrustServerCert;
         server.Encrypt = EditEncrypt;
 
-        if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
-        {
-            _credentialStore.SaveSqlPassword(server, EditPassword);
-        }
-
+        // Config FIRST, password second.
+        //
+        // The other order wrote the password to Credential Manager and then found the config could
+        // not be saved. Change a login's username and password together with config.json briefly
+        // locked, and the vault holds the NEW password while the file still has the OLD username -
+        // so every connection fails auth, and the form never shows a stored password, so nothing
+        // on screen says why. Delete already follows this rule.
         if (!SaveServers())
         {
             // Nothing reached the disk, so do not leave the list showing a server that is not
             // really there. Stay in the edit form so the save can be retried.
             if (IsNew) Servers.Remove(server);
+            else restore?.Invoke();
             return;
+        }
+
+        if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
+        {
+            try
+            {
+                _credentialStore.SaveSqlPassword(server, EditPassword);
+            }
+            catch (Exception ex)
+            {
+                SetError($"The server was saved, but the password could not be stored: {ex.Message}");
+                return;
+            }
         }
 
         SelectedServer = server;

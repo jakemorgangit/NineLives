@@ -189,6 +189,30 @@ public partial class BlobConfigViewModel : ViewModelBase
             EditTags != _originalTags;
     }
 
+    /// <summary>
+    /// Captures a container's persisted fields and returns the action that puts them back. Used to
+    /// undo an in-place edit when the config write is refused.
+    /// </summary>
+    private static Action Snapshot(BlobContainerConfig container)
+    {
+        var name = container.Name;
+        var url = container.ContainerUrl;
+        var pattern = container.PathPattern;
+        var sourceType = container.BackupSourceType;
+        var agPattern = container.AgPathPattern;
+        var tags = container.Tags.ToList();
+
+        return () =>
+        {
+            container.Name = name;
+            container.ContainerUrl = url;
+            container.PathPattern = pattern;
+            container.BackupSourceType = sourceType;
+            container.AgPathPattern = agPattern;
+            ReplaceTags(container.Tags, tags);
+        };
+    }
+
     private void StoreOriginalValues()
     {
         _originalName = EditName;
@@ -420,6 +444,11 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
 
         BlobContainerConfig container;
+
+        // Undoes the edit if the save is refused. Null for a new container, which is removed from
+        // the list instead.
+        Action? restore = null;
+
         if (IsNew)
         {
             if (Containers.Any(c => c.Name.Equals(EditName, StringComparison.OrdinalIgnoreCase)))
@@ -444,6 +473,12 @@ public partial class BlobConfigViewModel : ViewModelBase
         else
         {
             container = SelectedContainer!;
+
+            // Snapshot before mutating, so a refused save can put the model back. Without this an
+            // edit that failed to persist left the in-memory container showing values that are not
+            // on disk - and the next save writes them without the user knowing they were pending.
+            restore = Snapshot(container);
+
             container.Name = EditName;
             // Mutate in place - see ReplaceTags.
             ReplaceTags(container.Tags, TagPalette.ParseTags(EditTags));
@@ -454,16 +489,37 @@ public partial class BlobConfigViewModel : ViewModelBase
             container.AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim();
         }
 
-        if (haveTokenToSave)
-            _credentialStore.SaveSasToken(container, EditSasToken);
-        // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
+        // Config FIRST, secret second.
+        //
+        // The other order wrote a durable secret and then discovered the config could not be
+        // saved. Change a name and a token together, have config.json briefly locked, and the
+        // Credential Manager ends up holding the NEW token under a key the OLD config points at -
+        // or, for a rename, under a name nothing references. The form never shows a stored secret,
+        // so nothing on screen reveals the mismatch. Delete already follows this rule.
         if (!SaveContainers())
         {
             // Nothing reached the disk, so do not leave the list showing a container that is not
             // really there. Stay in the edit form so the save can be retried once whatever was
             // holding the file has let go.
             if (IsNew) Containers.Remove(container);
+            else restore?.Invoke();
             return;
+        }
+
+        // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
+        if (haveTokenToSave)
+        {
+            try
+            {
+                _credentialStore.SaveSasToken(container, EditSasToken);
+            }
+            catch (Exception ex)
+            {
+                // The config is saved and consistent; only the token is missing. Say exactly that,
+                // because "save failed" would send the user looking for the wrong problem.
+                SetError($"The container was saved, but the SAS token could not be stored: {ex.Message}");
+                return;
+            }
         }
 
         SelectedContainer = container;
