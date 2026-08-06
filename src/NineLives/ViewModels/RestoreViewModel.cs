@@ -100,19 +100,12 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private ObservableCollection<BackupSet> _chainSets = [];
 
-    // Options
-    [ObservableProperty]
-    private bool _withReplace = true;
-
-    [ObservableProperty]
-    private RecoveryMode _recoveryMode = RecoveryMode.Recovery;
-
-    public bool IsStandbyMode => RecoveryMode == RecoveryMode.Standby;
-
-    // OnRecoveryModeChanged is defined later to also update restore summary
-
-    [ObservableProperty]
-    private string _standbyFilePath = string.Empty;
+    /// <summary>
+    /// The RESTORE options, and the one place they become a <see cref="RestoreOptions"/>
+    /// (#115 seam 7). One subscription in the constructor keeps the script in step with all of
+    /// them, whatever gets added later.
+    /// </summary>
+    public RestoreOptionsViewModel Options { get; } = new();
 
     // ── Point-in-time (STOPAT) ───────────────────────────────────────────────────
     // Only meaningful for a transaction-log restore point. Without this the granularity of a
@@ -278,26 +271,6 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasVerifyFailures;
 
-    [ObservableProperty]
-    private bool _disconnectSessions = true;
-
-    [ObservableProperty]
-    private int _statsPercent = 10;
-
-    [ObservableProperty]
-    private bool _keepReplication;
-
-    [ObservableProperty]
-    private bool _enableBroker;
-
-    [ObservableProperty]
-    private bool _newBroker;
-
-    [ObservableProperty]
-    private bool _withChecksum;
-
-    [ObservableProperty]
-    private bool _continueAfterError;
 
     [ObservableProperty]
     private bool _useWithMove;
@@ -593,6 +566,11 @@ public partial class RestoreViewModel : ViewModelBase
         {
             if (!PointInTime.IsUpdating) UpdateRestoreSummary();
         };
+
+        // One subscription in place of a one-line change handler per option (#115 seam 7). An
+        // option added later is kept in step with the script by existing, rather than by whoever
+        // adds it remembering to write a handler - which is what #110 was.
+        Options.PropertyChanged += (_, _) => UpdateRestoreSummary();
 
         RefreshContainers();
     }
@@ -984,14 +962,14 @@ public partial class RestoreViewModel : ViewModelBase
 
         var optionsList = new List<string>();
 
-        if (WithReplace)
+        if (Options.WithReplace)
             optionsList.Add("overwrite existing database (WITH REPLACE)");
-        if (DisconnectSessions)
+        if (Options.DisconnectSessions)
             optionsList.Add("disconnect active sessions");
         if (UseWithMove)
             optionsList.Add($"relocate data files (WITH MOVE)");
 
-        var recoveryDesc = RecoveryMode switch
+        var recoveryDesc = Options.RecoveryMode switch
         {
             RecoveryMode.Recovery => "brought online for use (RECOVERY)",
             RecoveryMode.NoRecovery => "left in restoring state (NORECOVERY)",
@@ -1000,9 +978,9 @@ public partial class RestoreViewModel : ViewModelBase
         };
         optionsList.Add($"database will be {recoveryDesc}");
 
-        if (KeepReplication) optionsList.Add("preserve replication settings");
-        if (EnableBroker) optionsList.Add("enable Service Broker");
-        if (NewBroker) optionsList.Add("create new Service Broker ID");
+        if (Options.KeepReplication) optionsList.Add("preserve replication settings");
+        if (Options.EnableBroker) optionsList.Add("enable Service Broker");
+        if (Options.NewBroker) optionsList.Add("create new Service Broker ID");
 
         if (optionsList.Count > 0)
             parts.Add("Options: " + string.Join("; ", optionsList) + ".");
@@ -1131,7 +1109,7 @@ public partial class RestoreViewModel : ViewModelBase
 
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 var result = await _sqlService.RestoreVerifyOnlyAsync(
-                    ConnectedServer, urls, WithChecksum, fileMoves, ct);
+                    ConnectedServer, urls, Options.WithChecksum, fileMoves, ct);
 
                 ChainVerifyResults.Add(new ChainVerifyResult { Set = set, Result = result });
                 HasVerifyResults = true;
@@ -1244,28 +1222,15 @@ public partial class RestoreViewModel : ViewModelBase
                 : $"{warnings} warning(s) about this chain";
     }
 
-    partial void OnWithReplaceChanged(bool value) => UpdateRestoreSummary();
-    partial void OnDisconnectSessionsChanged(bool value) => UpdateRestoreSummary();
-    partial void OnRecoveryModeChanged(RecoveryMode oldValue, RecoveryMode newValue)
-    {
-        OnPropertyChanged(nameof(IsStandbyMode));
-        UpdateRestoreSummary();
-    }
-    partial void OnKeepReplicationChanged(bool value) => UpdateRestoreSummary();
-    partial void OnEnableBrokerChanged(bool value) => UpdateRestoreSummary();
-    partial void OnNewBrokerChanged(bool value) => UpdateRestoreSummary();
-    partial void OnWithChecksumChanged(bool value) => UpdateRestoreSummary();
-    partial void OnContinueAfterErrorChanged(bool value) => UpdateRestoreSummary();
-
-    // These four are typed into text boxes rather than ticked, and every one of them was missing
-    // its handler - so the script on screen did not change when they did. That is the exact
+    // The WITH MOVE paths are typed into text boxes rather than ticked, and both were missing
+    // their handler - so the script on screen did not change when they did. That is the exact
     // failure RegenerateScript exists to prevent: typing a new data-file path, watching the box
-    // update, and running a script that still had the old one - or, for WITH MOVE, no MOVE clause
-    // at all, sending the restore to the file paths baked into the backup.
+    // update, and running a script that still had the old one - or no MOVE clause at all, sending
+    // the restore to the file paths baked into the backup. The rest of that class of bug is gone
+    // structurally with #115 seam 7; these two are still here because the moves are worked out from
+    // the chain and the server rather than being options.
     partial void OnMoveDataFilePathChanged(string value) => UpdateRestoreSummary();
     partial void OnMoveLogFilePathChanged(string value) => UpdateRestoreSummary();
-    partial void OnStandbyFilePathChanged(string value) => UpdateRestoreSummary();
-    partial void OnStatsPercentChanged(int value) => UpdateRestoreSummary();
 
     // Verification opens its own connection and reads whole backups. Letting it start while a
     // restore is running would put a second heavy reader on the same server at the worst moment.
@@ -1330,15 +1295,6 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// STANDBY needs somewhere to put its undo file. Blank produced <c>STANDBY = ''</c>, which
-    /// SQL Server rejects - as the LAST statement of the chain, so it failed after SET SINGLE_USER
-    /// and WITH REPLACE had already dropped and overwritten the target, leaving it in RESTORING
-    /// and single-user with nothing to show for it.
-    /// </summary>
-    private bool HasStandbyFileIfNeeded =>
-        RecoveryMode != RecoveryMode.Standby || !string.IsNullOrWhiteSpace(StandbyFilePath);
-
-    /// <summary>
     /// Explicit Generate. Same work as the live rebuild, but it says why nothing was produced -
     /// the live path stays silent because reporting an error on every keystroke would be noise.
     /// </summary>
@@ -1365,7 +1321,7 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        if (!HasStandbyFileIfNeeded)
+        if (!Options.HasStandbyFileIfNeeded)
         {
             SetError("STANDBY needs an undo file path. Without one the script would end in " +
                      "STANDBY = '', which fails after the database has already been overwritten.");
@@ -1447,31 +1403,17 @@ public partial class RestoreViewModel : ViewModelBase
         if (RestoreChain == null
             || string.IsNullOrWhiteSpace(TargetDatabaseName)
             || (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
-            || !HasStandbyFileIfNeeded)
+            || !Options.HasStandbyFileIfNeeded)
         {
             GeneratedScript = string.Empty;
             HasScript = false;
             return;
         }
 
-        var fileMoves = BuildFileMoves();
-
-        var options = new RestoreOptions
-        {
-            TargetDatabaseName = TargetDatabaseName,
-            WithReplace = WithReplace,
-            RecoveryMode = RecoveryMode,
-            StandbyFilePath = string.IsNullOrWhiteSpace(StandbyFilePath) ? null : StandbyFilePath,
-            DisconnectSessions = DisconnectSessions,
-            StatsPercent = StatsPercent,
-            StopAt = PointInTime.Effective,
-            KeepReplication = KeepReplication,
-            EnableBroker = EnableBroker,
-            NewBroker = NewBroker,
-            WithChecksum = WithChecksum,
-            ContinueAfterError = ContinueAfterError,
-            FileMoves = fileMoves
-        };
+        // The three things that are not options: which database, where the point-in-time target
+        // ended up, and where the files land - each worked out somewhere that knows about the
+        // chain or the server.
+        var options = Options.Build(TargetDatabaseName, PointInTime.Effective, BuildFileMoves());
 
         GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
         HasScript = true;
@@ -1831,8 +1773,8 @@ public partial class RestoreViewModel : ViewModelBase
 
             _log.ServerChange(server.ServerName,
                 $"restore starting: target [{TargetDatabaseName}], " +
-                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
-                $"recovery={RecoveryMode}, stopAt={PointInTime.Effective?.ToString("s") ?? "none"}");
+                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={Options.WithReplace}, " +
+                $"recovery={Options.RecoveryMode}, stopAt={PointInTime.Effective?.ToString("s") ?? "none"}");
 
             AppendLog("Beginning restore execution...\n");
 

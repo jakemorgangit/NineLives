@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -123,7 +123,7 @@ public class ScriptStaysInStepTests
     {
         var vm = await Loaded();
 
-        vm.RecoveryMode = RecoveryMode.Standby;
+        vm.Options.RecoveryMode = RecoveryMode.Standby;
 
         // STANDBY = '' is the last statement of the chain, so it fails AFTER the target has been
         // dropped and overwritten. Refusing to produce a script is the only safe answer.
@@ -136,8 +136,8 @@ public class ScriptStaysInStepTests
     {
         var vm = await Loaded();
 
-        vm.RecoveryMode = RecoveryMode.Standby;
-        vm.StandbyFilePath = @"E:\Standby\MyDb.undo";
+        vm.Options.RecoveryMode = RecoveryMode.Standby;
+        vm.Options.StandbyFilePath = @"E:\Standby\MyDb.undo";
 
         Assert.Contains(@"STANDBY = 'E:\Standby\MyDb.undo'", vm.GeneratedScript);
     }
@@ -146,7 +146,7 @@ public class ScriptStaysInStepTests
     public async Task GenerateSaysWhyWhenStandbyHasNoUndoFile()
     {
         var vm = await Loaded();
-        vm.RecoveryMode = RecoveryMode.Standby;
+        vm.Options.RecoveryMode = RecoveryMode.Standby;
 
         vm.GenerateScriptCommand.Execute(null);
 
@@ -161,7 +161,7 @@ public class ScriptStaysInStepTests
     {
         var vm = await Loaded();
 
-        vm.StatsPercent = 25;
+        vm.Options.StatsPercent = 25;
 
         Assert.Contains("STATS = 25;", vm.GeneratedScript);
         Assert.DoesNotContain("STATS = 10;", vm.GeneratedScript);
