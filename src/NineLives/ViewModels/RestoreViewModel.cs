@@ -119,6 +119,13 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public PointInTimeViewModel PointInTime { get; } = new();
 
+    /// <summary>
+    /// The numbered steps, and whether each is open (#117 item 3). Every step was expanded at all
+    /// times, including the ones already finished and the ones not yet reachable, on a screen of
+    /// roughly 1,300 lines of markup in one column.
+    /// </summary>
+    public RestoreStepsViewModel Steps { get; } = new();
+
     // ── Chain gap detection ──────────────────────────────────────────────────────
     // Structural validation of the selected chain, run at selection time. The app otherwise
     // assumes every discovered backup is present and intact, so a missing stripe or a hole in
@@ -496,6 +503,11 @@ public partial class RestoreViewModel : ViewModelBase
         {
             if (e.PropertyName is nameof(IsBusy) or nameof(TargetDatabaseName))
                 RefreshCheckState();
+
+            if (e.PropertyName is nameof(BackupsLoaded) or nameof(SelectedDatabaseName)
+                or nameof(SelectedServerName) or nameof(SelectedContainer)
+                or nameof(TargetDatabaseName))
+                RefreshSteps();
         };
 
         // The selection now lives on the timeline (#115 seam 2), which is a different object, so
@@ -892,6 +904,8 @@ public partial class RestoreViewModel : ViewModelBase
         // the thing people read before running a restore against production.
         RegenerateScript();
 
+        RefreshSteps();
+
         if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
         {
             RestoreSummaryText = string.Empty;
@@ -933,6 +947,67 @@ public partial class RestoreViewModel : ViewModelBase
             parts.Add("Options: " + string.Join("; ", optionsList) + ".");
 
         RestoreSummaryText = string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// Tells each step where it stands. Driven from the same places as the restore summary, so a
+    /// step's heading cannot disagree with the screen underneath it.
+    /// </summary>
+    private void RefreshSteps()
+    {
+        Steps.Source.Report(
+            BackupsLoaded && !string.IsNullOrWhiteSpace(SelectedDatabaseName),
+            DescribeSource());
+
+        Steps.Point.Report(
+            Timeline.SelectedPoint != null,
+            Timeline.SelectedPoint is { } point
+                ? $"{point.TimestampDisplay}, {RestoreChain?.Summary ?? "no chain"}"
+                : string.Empty);
+
+        Steps.Options.Report(
+            !string.IsNullOrWhiteSpace(TargetDatabaseName),
+            DescribeOptions());
+    }
+
+    private string DescribeSource()
+    {
+        if (SelectedContainer == null) return string.Empty;
+
+        var parts = new List<string> { SelectedContainer.Name };
+        if (!string.IsNullOrWhiteSpace(SelectedDatabaseName))
+        {
+            parts.Add(string.IsNullOrWhiteSpace(SelectedServerName)
+                ? SelectedDatabaseName!
+                : $"{SelectedDatabaseName} on {SelectedServerName}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// The short form for a collapsed step: the target and the handful of options that change what
+    /// the restore DOES. Not the full sentence from the restore summary - that is a paragraph, and
+    /// this has to fit on the heading beside the step title.
+    /// </summary>
+    private string DescribeOptions()
+    {
+        if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return string.Empty;
+
+        var parts = new List<string> { $"as {TargetDatabaseName}" };
+
+        parts.Add(Options.RecoveryMode switch
+        {
+            RecoveryMode.NoRecovery => "NORECOVERY",
+            RecoveryMode.Standby => "STANDBY",
+            _ => "RECOVERY"
+        });
+
+        if (Options.WithReplace) parts.Add("REPLACE");
+        if (UseWithMove) parts.Add("MOVE");
+        if (PointInTime.Effective is DateTime stopAt) parts.Add($"STOPAT {stopAt:yyyy-MM-dd HH:mm:ss}");
+
+        return string.Join(", ", parts);
     }
 
     /// <summary>

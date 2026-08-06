@@ -51,9 +51,9 @@
             <!-- Step 1: Container + Database -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
-                    <TextBlock Text="1. SELECT SOURCE"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,12" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Source. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Source}" />
+                    <StackPanel Visibility="{Binding Steps.Source.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -152,6 +152,7 @@
                                    Style="{StaticResource SecondaryText}"
                                    VerticalAlignment="Center" HorizontalAlignment="Right" />
                     </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -195,9 +196,9 @@
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Timeline.HasPoints, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="2. SELECT RESTORE POINT"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,4" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Point. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Point}" />
+                    <StackPanel Visibility="{Binding Steps.Point.IsExpanded, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="Click a point on the timeline, or pick one from the list below."
                                Style="{StaticResource SecondaryText}"
                                Margin="0,0,0,12" />
@@ -835,6 +836,7 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -842,9 +844,9 @@
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="3. RESTORE OPTIONS"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,16" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Options. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Options}" />
+                    <StackPanel Visibility="{Binding Steps.Options.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -1218,6 +1220,7 @@
                             </Border>
                         </StackPanel>
                     </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
