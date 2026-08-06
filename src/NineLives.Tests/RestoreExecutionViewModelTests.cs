@@ -140,8 +140,8 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         RunOnUi(async () =>
         {
             var (vm, sql) = await ReadyToExecute(server, store);
-            sql.CredentialExists = true;
-            sql.CredentialIsSas = true;
+            sql.Credential = new BlobCredentialStatus(
+                BlobCredentialIdentity.SharedAccessSignature, "SHARED ACCESS SIGNATURE");
             store.SaveSasToken(vm.SelectedContainer!, "sv=2024-01-01&sig=x");
 
             await vm.ExecuteScriptCommand.ExecuteAsync(null);
@@ -149,6 +149,137 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         });
 
         Assert.Contains("Server state not modified", log);
+    }
+
+    /// <summary>
+    /// The #145 regression, and the reason it mattered.
+    ///
+    /// A managed-identity credential restores perfectly well, but the old check reduced every
+    /// identity to "is it SAS", so this arrived at the same branch as a broken one and was ALTERed -
+    /// which resets IDENTITY. The instance stopped authenticating to that container as itself, and
+    /// so did every other job pointed at the same URL, under the log line "Credential updated on
+    /// the server".
+    /// </summary>
+    [Fact]
+    public void AManagedIdentityCredentialIsLeftAloneRatherThanConvertedToSas()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        var store = new FakeCredentialStore();
+        string log = string.Empty;
+        List<string> writes = [];
+        List<string> executed = [];
+
+        RunOnUi(async () =>
+        {
+            var (vm, sql) = await ReadyToExecute(server, store);
+            sql.Credential = new BlobCredentialStatus(
+                BlobCredentialIdentity.ManagedIdentity, "Managed Identity");
+
+            // A SAS token IS stored for the container - that is what made this reachable. Browsing
+            // with one and restoring with the instance's identity is an ordinary pairing.
+            store.SaveSasToken(vm.SelectedContainer!, "sv=2024-01-01&sig=x");
+
+            await vm.ExecuteScriptCommand.ExecuteAsync(null);
+
+            log = vm.Console.Text;
+            writes = sql.CredentialWrites;
+            executed = sql.ExecutedScripts;
+        });
+
+        Assert.Empty(writes);
+        Assert.Contains("Managed Identity", log);
+        Assert.Contains("Server state not modified", log);
+
+        // Left alone, not skipped: the restore still ran.
+        Assert.Single(executed);
+    }
+
+    /// <summary>
+    /// An identity that genuinely cannot serve a restore is still not this app's to overwrite on
+    /// the way past. Converting it is a real option - it is what the button on the panel does -
+    /// but it changes shared state on someone's instance, so it takes a decision rather than a
+    /// side effect of pressing Execute (#145).
+    /// </summary>
+    [Fact]
+    public void AnUnusableCredentialStopsTheRestoreInsteadOfBeingOverwritten()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        var store = new FakeCredentialStore();
+        var history = new FakeRestoreHistoryStore();
+        string log = string.Empty;
+        string error = string.Empty;
+        List<string> writes = [];
+        List<string> executed = [];
+
+        RunOnUi(async () =>
+        {
+            var (vm, sql) = await ReadyToExecute(server, store, history);
+            sql.Credential = new BlobCredentialStatus(BlobCredentialIdentity.Other, "MYDOMAIN\\svc_sql");
+            store.SaveSasToken(vm.SelectedContainer!, "sv=2024-01-01&sig=x");
+
+            await vm.ExecuteScriptCommand.ExecuteAsync(null);
+
+            log = vm.Console.Text;
+            error = vm.ErrorMessage;
+            writes = sql.CredentialWrites;
+            executed = sql.ExecutedScripts;
+        });
+
+        Assert.Empty(writes);
+        Assert.Empty(executed);
+
+        // Named, so it is obvious whether the credential is a mistake or somebody's arrangement.
+        Assert.Contains("MYDOMAIN\\svc_sql", error);
+        Assert.Contains("MYDOMAIN\\svc_sql", log);
+
+        // Nothing was attempted, so this is not an execution to file.
+        Assert.Empty(history.Entries);
+    }
+
+    /// <summary>
+    /// The one case that does still write: nothing of that name exists, so there is nothing to
+    /// destroy and the restore cannot proceed without it.
+    /// </summary>
+    [Fact]
+    public void AMissingCredentialIsStillCreated()
+    {
+        var server = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01"
+        };
+
+        var store = new FakeCredentialStore();
+        List<string> writes = [];
+        List<string> executed = [];
+
+        RunOnUi(async () =>
+        {
+            var (vm, sql) = await ReadyToExecute(server, store);
+            sql.Credential = BlobCredentialStatus.Missing;
+            store.SaveSasToken(vm.SelectedContainer!, "sv=2024-01-01&sig=x");
+
+            await vm.ExecuteScriptCommand.ExecuteAsync(null);
+
+            writes = sql.CredentialWrites;
+            executed = sql.ExecutedScripts;
+        });
+
+        Assert.Single(writes);
+        Assert.Single(executed);
     }
 
     /// <summary>The script that runs is the one on screen, not one rebuilt on the way out.</summary>

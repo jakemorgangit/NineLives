@@ -295,7 +295,9 @@ Your SAS token needs the following minimum permissions:
 - **List (l)** - To enumerate blobs in the container
 - **Read (r)** - To read backup files
 
-For restore execution, the SQL Server instance must have a credential for the blob container URL (identity `SHARED ACCESS SIGNATURE`). You can create or update this credential from the app using "Create credential on server" in the Restore options; the SAS token is never included in generated scripts.
+For restore execution, the SQL Server instance must have a credential for the blob container URL. Two identities work: `SHARED ACCESS SIGNATURE`, and — on SQL Server 2022 and later or Azure SQL MI — `Managed Identity`. You can create the SAS kind from the app using "Create credential on server" in the Restore options; the SAS token is never included in generated scripts.
+
+A credential that already exists is never rewritten by running a restore. If it holds a managed identity the app reports it as valid and leaves it alone, since replacing it would change how the whole instance reaches that container. Replacing one is a deliberate press of the button on the credential panel, which says exactly what it would do.
 
 Example SAS token permissions: `sp=rl` (read + list)
 
@@ -409,8 +411,10 @@ NineLives/
 
 - Windows only (WPF application)
 - x64 architecture only
-- SAS token authentication only (no Azure AD/Managed Identity yet)
 - Single container per restore operation
+- Browsing a container works with a SAS token or Entra ID. The **server-side** credential that
+  `RESTORE FROM URL` needs can only be created from here as a SAS credential — a Managed Identity
+  credential is recognised and left alone, but has to be created on the instance itself
 
 ## Troubleshooting
 
@@ -418,6 +422,9 @@ NineLives/
 - Verify your SAS token has `list` permission
 - Check the token hasn't expired
 - Ensure the container URL is correct (no trailing slash)
+- On Entra ID, the account needs **Storage Blob Data Reader** on the container. Owner or
+  Contributor is not enough — see [Entra ID for Blob Storage](#entra-id-for-blob-storage) above.
+  Test Connection names the account it signed in as
 
 ### "File cannot be restored to..." error
 - Enable **WITH MOVE** option

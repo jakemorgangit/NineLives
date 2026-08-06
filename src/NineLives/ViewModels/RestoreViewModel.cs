@@ -323,8 +323,31 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool? _credentialExistsOnServer; // null = not checked
 
+    // What the credential of that name actually authenticates as. The three views below are
+    // derived rather than stored: they used to be one bool that conflated "not a SAS credential"
+    // with "unusable", which is how a managed identity came to be treated as damage (#145).
     [ObservableProperty]
-    private bool _credentialIsValidSas; // true when exists and identity is SHARED ACCESS SIGNATURE
+    private BlobCredentialIdentity _credentialIdentityKind = BlobCredentialIdentity.Missing;
+
+    /// <summary>A restore can authenticate with what is on the server as it stands.</summary>
+    public bool CredentialIsUsable =>
+        CredentialIdentityKind is BlobCredentialIdentity.SharedAccessSignature
+            or BlobCredentialIdentity.ManagedIdentity;
+
+    /// <summary>The credential holds a SAS, so the stored token is the thing that can go stale.</summary>
+    public bool CredentialIsSharedAccessSignature =>
+        CredentialIdentityKind == BlobCredentialIdentity.SharedAccessSignature;
+
+    /// <summary>The instance authenticates to storage as itself, and this app must not touch it.</summary>
+    public bool CredentialIsManagedIdentity =>
+        CredentialIdentityKind == BlobCredentialIdentity.ManagedIdentity;
+
+    partial void OnCredentialIdentityKindChanged(BlobCredentialIdentity value)
+    {
+        OnPropertyChanged(nameof(CredentialIsUsable));
+        OnPropertyChanged(nameof(CredentialIsSharedAccessSignature));
+        OnPropertyChanged(nameof(CredentialIsManagedIdentity));
+    }
 
     [ObservableProperty]
     private string _credentialStatusMessage = string.Empty;
@@ -386,7 +409,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             CredentialExistsOnServer = null;
             CredentialStatusMessage = string.Empty;
-            CredentialIsValidSas = false;
+            CredentialIdentityKind = BlobCredentialIdentity.Missing;
             return;
         }
 
@@ -400,12 +423,10 @@ public partial class RestoreViewModel : ViewModelBase
         var server = ConnectedServer;
         try
         {
-            var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName, ct);
-            CredentialExistsOnServer = exists;
-            CredentialIsValidSas = exists && isSas;
-            CredentialStatusMessage = exists
-                ? (isSas ? "Credential is present and valid (SHARED ACCESS SIGNATURE)." : "Credential exists but is not a SAS credential; restore may fail.")
-                : "Credential is not present on this server. Restore will fail unless you create it.";
+            var credential = await _sqlService.CredentialExistsAsync(server, SqlCredentialName, ct);
+            CredentialExistsOnServer = credential.Exists;
+            CredentialIdentityKind = credential.Kind;
+            CredentialStatusMessage = DescribeCredential(credential);
         }
         catch (OperationCanceledException)
         {
@@ -416,7 +437,7 @@ public partial class RestoreViewModel : ViewModelBase
         catch (Exception ex)
         {
             CredentialExistsOnServer = null;
-            CredentialIsValidSas = false;
+            CredentialIdentityKind = BlobCredentialIdentity.Missing;
             CredentialStatusMessage = $"Could not check credential: {ex.Message}";
         }
         finally
@@ -432,6 +453,24 @@ public partial class RestoreViewModel : ViewModelBase
             }
         }
     }
+
+    /// <summary>
+    /// The panel's one line about what is on the server. An unusable credential is named rather
+    /// than just rejected: "not a SAS credential" was the same sentence for a managed identity
+    /// that would have restored perfectly well and for a Windows account that never could (#145).
+    /// </summary>
+    internal static string DescribeCredential(BlobCredentialStatus credential) => credential.Kind switch
+    {
+        BlobCredentialIdentity.SharedAccessSignature =>
+            "Credential is present and valid (SHARED ACCESS SIGNATURE).",
+        BlobCredentialIdentity.ManagedIdentity =>
+            "Credential is present and valid (Managed Identity). The restore authenticates as the " +
+            "instance's own identity, so no SAS token is involved and this app will not modify it.",
+        BlobCredentialIdentity.Other =>
+            $"Credential exists with identity '{credential.Identity}', which a restore from URL " +
+            "cannot use. Replace it below, or point at a different credential.",
+        _ => "Credential is not present on this server. Restore will fail unless you create it."
+    };
 
     [ObservableProperty]
     private ObservableCollection<FileMoveOption> _fileMoves = [];
@@ -1432,15 +1471,28 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
+        // What is about to be overwritten, read before the write. This is the only route by which
+        // a managed identity gets replaced by a SAS token, and it should say so afterwards rather
+        // than reporting a routine "updated" for a change to how the instance authenticates (#145).
+        var replaced = CredentialIdentityKind;
+
         try
         {
             var change = await _sqlService.EnsureCredentialExistsAsync(
                 ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken,
                 _queryCancellation.Begin());
             await RefreshCredentialStatusAsync();
-            SetStatus(change == CredentialChange.Created
-                ? "Credential created on server."
-                : "Credential updated on server with the stored SAS token.");
+            SetStatus(change switch
+            {
+                CredentialChange.Created => "Credential created on server.",
+                _ when replaced == BlobCredentialIdentity.ManagedIdentity =>
+                    "Credential replaced on server: it authenticated as the instance's managed " +
+                    "identity and now holds the stored SAS token.",
+                _ => "Credential updated on server with the stored SAS token."
+            });
+            if (replaced == BlobCredentialIdentity.ManagedIdentity)
+                _log.ServerChange(ConnectedServer.ServerName,
+                    $"credential [{SqlCredentialName}] identity changed from Managed Identity to SAS");
         }
         catch (Exception ex)
         {
@@ -1737,16 +1789,38 @@ public partial class RestoreViewModel : ViewModelBase
                     // a rotated SAS that no longer works - that is unknowable from here, since the
                     // secret cannot be read back - so the fix for that case is the explicit
                     // refresh button, not silently rewriting server state on every run.
-                    var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
-                    if (exists && isSas)
+                    //
+                    // A managed identity is left alone for a stronger reason: it restores perfectly
+                    // well, this app cannot create one, and ALTER would reset the identity. Reading
+                    // "not SAS" as "broken" is what silently converted somebody's working managed
+                    // identity into a SAS token here, taking every other job on that container with
+                    // it, under the log line "Credential updated on the server" (#145).
+                    var credential = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
+                    if (credential.CanRestoreFromUrl)
                     {
-                        AppendLog($"Using the existing SQL credential [{SqlCredentialName}]. Server state not modified.");
+                        AppendLog(credential.Kind == BlobCredentialIdentity.ManagedIdentity
+                            ? $"Using the existing SQL credential [{SqlCredentialName}] (Managed Identity). Server state not modified."
+                            : $"Using the existing SQL credential [{SqlCredentialName}]. Server state not modified.");
+                    }
+                    else if (credential.Exists)
+                    {
+                        // Neither usable nor ours to reinterpret. Converting it is a real option -
+                        // it is what the button on the panel does - but it must be a decision
+                        // somebody made, not a side effect of pressing Execute. Stopping here costs
+                        // a restore that was about to fail on blob access anyway.
+                        attempted = false;
+                        var message =
+                            $"Credential [{SqlCredentialName}] exists with identity " +
+                            $"'{credential.Identity}', which a restore from URL cannot use. Left " +
+                            "untouched: replacing it with the stored SAS token is what " +
+                            "\"Create credential on server\" does, so that it is a deliberate change.";
+                        AppendLog(message);
+                        SetError(message);
+                        return;
                     }
                     else
                     {
-                        AppendLog(exists
-                            ? $"Credential [{SqlCredentialName}] exists but is not a SAS credential - updating it..."
-                            : $"Credential [{SqlCredentialName}] is missing - creating it...");
+                        AppendLog($"Credential [{SqlCredentialName}] is missing - creating it...");
 
                         // This statement carries the SAS token to the server. It is the one moment
                         // in a restore where a secret crosses the wire, so if the connection is
