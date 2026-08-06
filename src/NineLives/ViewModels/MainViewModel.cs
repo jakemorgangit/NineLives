@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -98,10 +98,53 @@ public partial class MainViewModel : ViewModelBase
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
+        // One place that answers "is it doing something?". Every screen already tracks its own
+        // work; without this the answer depended on which part of a long page was scrolled into
+        // view, and the Restore screen's own status line is below the fold most of the time (#128).
+        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Restore);
+
         CurrentView = BlobConfig;
 
         // Fire and forget - startup must not wait on the network.
         _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>What the app is currently doing, or empty when it is idle.</summary>
+    [ObservableProperty]
+    private string _busyText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isBusy;
+
+    private readonly List<ViewModelBase> _watched = [];
+
+    private void WatchForBusy(params ViewModelBase[] children)
+    {
+        foreach (var child in children)
+        {
+            _watched.Add(child);
+            child.PropertyChanged += (_, _) => RefreshBusy();
+        }
+    }
+
+    /// <summary>
+    /// The Restore screen names what it is doing; the others only say they are busy, and what that
+    /// means is obvious from the screen. Restore wins when more than one is going, because it is
+    /// the one that can be running a RESTORE.
+    /// </summary>
+    private void RefreshBusy()
+    {
+        var text =
+            Restore.IsBusyWithAnything ? Restore.BusyDescription
+            : BlobConfig.IsBusy ? "Testing the container connection..."
+            : BlobBrowser.IsBusy ? "Listing the container..."
+            : ServerManager.IsBusy ? "Connecting to SQL Server..."
+            : string.Empty;
+
+        if (text == BusyText) return;
+
+        BusyText = text;
+        IsBusy = text.Length > 0;
     }
 
     /// <summary>

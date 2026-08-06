@@ -105,8 +105,24 @@ public class XamlLoadTests(WpfFixture wpf)
             // Against a fake store, not the real one. This used to construct a MainViewModel over
             // the actual %LOCALAPPDATA% config and run the secret-key migration across it - a test
             // reaching into the user's own data (#41).
-            var window = new MainWindow(new MainViewModel(new FakeCredentialStore()));
-            Realise(window);
+            var vm = new MainViewModel(new FakeCredentialStore());
+
+            // Busy, so the strip that says what the app is doing is actually built and bound - it
+            // is collapsed the rest of the time, and a mistyped path there would be silent (#128).
+            vm.BlobBrowser.IsBusy = true;
+
+            var window = new MainWindow(vm);
+
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(window);
+                listener.AssertNone("MainWindow");
+            }
+            finally
+            {
+                listener.Detach();
+            }
         });
     }
 
