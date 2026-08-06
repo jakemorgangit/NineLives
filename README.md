@@ -233,11 +233,6 @@ perfectly valid combination.
 
 #### Entra ID authentication
 
-> **Untested against a real tenant.** There is no Entra-enabled instance to develop this against, so
-> what is verified is the connection string handed to the driver, not that a sign-in succeeds. The
-> token flow itself belongs to `Microsoft.Data.SqlClient`. **Test Connection** will tell you honestly
-> whether it works — please open an issue either way.
-
 Three modes, all of which store nothing:
 
 | Mode | What it does | When to pick it |

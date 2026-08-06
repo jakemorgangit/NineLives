@@ -78,8 +78,17 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
     public int ListCalls { get; private set; }
 
+    /// <summary>
+    /// The config the ViewModel actually handed over. What is on the form has to reach the service
+    /// intact - the authentication mode failing to make that trip is what shipped broken in #29.
+    /// </summary>
+    public BlobContainerConfig? LastConfig { get; private set; }
+
     public Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
-        => Task.FromResult(true);
+    {
+        LastConfig = config;
+        return Task.FromResult(true);
+    }
 
     public Task<List<string>> ListTopLevelFoldersAsync(BlobContainerConfig config, CancellationToken ct = default)
         => Task.FromResult(new List<string>());
