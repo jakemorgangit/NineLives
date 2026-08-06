@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Blackcat.NineLives.Models;
@@ -39,10 +39,35 @@ public partial class ConsoleBuffer : ObservableObject
     /// </summary>
     public bool IsRunning { get; set; }
 
+    /// <summary>
+    /// What the flush timer runs on. Null means flush inline, because there is nothing to tick.
+    ///
+    /// Resolved once, at construction, rather than looked up per message. A buffer belongs to the
+    /// thread that made it, so asking once is both cheaper and more truthful. Asking repeatedly
+    /// meant the answer came from whatever state the CURRENT thread happened to be in - which is
+    /// not something this class can reason about, and which broke: a test thread that had been used
+    /// for something unrelated came back carrying a dispatcher, so the buffer waited on a timer
+    /// that nothing was pumping and the lines never appeared.
+    /// </summary>
+    private readonly Dispatcher? _dispatcher;
+
     /// <param name="alsoLog">
     /// Called with every message as it arrives, so the log file cannot drift from what was shown.
     /// </param>
-    public ConsoleBuffer(Action<string>? alsoLog = null) => _alsoLog = alsoLog;
+    public ConsoleBuffer(Action<string>? alsoLog = null)
+        : this(alsoLog, Dispatcher.FromThread(Thread.CurrentThread))
+    {
+    }
+
+    /// <summary>
+    /// Lets a test say outright whether there is a dispatcher, instead of depending on what its
+    /// thread happens to be carrying.
+    /// </summary>
+    internal ConsoleBuffer(Action<string>? alsoLog, Dispatcher? dispatcher)
+    {
+        _alsoLog = alsoLog;
+        _dispatcher = dispatcher;
+    }
 
     [ObservableProperty]
     private ObservableCollection<ConsoleLine> _lines = [];
@@ -108,6 +133,9 @@ public partial class ConsoleBuffer : ObservableObject
         HasOutput = false;
     }
 
+    /// <summary>Whether there is anything to batch on. Only the tests care.</summary>
+    internal bool HasDispatcher => _dispatcher != null;
+
     /// <summary>
     /// True while lines are waiting. Only the tests care - it is how "batched, not immediate" is
     /// asserted without waiting on a dispatcher timer.
@@ -120,13 +148,16 @@ public partial class ConsoleBuffer : ObservableObject
 
         // No dispatcher (a plain unit test, or a background thread) means no timer to tick, so
         // flush inline instead of buffering forever with nothing to drain it.
-        if (Dispatcher.FromThread(Thread.CurrentThread) == null)
+        if (_dispatcher == null)
         {
             Flush();
             return;
         }
 
-        _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = FlushInterval };
+        _timer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        {
+            Interval = FlushInterval
+        };
         _timer.Tick += (_, _) => Flush();
         _timer.Start();
     }
