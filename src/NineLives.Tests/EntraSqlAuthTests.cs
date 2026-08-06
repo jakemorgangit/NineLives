@@ -1,4 +1,4 @@
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Xunit;
@@ -182,5 +182,46 @@ public class EntraSqlAuthTests
     public void TheStoredValuesArePinned(AuthMode mode, int expected)
     {
         Assert.Equal(expected, (int)mode);
+    }
+
+    // ── the provider has to exist ───────────────────────────────────────────────
+
+    /// <summary>
+    /// The regression, and the one thing about Entra that IS checkable without a tenant.
+    ///
+    /// Microsoft.Data.SqlClient 7.0 moved the Entra providers out of the main package and into
+    /// Microsoft.Data.SqlClient.Extensions.Azure. Without that package every Entra connection fails
+    /// at open with "Cannot find an authentication provider for 'ActiveDirectoryInteractive'" -
+    /// which is what the first person to try it hit.
+    ///
+    /// MSAL being present transitively is necessary but not sufficient, and checking for MSAL is
+    /// what was done instead of checking for this. Reverting the package reference fails all three.
+    /// </summary>
+    [Theory]
+    [InlineData(SqlAuthenticationMethod.ActiveDirectoryInteractive)]
+    [InlineData(SqlAuthenticationMethod.ActiveDirectoryIntegrated)]
+    [InlineData(SqlAuthenticationMethod.ActiveDirectoryDefault)]
+    public void SomethingCanActuallyServiceTheAuthenticationMethod(SqlAuthenticationMethod method)
+    {
+        Assert.NotNull(SqlAuthenticationProvider.GetProvider(method));
+    }
+
+    /// <summary>
+    /// And it is the real provider from the Azure extension package, not some placeholder that
+    /// would fail later with a less helpful message.
+    ///
+    /// The driver discovers this at runtime. Discovery was checked against an actual single-file
+    /// self-contained publish - the shape this app ships in, where an assembly nothing references
+    /// from code could plausibly have been left behind - and it resolves there too.
+    /// </summary>
+    [Fact]
+    public void TheProviderIsTheOneFromTheAzureExtensionPackage()
+    {
+        var provider = SqlAuthenticationProvider.GetProvider(
+            SqlAuthenticationMethod.ActiveDirectoryInteractive);
+
+        Assert.Equal(
+            "Microsoft.Data.SqlClient.ActiveDirectoryAuthenticationProvider",
+            provider!.GetType().FullName);
     }
 }
