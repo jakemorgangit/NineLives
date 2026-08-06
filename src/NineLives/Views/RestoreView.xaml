@@ -1138,7 +1138,7 @@
                         <Button Content="{Binding ExecuteButtonText}"
                                 Style="{StaticResource DangerButton}"
                                 Command="{Binding ExecuteScriptCommand}"
-                                IsEnabled="{Binding IsConnectedToServer}"
+                                IsEnabled="{Binding CanPressExecute}"
                                 MinWidth="140" />
 
                         <!-- Only while a restore is actually running. Until now the only way to
@@ -1152,6 +1152,15 @@
                                 MinWidth="110"
                                 ToolTip="Asks SQL Server to abort the statement in flight. It rolls that statement back, but the target database is left mid-restore and will need recovering - the app will tell you how." />
                     </StackPanel>
+
+                    <!-- Why Execute is greyed out. Not connected, no script and a chain that cannot
+                         restore all looked identical - one disabled button, three different
+                         problems, and the answer already sitting in the viewmodel unshown. -->
+                    <TextBlock Text="{Binding ExecuteBlockedReason}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"
+                               Visibility="{Binding IsExecuteBlocked, Converter={StaticResource BoolToVis}}" />
 
                     <!-- Execute armed warning. The server's tags appear here deliberately: this is
                          the last thing between the user and an irreversible overwrite, and a

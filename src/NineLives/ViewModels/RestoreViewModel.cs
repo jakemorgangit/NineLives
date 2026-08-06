@@ -1597,11 +1597,51 @@ public partial class RestoreViewModel : ViewModelBase
 
     // Verification opens its own connection and reads whole backups. Letting it start while a
     // restore is running would put a second heavy reader on the same server at the worst moment.
-    partial void OnIsExecutingChanged(bool value) => VerifyChainCommand.NotifyCanExecuteChanged();
+    partial void OnIsExecutingChanged(bool value)
+    {
+        VerifyChainCommand.NotifyCanExecuteChanged();
+        RefreshExecuteBlockedReason();
+    }
+
+    /// <summary>
+    /// Why Execute cannot be pressed, or empty when it can.
+    ///
+    /// The button was disabled identically whether the user was not connected, had no script, or
+    /// had a chain the app already knows will not restore. Three different problems, one greyed-out
+    /// button, and the information was all sitting in properties nobody showed.
+    /// </summary>
+    public string ExecuteBlockedReason
+    {
+        get
+        {
+            if (IsExecuting) return string.Empty;
+            if (!IsConnectedToServer) return "Connect to a SQL Server to execute this restore.";
+            if (!HasScript) return "No script yet - pick a restore point and a target database name.";
+            if (HasChainErrors) return "This chain cannot restore. See the problems listed above.";
+            return string.Empty;
+        }
+    }
+
+    public bool IsExecuteBlocked => ExecuteBlockedReason.Length > 0;
+
+    /// <summary>The button's own IsEnabled, so the reason and the enabled state cannot disagree.</summary>
+    public bool CanPressExecute => !IsExecuteBlocked;
+
+    private void RefreshExecuteBlockedReason()
+    {
+        OnPropertyChanged(nameof(ExecuteBlockedReason));
+        OnPropertyChanged(nameof(IsExecuteBlocked));
+        OnPropertyChanged(nameof(CanPressExecute));
+    }
+
+    partial void OnHasScriptChanged(bool value) => RefreshExecuteBlockedReason();
+
+    partial void OnHasChainErrorsChanged(bool value) => RefreshExecuteBlockedReason();
     partial void OnTargetDatabaseNameChanged(string value) => UpdateRestoreSummary();
 
     partial void OnIsConnectedToServerChanged(bool value)
     {
+        RefreshExecuteBlockedReason();
         var chips = value && ConnectedServer != null
             ? ConnectedServer.TagChips
             : [];
