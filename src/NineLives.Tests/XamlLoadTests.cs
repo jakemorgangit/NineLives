@@ -395,6 +395,49 @@ public class XamlLoadTests(WpfFixture wpf)
         });
     }
 
+    /// <summary>
+    /// The point-in-time panel, and the fact that a rejected target reads as a rejection.
+    ///
+    /// "Must be after 22:00" was drawn in the same muted grey as "Valid range: ...". Execute is
+    /// already blocked at that point, so that message is the only thing on screen saying why
+    /// (#115 seam 3).
+    /// </summary>
+    [Fact]
+    public void ARejectedPointInTimeTargetIsShownAsAnError()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.PointInTime.SetWindow((new DateTime(2026, 1, 10, 22, 0, 0), new DateTime(2026, 1, 10, 22, 15, 0)));
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var message = FindAll<TextBlock>(view)
+                    .Single(t => t.Text.StartsWith("Valid range", StringComparison.Ordinal));
+                var informational = message.Foreground;
+
+                // Ticked, over a target past the end of the log.
+                vm.PointInTime.Use = true;
+                vm.PointInTime.StopAtText = "2026-01-10 23:59:59";
+                Realise(view);
+
+                Assert.True(vm.PointInTime.HasError);
+                Assert.StartsWith("Must be at or before", message.Text);
+                Assert.NotEqual(informational.ToString(), message.Foreground.ToString());
+
+                listener.AssertNone("RestoreView point-in-time panel");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
     /// <summary>The inventory warnings panel added with #46 - separate from the chain issues one.</summary>
     [Fact]
     public void TheInventoryPanelShowsItsFindings()
