@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace Blackcat.NineLives.Models;
 
@@ -271,8 +271,12 @@ public class RestorePoint
 {
     public DateTime Timestamp { get; set; }
     public BackupType Type { get; set; }
-    public BackupSet PrimarySet { get; set; } = null!;
-    public BackupSet RequiredFullSet { get; set; } = null!;
+    // required, not null!. The old annotation claimed "never null" while the code disagreed with
+    // itself about it: IsTimestampApproximate defended with ?., TotalFiles dereferenced bare, and
+    // BackupChainValidator had a null check the compiler believed was always true. Both are only
+    // ever built fully populated, so the compiler can be told that and then enforce it.
+    public required BackupSet PrimarySet { get; set; }
+    public required BackupSet RequiredFullSet { get; set; }
     public List<BackupSet> RequiredDiffSets { get; set; } = [];
     public List<BackupSet> RequiredLogSets { get; set; } = [];
 
@@ -290,7 +294,7 @@ public class RestorePoint
     /// True when this point's own time is a blob-derived approximation, which is what decides
     /// where it lands on the timeline.
     /// </summary>
-    public bool IsTimestampApproximate => PrimarySet?.IsTimestampApproximate ?? false;
+    public bool IsTimestampApproximate => PrimarySet.IsTimestampApproximate;
 
     public string TimestampDisplay => BackupTime.Format(Timestamp, IsTimestampApproximate);
 
@@ -349,7 +353,7 @@ public class RestorePoint
 
 public class BackupChain
 {
-    public BackupSet FullSet { get; set; } = null!;
+    public required BackupSet FullSet { get; set; }
     public List<BackupSet> DiffSets { get; set; } = [];
     public List<BackupSet> LogSets { get; set; } = [];
     public DateTime? StopAt { get; set; }

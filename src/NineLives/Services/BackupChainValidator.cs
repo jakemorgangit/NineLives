@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -171,7 +171,7 @@ public class BackupChainValidator
         var reachable = new HashSet<BackupSet>();
         foreach (var point in restorePoints)
         {
-            if (point.PrimarySet != null) reachable.Add(point.PrimarySet);
+            reachable.Add(point.PrimarySet);
             foreach (var log in point.RequiredLogSets) reachable.Add(log);
         }
 
