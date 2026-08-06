@@ -182,6 +182,13 @@ public class XamlLoadTests(WpfFixture wpf)
         });
     }
 
+    // The sidebar highlight is likewise not asserted here (#117 item 5). It is bound to
+    // CurrentViewName so that Ctrl+1..6 moves it, and the obvious test - navigate by command, then
+    // check which RadioButton is checked - finds no RadioButtons at all: an unshown Window has no
+    // visual tree, the same limitation as the banner above. What CAN break is covered elsewhere:
+    // MainWindowLoads traces a wrong binding path, and KeyboardShortcutTests pins the converter in
+    // both directions, including that ConvertBack refuses so a click cannot desync the selection.
+
     // The update banner is not asserted on beyond MainWindowLoads above, which does cover what
     // can break silently: it parses the banner's markup, its storyboard and its drop shadow, and
     // resolves every {StaticResource} it uses - a missing key would throw there.

@@ -19,7 +19,9 @@ public partial class MainViewModel : ViewModelBase
     private ViewModelBase? _currentView;
 
     [ObservableProperty]
-    private string _currentViewName = "Blob Storage";
+    // The sidebar's selection is bound to this, so it also decides which button is highlighted at
+    // startup - it used to be a hardcoded IsChecked="True" on the first one (#117 item 5).
+    private string _currentViewName = Nav.BlobStorage;
 
     [ObservableProperty]
     private string _globalStatus = "Ready";
@@ -260,6 +262,58 @@ public partial class MainViewModel : ViewModelBase
     private void DisconnectSql()
     {
         ServerManager.DisconnectCommand.Execute(null);
+    }
+
+    // ── keyboard (#117 item 5) ──────────────────────────────────────────────────
+    //
+    // The shortcuts are declared on the window, but what they DO is decided here, because a key
+    // that reaches the whole app has to mean something sensible on every screen. F5 bound straight
+    // to the Restore screen's loader would run a blob listing while somebody was reading About -
+    // no visible effect, real network traffic, and a status line changing on a page that has none.
+    //
+    // Each of these routes to the current screen and does nothing where it has no meaning, rather
+    // than being disabled globally because one screen cannot use it.
+
+    /// <summary>F5: reload whatever the current screen lists.</summary>
+    [RelayCommand]
+    private void Reload()
+    {
+        switch (CurrentViewName)
+        {
+            case Nav.Restore:
+                if (Restore.LoadBackupsCommand.CanExecute(null)) Restore.LoadBackupsCommand.Execute(null);
+                break;
+            case Nav.BrowseBackups:
+                BlobBrowser.RefreshContainers();
+                break;
+            case Nav.History:
+                History.Refresh();
+                break;
+        }
+    }
+
+    /// <summary>Ctrl+G: generate the restore script. Only the Restore screen generates anything.</summary>
+    [RelayCommand]
+    private void GenerateScript()
+    {
+        if (CurrentViewName != Nav.Restore) return;
+        if (Restore.GenerateScriptCommand.CanExecute(null)) Restore.GenerateScriptCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Esc: stop whatever is running.
+    ///
+    /// Not gated on the current screen. A restore or a verify keeps running while somebody
+    /// navigates away, and the whole point of a stop key is that it works when you reach for it.
+    /// Ordered by cost of letting it continue: an execute is writing to a database, a query is
+    /// only reading, a load is only listing.
+    /// </summary>
+    [RelayCommand]
+    private void CancelCurrent()
+    {
+        if (Restore.CancelExecuteCommand.CanExecute(null)) { Restore.CancelExecuteCommand.Execute(null); return; }
+        if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
+        if (Restore.CancelLoadCommand.CanExecute(null)) Restore.CancelLoadCommand.Execute(null);
     }
 
     /// <summary>
