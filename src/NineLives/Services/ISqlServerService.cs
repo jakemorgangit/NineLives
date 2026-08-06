@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -38,6 +38,7 @@ public interface ISqlServerService
         ServerConnection server,
         IReadOnlyList<string> blobUrls,
         bool withChecksum = false,
+        IReadOnlyList<FileMoveOption>? fileMoves = null,
         CancellationToken ct = default);
 
     Task ExecuteNonQueryAsync(

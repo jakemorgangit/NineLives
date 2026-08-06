@@ -180,10 +180,15 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Every token handed to a verify call, so a test can prove one was passed at all.</summary>
     public List<CancellationToken> VerifyTokens { get; } = [];
 
+    /// <summary>The MOVE clauses the last verification was given (#129).</summary>
+    public List<FileMoveOption> VerifiedWithMoves { get; private set; } = [];
+
     public Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
-        ServerConnection server, IReadOnlyList<string> blobUrls, bool withChecksum = false, CancellationToken ct = default)
+        ServerConnection server, IReadOnlyList<string> blobUrls, bool withChecksum = false,
+        IReadOnlyList<FileMoveOption>? fileMoves = null, CancellationToken ct = default)
     {
         VerifiedUrls.AddRange(blobUrls);
+        VerifiedWithMoves = fileMoves?.ToList() ?? [];
         VerifyTokens.Add(ct);
         OnVerify?.Invoke(ct);
 
