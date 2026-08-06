@@ -30,6 +30,24 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly OperationCancellation _loadCancellation = new();
     private readonly OperationCancellation _executeCancellation = new();
 
+    /// <summary>
+    /// The server queries a user starts and might want to abandon: verify, validate, the two
+    /// metadata reads, creating the credential, and the post-failure recovery actions (#111).
+    ///
+    /// They share one source because they are mutually exclusive buttons - starting one while
+    /// another runs should stop the first, which is exactly what Begin() does. RESTORE VERIFYONLY
+    /// reads every byte of every backup in the chain at CommandTimeout = 0, so on a large chain
+    /// this was hours with no Stop button and no timeout.
+    /// </summary>
+    private readonly OperationCancellation _queryCancellation = new();
+
+    /// <summary>
+    /// The background credential check. Separate because it is not user-initiated and has no
+    /// button - and because it races itself: two overlapping checks would leave the panel showing
+    /// the result for whichever finished last, which could be the container the user just left.
+    /// </summary>
+    private readonly OperationCancellation _credentialCheckCancellation = new();
+
     #region Observable Properties
 
     [ObservableProperty]
@@ -206,6 +224,10 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _canCancelExecute;
 
+    /// <summary>True while a server query is running and has not been asked to stop (#111).</summary>
+    [ObservableProperty]
+    private bool _canCancelQuery;
+
     /// <summary>True between asking to stop and the operation actually unwinding.</summary>
     [ObservableProperty]
     private bool _isCancelling;
@@ -244,7 +266,10 @@ public partial class RestoreViewModel : ViewModelBase
     {
         CanCancelLoad = _loadCancellation.CanCancel;
         CanCancelExecute = _executeCancellation.CanCancel;
-        IsCancelling = _loadCancellation.IsCancelling || _executeCancellation.IsCancelling;
+        CanCancelQuery = _queryCancellation.CanCancel;
+        IsCancelling = _loadCancellation.IsCancelling
+            || _executeCancellation.IsCancelling
+            || _queryCancellation.IsCancelling;
     }
 
     /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
@@ -445,17 +470,28 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
+        // Cancels any check already in flight. Two overlapping checks left the panel showing the
+        // result of whichever finished LAST, which could be the container the user had just left -
+        // and that panel is what someone reads before deciding whether to create a credential.
+        var ct = _credentialCheckCancellation.Begin();
+
         IsCheckingCredential = true;
         CredentialStatusMessage = "Checking...";
-        var server = ConnectedServer!;
+        var server = ConnectedServer;
         try
         {
-            var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
+            var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName, ct);
             CredentialExistsOnServer = exists;
             CredentialIsValidSas = exists && isSas;
             CredentialStatusMessage = exists
                 ? (isSas ? "Credential is present and valid (SHARED ACCESS SIGNATURE)." : "Credential exists but is not a SAS credential; restore may fail.")
                 : "Credential is not present on this server. Restore will fail unless you create it.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer check - which is about to write its own answer here. Saying
+            // anything would just be the older check having the last word again.
+            return;
         }
         catch (Exception ex)
         {
@@ -465,8 +501,15 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
-            IsCheckingCredential = false;
-            CreateCredentialOnServerCommand.NotifyCanExecuteChanged();
+            // Only when this check is still the current one. Ending the newer check's source, or
+            // clearing its "Checking..." state, is how the previous version left the panel
+            // reporting the container the user had already moved away from.
+            if (!ct.IsCancellationRequested)
+            {
+                _credentialCheckCancellation.End();
+                IsCheckingCredential = false;
+                CreateCredentialOnServerCommand.NotifyCanExecuteChanged();
+            }
         }
     }
 
@@ -825,6 +868,20 @@ public partial class RestoreViewModel : ViewModelBase
         return new BlobListingScope(pathServer, SelectedDatabaseName);
     }
 
+    /// <summary>
+    /// Stops whichever server query is running - verify, validate, a metadata read, or a recovery
+    /// action. They share one source because they are mutually exclusive buttons (#111).
+    /// </summary>
+    [RelayCommand]
+    private void CancelQuery()
+    {
+        if (!_queryCancellation.CanCancel) return;
+
+        _queryCancellation.Cancel();
+        RefreshCancelState();
+        SetStatus("Stopping...");
+    }
+
     /// <summary>Stops an in-progress backup listing.</summary>
     [RelayCommand]
     private void CancelLoad()
@@ -1165,7 +1222,8 @@ public partial class RestoreViewModel : ViewModelBase
         PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
         try
         {
-            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(ConnectedServer);
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(
+                ConnectedServer, _queryCancellation.Begin());
             var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
 
             if (!string.IsNullOrEmpty(dataPath))
@@ -1286,18 +1344,28 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsValidatingChain = true;
+        RefreshCancelState();
         ClearStatus();
         try
         {
             var headers = new List<ChainHeader>();
             foreach (var set in RestoreChain.AllSets)
             {
+                ct.ThrowIfCancellationRequested();
+
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 try
                 {
-                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
+                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
                     headers.Add(new ChainHeader(set, header));
+                }
+                catch (OperationCanceledException)
+                {
+                    // Asked for. Must not be swallowed by the per-member catch below, which exists
+                    // so ONE unreadable backup does not abort the rest.
+                    throw;
                 }
                 catch (Exception)
                 {
@@ -1314,13 +1382,19 @@ public partial class RestoreViewModel : ViewModelBase
                 ? $"Chain validation found problems - see the panel above."
                 : $"Chain validated: {headers.Count} backup(s) read, LSN chain is intact.");
         }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Chain validation cancelled.");
+        }
         catch (Exception ex)
         {
             SetError($"Chain validation failed: {ex.Message}");
         }
         finally
         {
+            _queryCancellation.End();
             IsValidatingChain = false;
+            RefreshCancelState();
         }
     }
 
@@ -1341,7 +1415,9 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsVerifyingChain = true;
+        RefreshCancelState();
         ClearStatus();
         ChainVerifyResults.Clear();
         HasVerifyResults = false;
@@ -1356,7 +1432,7 @@ public partial class RestoreViewModel : ViewModelBase
 
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 var result = await _sqlService.RestoreVerifyOnlyAsync(
-                    ConnectedServer, urls, WithChecksum);
+                    ConnectedServer, urls, WithChecksum, ct);
 
                 ChainVerifyResults.Add(new ChainVerifyResult { Set = set, Result = result });
                 HasVerifyResults = true;
@@ -1379,7 +1455,9 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
+            _queryCancellation.End();
             IsVerifyingChain = false;
+            RefreshCancelState();
         }
     }
 
@@ -1667,7 +1745,8 @@ public partial class RestoreViewModel : ViewModelBase
         try
         {
             var change = await _sqlService.EnsureCredentialExistsAsync(
-                ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
+                ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken,
+                _queryCancellation.Begin());
             await RefreshCredentialStatusAsync();
             SetStatus(change == CredentialChange.Created
                 ? "Credential created on server."
@@ -1712,13 +1791,15 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsBusy = true;
+        RefreshCancelState();
         BackupMetadataSummary = null;
         try
         {
             // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
             var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls);
+            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls, ct);
 
             var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? @"C:\SQL\Data";
             var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
@@ -1749,7 +1830,9 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
+            _queryCancellation.End();
             IsBusy = false;
+            RefreshCancelState();
         }
     }
 
@@ -1761,12 +1844,14 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsBusy = true;
+        RefreshCancelState();
         try
         {
             // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
             var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
 
             if (header == null)
             {
@@ -1795,7 +1880,9 @@ public partial class RestoreViewModel : ViewModelBase
         }
         finally
         {
+            _queryCancellation.End();
             IsBusy = false;
+            RefreshCancelState();
         }
     }
 
@@ -2148,20 +2235,39 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (action == null || ConnectedServer == null) return;
 
+        // Cancellable, and it needs it more than most: this runs when a restore has already
+        // failed, RESTORE ... WITH RECOVERY can take a long time on a large database, and it goes
+        // out at CommandTimeout = 0. Without a Stop the only way out was killing the process - at
+        // the exact moment the user is trying to get their database back.
+        var ct = _queryCancellation.Begin();
+        RefreshCancelState();
+
         try
         {
             AppendLog($"\nRunning: {action.Sql}");
-            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql);
+            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql, ct);
             AppendLog("Completed.");
             await ReportRecoveryStateAsync(ConnectedServer);
 
             if (!HasRecoveryActions)
                 SetStatus($"[{TargetDatabaseName}] is back to a usable state.");
         }
+        catch (OperationCanceledException)
+        {
+            // SQL Server rolls back the statement that was in flight, so the database is where it
+            // was before this step - which is still whatever the failed restore left behind.
+            AppendLog("\nCancelled. The database is in the same state as before this step.");
+            SetStatus("Recovery step cancelled.");
+        }
         catch (Exception ex)
         {
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Recovery step failed: {ex.Message}");
+        }
+        finally
+        {
+            _queryCancellation.End();
+            RefreshCancelState();
         }
     }
 
