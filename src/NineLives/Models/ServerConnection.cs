@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
@@ -165,4 +165,25 @@ public class ServerConnection : INotifyPropertyChanged
     public string DisplayText => AuthMode == AuthMode.WindowsAuth
         ? $"{ServerName} (Windows Auth)"
         : $"{ServerName} ({Username})";
+
+    private bool _isConnectedServer;
+
+    /// <summary>
+    /// True for the one server currently connected. Not persisted - it describes this session.
+    ///
+    /// Connecting used to change the banner at the top of the window and nothing in the list, so
+    /// with more than a screenful of servers there was no way to tell which one was live (#127).
+    /// Kept on the model rather than compared in the view so the row can simply bind to it.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsConnectedServer
+    {
+        get => _isConnectedServer;
+        set
+        {
+            if (_isConnectedServer == value) return;
+            _isConnectedServer = value;
+            OnPropertyChanged(nameof(IsConnectedServer));
+        }
+    }
 }

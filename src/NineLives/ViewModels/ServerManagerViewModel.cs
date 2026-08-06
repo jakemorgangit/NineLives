@@ -338,6 +338,7 @@ public partial class ServerManagerViewModel : ViewModelBase
         if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
         {
             IsConnected = false;
+            MarkConnected(null);
             ConnectedServerDisplay = string.Empty;
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
             {
@@ -427,6 +428,7 @@ public partial class ServerManagerViewModel : ViewModelBase
 
             IsConnected = true;
             ConnectedServerDisplay = SelectedServer.DisplayText;
+            MarkConnected(SelectedServer);
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
             {
                 IsConnected = true,
@@ -445,11 +447,21 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Exactly one server carries the connected marker, so the list can never show two.
+    /// </summary>
+    private void MarkConnected(ServerConnection? connected)
+    {
+        foreach (var server in Servers)
+            server.IsConnectedServer = ReferenceEquals(server, connected);
+    }
+
     [RelayCommand]
     private void Disconnect()
     {
         IsConnected = false;
         ConnectedServerDisplay = string.Empty;
+        MarkConnected(null);
         ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
         {
             IsConnected = false,
