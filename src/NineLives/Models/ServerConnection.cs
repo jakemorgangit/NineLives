@@ -7,10 +7,68 @@ using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Models;
 
+/// <summary>
+/// How the app authenticates to the SQL Server instance.
+///
+/// The Entra modes are handled entirely by Microsoft.Data.SqlClient's own token flow - the app
+/// stores no secret for any of them, which is the point: an estate that has mandated Entra has
+/// usually done so precisely to stop tools holding passwords (#30).
+///
+/// The numbers are pinned. These values are serialised into config.json, so appending to the list
+/// without them would be fine but reordering would silently repoint every saved connection at a
+/// different authentication mode.
+/// </summary>
 public enum AuthMode
 {
-    WindowsAuth,
-    SqlAuth
+    WindowsAuth = 0,
+    SqlAuth = 1,
+
+    /// <summary>
+    /// Entra ID with an interactive browser prompt, which is the mode that satisfies MFA. The
+    /// username, if given, is only a hint for the account picker.
+    /// </summary>
+    EntraInteractive = 2,
+
+    /// <summary>Entra ID using the signed-in Windows account, with no prompt.</summary>
+    EntraIntegrated = 3,
+
+    /// <summary>
+    /// Entra ID letting the driver choose - environment variables, then managed identity, then the
+    /// signed-in account, then an interactive prompt. The mode to pick for SQL Server on an Azure
+    /// VM, where the managed identity is what should be used.
+    /// </summary>
+    EntraDefault = 4
+}
+
+/// <summary>Things every authentication mode has to answer.</summary>
+public static class AuthModes
+{
+    /// <summary>Whether the app has to hold a password for this mode. Only SQL auth does.</summary>
+    public static bool NeedsStoredPassword(this AuthMode mode) => mode == AuthMode.SqlAuth;
+
+    /// <summary>Whether a username is required rather than optional.</summary>
+    public static bool RequiresUsername(this AuthMode mode) => mode == AuthMode.SqlAuth;
+
+    /// <summary>
+    /// Whether a username box is worth showing. Interactive Entra accepts one as a hint that
+    /// pre-selects the account, which is worth having on a machine signed in to several.
+    /// </summary>
+    public static bool AcceptsUsername(this AuthMode mode) =>
+        mode is AuthMode.SqlAuth or AuthMode.EntraInteractive;
+
+    public static bool IsEntra(this AuthMode mode) =>
+        mode is AuthMode.EntraInteractive or AuthMode.EntraIntegrated or AuthMode.EntraDefault;
+
+    /// <summary>How the mode reads in a list, next to a server name.</summary>
+    public static string Describe(this AuthMode mode) => mode switch
+    {
+        AuthMode.WindowsAuth => "Windows Auth",
+        AuthMode.SqlAuth => "SQL Auth",
+        AuthMode.EntraInteractive => "Entra ID (interactive)",
+        AuthMode.EntraIntegrated => "Entra ID (integrated)",
+        AuthMode.EntraDefault => "Entra ID (default)",
+        _ => "Unknown"
+    };
 }
 
 public enum EncryptMode
@@ -144,7 +202,7 @@ public class ServerConnection : INotifyPropertyChanged
 
     /// <summary>
     /// Key used to look up password in Windows Credential Manager.
-    /// Only used when AuthMode is SqlAuth.
+    /// Only used when <see cref="AuthMode"/> needs a stored password, which is SQL auth alone.
     /// </summary>
     [JsonIgnore]
     public string CredentialKey =>
@@ -162,9 +220,14 @@ public class ServerConnection : INotifyPropertyChanged
     [JsonIgnore]
     public string? UnsavedPassword { get; set; }
 
-    public string DisplayText => AuthMode == AuthMode.WindowsAuth
-        ? $"{ServerName} (Windows Auth)"
-        : $"{ServerName} ({Username})";
+    /// <summary>
+    /// The server and how it authenticates, for the list. A username is only shown when it
+    /// identifies the login being used - for interactive Entra it is a hint for the account picker,
+    /// not the account that ends up connecting, so showing it would misstate who is connected.
+    /// </summary>
+    public string DisplayText => AuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(Username)
+        ? $"{ServerName} ({Username})"
+        : $"{ServerName} ({AuthMode.Describe()})";
 
     private bool _isConnectedServer;
 

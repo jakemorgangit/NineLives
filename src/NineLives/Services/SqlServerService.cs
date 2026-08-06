@@ -34,7 +34,24 @@ public class SqlServerService : ISqlServerService
 
         builder.IntegratedSecurity = server.AuthMode == AuthMode.WindowsAuth;
 
-        // No UserID or Password here - SQL auth credentials go on the SqlConnection as a
+        // Entra is the driver's own token flow - Microsoft.Data.SqlClient acquires and refreshes
+        // the token through MSAL, and the app never sees or stores a secret for it (#30).
+        if (server.AuthMode.IsEntra())
+        {
+            builder.Authentication = server.AuthMode switch
+            {
+                AuthMode.EntraInteractive => SqlAuthenticationMethod.ActiveDirectoryInteractive,
+                AuthMode.EntraIntegrated => SqlAuthenticationMethod.ActiveDirectoryIntegrated,
+                _ => SqlAuthenticationMethod.ActiveDirectoryDefault
+            };
+
+            // A hint for the account picker, not a credential. Safe in the connection string for
+            // the same reason the SQL auth username is not: there is no password to pair it with.
+            if (server.AuthMode == AuthMode.EntraInteractive && !string.IsNullOrWhiteSpace(server.Username))
+                builder.UserID = server.Username;
+        }
+
+        // No UserID or Password here for SQL auth - those credentials go on the SqlConnection as a
         // SqlCredential instead (#20). A connection string is a long-lived managed string that
         // cannot be zeroed and turns up in crash dumps and memory captures; SqlCredential holds
         // the password in a SecureString the driver disposes. It also means anything that logs or
@@ -53,7 +70,8 @@ public class SqlServerService : ISqlServerService
     {
         var conn = new SqlConnection(BuildConnectionString(server));
 
-        if (server.AuthMode != AuthMode.SqlAuth)
+        // Windows auth and the Entra modes carry no password of ours - the driver handles both.
+        if (!server.AuthMode.NeedsStoredPassword())
             return conn;
 
         // Unsaved wins, so Test Connection can try a password without persisting it first (#12).

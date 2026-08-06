@@ -154,4 +154,76 @@ public class SaveOrderingTests
         Assert.Equal("olduser", server.Username);
         Assert.Equal("oldpassword", store.GetSqlPassword(server));
     }
+
+    /// <summary>
+    /// Switching a saved connection away from SQL auth used to leave its password in Credential
+    /// Manager - a live secret for a login nothing uses any more, outliving the only reason it was
+    /// stored (#30).
+    ///
+    /// It matters most for the switch this was written for: moving to Entra is usually done
+    /// precisely to stop tools holding passwords, so leaving one behind defeats the point.
+    /// </summary>
+    [Theory]
+    [InlineData(AuthMode.EntraInteractive)]
+    [InlineData(AuthMode.EntraIntegrated)]
+    [InlineData(AuthMode.EntraDefault)]
+    [InlineData(AuthMode.WindowsAuth)]
+    public void SwitchingAwayFromSqlAuthDestroysTheStoredPassword(AuthMode to)
+    {
+        var store = new FakeCredentialStore();
+        var existing = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01",
+            AuthMode = AuthMode.SqlAuth,
+            Username = "restoreadmin"
+        };
+        store.Config.Servers.Add(existing);
+        store.SaveSqlPassword(existing, "no-longer-needed");
+
+        var vm = new ServerManagerViewModel(store, new FakeSqlServerService());
+        vm.SelectedServer = vm.Servers.Single();
+        vm.EditCommand.Execute(null);
+
+        vm.EditAuthMode = to;
+        vm.SaveCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+        Assert.Null(store.GetSqlPassword(vm.Servers.Single()));
+    }
+
+    /// <summary>
+    /// And only once the mode change has actually reached the disk - the same ordering rule the
+    /// rest of this file is about. A refused save that had already destroyed the password would
+    /// leave a SQL auth connection in config.json with no credential behind it.
+    /// </summary>
+    [Fact]
+    public void ARefusedSwitchAwayFromSqlAuthKeepsThePassword()
+    {
+        var store = new FakeCredentialStore();
+        var existing = new ServerConnection
+        {
+            Id = ServerConnection.NewId(),
+            Name = "SRV01",
+            ServerName = "SRV01",
+            AuthMode = AuthMode.SqlAuth,
+            Username = "restoreadmin"
+        };
+        store.Config.Servers.Add(existing);
+        store.SaveSqlPassword(existing, "still-needed");
+
+        var vm = new ServerManagerViewModel(store, new FakeSqlServerService());
+        vm.SelectedServer = vm.Servers.Single();
+        vm.EditCommand.Execute(null);
+
+        store.SaveConfigThrows = Locked();
+
+        vm.EditAuthMode = AuthMode.EntraInteractive;
+        vm.SaveCommand.Execute(null);
+
+        Assert.True(vm.HasError);
+        Assert.Equal(AuthMode.SqlAuth, vm.Servers.Single().AuthMode);
+        Assert.Equal("still-needed", store.GetSqlPassword(vm.Servers.Single()));
+    }
 }
