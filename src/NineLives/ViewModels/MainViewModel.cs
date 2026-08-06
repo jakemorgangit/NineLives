@@ -52,6 +52,7 @@ public partial class MainViewModel : ViewModelBase
     public BlobBrowserViewModel BlobBrowser { get; }
     public RestoreViewModel Restore { get; }
     public HistoryViewModel History { get; }
+    public SettingsViewModel Settings { get; }
     public AboutViewModel About { get; }
 
     /// <summary>
@@ -96,7 +97,14 @@ public partial class MainViewModel : ViewModelBase
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
         History = new HistoryViewModel(_historyStore);
-        About = new AboutViewModel(_credentialStore);
+        Settings = new SettingsViewModel(_credentialStore);
+        About = new AboutViewModel();
+
+        // After the config is loaded, not at startup in App: pruning first and reading the setting
+        // afterwards would delete files the user had asked to keep, using the default of 30 to
+        // decide (#117 item 2).
+        App.Log.RetentionDays = Settings.LogRetentionDays;
+        App.Log.Prune();
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
@@ -331,10 +339,11 @@ public partial class MainViewModel : ViewModelBase
         public const string BrowseBackups = "Browse Backups";
         public const string Restore = "Restore";
         public const string History = "History";
+        public const string Settings = "Settings";
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Restore, History, About];
+            [BlobStorage, SqlServers, BrowseBackups, Restore, History, Settings, About];
     }
 
     [RelayCommand]
@@ -348,6 +357,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.BrowseBackups => BlobBrowser,
             Nav.Restore => Restore,
             Nav.History => History,
+            Nav.Settings => Settings,
             Nav.About => About,
             _ => BlobConfig
         };

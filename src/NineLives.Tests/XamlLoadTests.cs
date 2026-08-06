@@ -138,6 +138,11 @@ public class XamlLoadTests(WpfFixture wpf)
             new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(Store()), Store()) });
 
     [Fact]
+    public void SettingsViewLoads()
+        => Check("SettingsView", () =>
+            new SettingsView { DataContext = new SettingsViewModel(Store()) });
+
+    [Fact]
     public void RestoreViewLoads()
         => Check("RestoreView", () => new RestoreView { DataContext = NewRestoreViewModel() });
 

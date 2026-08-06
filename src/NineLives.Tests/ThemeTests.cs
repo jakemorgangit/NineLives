@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
@@ -340,7 +340,7 @@ public class ThemeTests(WpfFixture wpf)
         {
             wpf.Invoke(() =>
             {
-                var vm = new AboutViewModel(store) { SelectedTheme = AppTheme.HighContrast };
+                var vm = new SettingsViewModel(store) { SelectedTheme = AppTheme.HighContrast };
                 Assert.Equal(AppTheme.HighContrast, ThemeManager.Current);
             });
 
@@ -366,7 +366,7 @@ public class ThemeTests(WpfFixture wpf)
         {
             wpf.Invoke(() =>
             {
-                var vm = new AboutViewModel(store) { SelectedTheme = AppTheme.Light };
+                var vm = new SettingsViewModel(store) { SelectedTheme = AppTheme.Light };
 
                 Assert.Equal(AppTheme.Light, ThemeManager.Current);
                 Assert.True(vm.HasError);

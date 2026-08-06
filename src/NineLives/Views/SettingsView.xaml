@@ -1,0 +1,87 @@
+﻿<UserControl x:Class="Blackcat.NineLives.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+        <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+
+            <TextBlock Text="Settings" Style="{StaticResource HeaderText}" Margin="0,0,0,4" />
+            <TextBlock Text="Applies to the whole application. Anything that belongs to one container or one server is edited where that container or server is."
+                       Style="{StaticResource SecondaryText}"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,20" />
+
+            <ContentControl Style="{StaticResource ErrorBanner}" />
+
+            <!-- Appearance -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="APPEARANCE" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                    <ComboBox ItemsSource="{Binding Themes}"
+                              DisplayMemberPath="Name"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding SelectedTheme}"
+                              Style="{StaticResource DarkComboBox}"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,6"
+                              ToolTip="Dark is the default. High contrast is pure black and white with saturated status colours, for anyone who needs it." />
+                    <TextBlock Text="Applies straight away, and is remembered."
+                               Style="{StaticResource SecondaryText}"
+                               FontSize="11" />
+                </StackPanel>
+            </Border>
+
+            <!-- Updates -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="UPDATES" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                    <CheckBox IsChecked="{Binding CheckForUpdates}"
+                              Content="Check GitHub for a newer release at startup"
+                              Style="{StaticResource DarkCheckBox}"
+                              Margin="0,0,0,6" />
+                    <TextBlock Text="Turn this off for an offline install, or where outbound access to github.com is not allowed. Nothing is ever downloaded or installed automatically - the check only shows a banner."
+                               Style="{StaticResource SecondaryText}"
+                               FontSize="11"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!-- Logs -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="LOGS" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+
+                    <TextBlock Text="{Binding LogFolder}"
+                               Style="{StaticResource SecondaryText}"
+                               FontFamily="Cascadia Code, Consolas, Courier New"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8" />
+
+                    <!-- The logs are what someone attaches to a bug report, so there has to be a
+                         way to find them that is not "know where LocalAppData lives" (#40). -->
+                    <Button Content="Open log folder"
+                            Command="{Binding OpenLogFolderCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="10,6"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,16"
+                            ToolTip="{Binding LogFolder}" />
+
+                    <TextBlock Text="KEEP LOGS FOR (DAYS)" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding LogRetentionDays, UpdateSourceTrigger=LostFocus}"
+                             Style="{StaticResource DarkTextBox}"
+                             Width="100"
+                             HorizontalAlignment="Left"
+                             Margin="0,0,0,6" />
+                    <TextBlock Text="Older log files are deleted on startup, and when this is changed. A restore's own record lives here, so a change ticket that needs the evidence later needs this set high enough to keep it."
+                               Style="{StaticResource SecondaryText}"
+                               FontSize="11"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

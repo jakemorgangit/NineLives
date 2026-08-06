@@ -312,6 +312,16 @@ public class AppConfig
     public AppTheme Theme { get; set; } = AppTheme.Dark;
 
     /// <summary>
+    /// How many days of operation logs to keep. It was a hardcoded 30 with no way to change it,
+    /// which is the wrong answer in both directions: a change ticket may need the record kept for
+    /// longer, and a shared machine may want it kept for less (#117 item 2).
+    ///
+    /// Clamped where it is used rather than trusted from here - a hand-edited 0 would otherwise
+    /// delete today's log, which is the one recording the restore currently running.
+    /// </summary>
+    public int LogRetentionDays { get; set; } = OperationLog.DefaultRetentionDays;
+
+    /// <summary>
     /// Set when config.json existed but could not be read or parsed. Not persisted - it describes
     /// this load attempt, not the configuration. While it is set, this object holds empty defaults
     /// that do NOT reflect what is on disk, so <see cref="CredentialStore.SaveConfig"/> will
