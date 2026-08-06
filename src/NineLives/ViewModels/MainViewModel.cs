@@ -251,9 +251,9 @@ public partial class MainViewModel : ViewModelBase
         ConnectedServerName = e.IsConnected ? e.ServerName : "Not connected";
         Restore.IsConnectedToServer = e.IsConnected;
         Restore.ConnectedServerName = e.ServerName;
+        // Setting ConnectedServer re-checks the credential itself (#115 seam 5).
         Restore.ConnectedServer = e.ConnectedServer;
         GlobalStatus = e.IsConnected ? $"Connected to {e.ServerName}" : "Ready";
-        _ = Restore.RefreshCredentialStatusAsync();
     }
 
     [RelayCommand]

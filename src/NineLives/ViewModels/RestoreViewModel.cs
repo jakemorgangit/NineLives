@@ -42,11 +42,10 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly OperationCancellation _queryCancellation = new();
 
     /// <summary>
-    /// The background credential check. Separate because it is not user-initiated and has no
-    /// button - and because it races itself: two overlapping checks would leave the panel showing
-    /// the result for whichever finished last, which could be the container the user just left.
+    /// The server-side credential the restore authenticates with: what is on the instance, what to
+    /// say about it, and what Execute should do before it runs (#115 seam 5).
     /// </summary>
-    private readonly OperationCancellation _credentialCheckCancellation = new();
+    public ServerCredentialViewModel Credential { get; }
 
     #region Observable Properties
 
@@ -277,7 +276,25 @@ public partial class RestoreViewModel : ViewModelBase
 
     public bool ShowMoveOptions => UseWithMove;
 
-    public ServerConnection? ConnectedServer { get; set; }
+    private ServerConnection? _connectedServer;
+
+    /// <summary>
+    /// The instance every server call on this screen runs against.
+    ///
+    /// Setting it re-checks the credential, rather than leaving the caller to remember: forgetting
+    /// left the panel describing the credential on the server someone had just disconnected from,
+    /// and that panel is what they read before deciding whether to create one (#115 seam 5).
+    /// </summary>
+    public ServerConnection? ConnectedServer
+    {
+        get => _connectedServer;
+        set
+        {
+            _connectedServer = value;
+            Credential.Server = value;
+            _ = Credential.RefreshAsync();
+        }
+    }
 
     /// <summary>
     /// Tags of the connected server, shown on the execute confirmation. Chips rather than plain
@@ -316,61 +333,15 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _restoreSummaryText = string.Empty;
 
-    [ObservableProperty]
-    private string _sqlCredentialName = string.Empty;
-
-    // Blob credential status on connected server (credential must exist for RESTORE FROM URL)
-    [ObservableProperty]
-    private bool? _credentialExistsOnServer; // null = not checked
-
-    // What the credential of that name actually authenticates as. The three views below are
-    // derived rather than stored: they used to be one bool that conflated "not a SAS credential"
-    // with "unusable", which is how a managed identity came to be treated as damage (#145).
-    [ObservableProperty]
-    private BlobCredentialIdentity _credentialIdentityKind = BlobCredentialIdentity.Missing;
-
-    /// <summary>A restore can authenticate with what is on the server as it stands.</summary>
-    public bool CredentialIsUsable =>
-        CredentialIdentityKind is BlobCredentialIdentity.SharedAccessSignature
-            or BlobCredentialIdentity.ManagedIdentity;
-
-    /// <summary>The credential holds a SAS, so the stored token is the thing that can go stale.</summary>
-    public bool CredentialIsSharedAccessSignature =>
-        CredentialIdentityKind == BlobCredentialIdentity.SharedAccessSignature;
-
-    /// <summary>The instance authenticates to storage as itself, and this app must not touch it.</summary>
-    public bool CredentialIsManagedIdentity =>
-        CredentialIdentityKind == BlobCredentialIdentity.ManagedIdentity;
-
-    partial void OnCredentialIdentityKindChanged(BlobCredentialIdentity value)
-    {
-        OnPropertyChanged(nameof(CredentialIsUsable));
-        OnPropertyChanged(nameof(CredentialIsSharedAccessSignature));
-        OnPropertyChanged(nameof(CredentialIsManagedIdentity));
-    }
-
-    [ObservableProperty]
-    private string _credentialStatusMessage = string.Empty;
-
-    [ObservableProperty]
-    private bool _isCheckingCredential;
-
-    [ObservableProperty]
-    private bool _credentialSectionVisible;
-
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
     {
-        if (value != null)
-            SqlCredentialName = value.ContainerUrl;
-        CredentialSectionVisible = value != null;
-
         // Everything on screen below this point came from the PREVIOUS container. Leaving it there
         // meant the credential panel and Create credential targeted the new container while the
         // script still restored from the old one's URLs - so Execute stayed armed and enabled, and
         // failed with Msg 3201 after WITH REPLACE had already dropped the target.
         ClearLoadedBackups();
 
-        _ = RefreshCredentialStatusAsync();
+        _ = Credential.PointAtAsync(value);
     }
 
     /// <summary>
@@ -400,77 +371,6 @@ public partial class RestoreViewModel : ViewModelBase
         ExecuteButtonText = "Execute on Server";
         _armTimeoutCts?.Cancel();
     }
-
-    /// <summary>Call when ConnectedServer or SelectedContainer changes so credential status is updated.</summary>
-    public async Task RefreshCredentialStatusAsync()
-    {
-        CredentialSectionVisible = SelectedContainer != null;
-        if (ConnectedServer == null || SelectedContainer == null)
-        {
-            CredentialExistsOnServer = null;
-            CredentialStatusMessage = string.Empty;
-            CredentialIdentityKind = BlobCredentialIdentity.Missing;
-            return;
-        }
-
-        // Cancels any check already in flight. Two overlapping checks left the panel showing the
-        // result of whichever finished LAST, which could be the container the user had just left -
-        // and that panel is what someone reads before deciding whether to create a credential.
-        var ct = _credentialCheckCancellation.Begin();
-
-        IsCheckingCredential = true;
-        CredentialStatusMessage = "Checking...";
-        var server = ConnectedServer;
-        try
-        {
-            var credential = await _sqlService.CredentialExistsAsync(server, SqlCredentialName, ct);
-            CredentialExistsOnServer = credential.Exists;
-            CredentialIdentityKind = credential.Kind;
-            CredentialStatusMessage = DescribeCredential(credential);
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a newer check - which is about to write its own answer here. Saying
-            // anything would just be the older check having the last word again.
-            return;
-        }
-        catch (Exception ex)
-        {
-            CredentialExistsOnServer = null;
-            CredentialIdentityKind = BlobCredentialIdentity.Missing;
-            CredentialStatusMessage = $"Could not check credential: {ex.Message}";
-        }
-        finally
-        {
-            // Only when this check is still the current one. Ending the newer check's source, or
-            // clearing its "Checking..." state, is how the previous version left the panel
-            // reporting the container the user had already moved away from.
-            if (!ct.IsCancellationRequested)
-            {
-                _credentialCheckCancellation.End();
-                IsCheckingCredential = false;
-                CreateCredentialOnServerCommand.NotifyCanExecuteChanged();
-            }
-        }
-    }
-
-    /// <summary>
-    /// The panel's one line about what is on the server. An unusable credential is named rather
-    /// than just rejected: "not a SAS credential" was the same sentence for a managed identity
-    /// that would have restored perfectly well and for a Windows account that never could (#145).
-    /// </summary>
-    internal static string DescribeCredential(BlobCredentialStatus credential) => credential.Kind switch
-    {
-        BlobCredentialIdentity.SharedAccessSignature =>
-            "Credential is present and valid (SHARED ACCESS SIGNATURE).",
-        BlobCredentialIdentity.ManagedIdentity =>
-            "Credential is present and valid (Managed Identity). The restore authenticates as the " +
-            "instance's own identity, so no SAS token is involved and this app will not modify it.",
-        BlobCredentialIdentity.Other =>
-            $"Credential exists with identity '{credential.Identity}', which a restore from URL " +
-            "cannot use. Replace it below, or point at a different credential.",
-        _ => "Credential is not present on this server. Restore will fail unless you create it."
-    };
 
     [ObservableProperty]
     private ObservableCollection<FileMoveOption> _fileMoves = [];
@@ -581,6 +481,14 @@ public partial class RestoreViewModel : ViewModelBase
         // Every console message is written to the log file as it arrives, so the file cannot drift
         // from what was on screen.
         Console = new ConsoleBuffer(message => _log.Info($"[execute] {message.Trim()}"));
+
+        // Shares _queryCancellation so the Stop button stops a credential write too (#111), and
+        // reports through the same status line as everything else on this screen (#115 seam 5).
+        Credential = new ServerCredentialViewModel(sqlService, credentialStore, _log, _queryCancellation);
+        Credential.Reported += (message, isError) =>
+        {
+            if (isError) SetError(message); else SetStatus(message);
+        };
 
         // IsBusy and TargetDatabaseName live on the base class, so they cannot have a generated
         // partial hook - but the busy strip is computed from them.
@@ -1458,55 +1366,6 @@ public partial class RestoreViewModel : ViewModelBase
         HasScript = true;
     }
 
-    /// <summary>Create or update the blob credential on the connected server (optional; not included in generated script).</summary>
-    [RelayCommand(CanExecute = nameof(CanCreateCredential))]
-    private async Task CreateCredentialOnServerAsync()
-    {
-        if (ConnectedServer == null || SelectedContainer == null) return;
-
-        var sasToken = _credentialStore.GetSasToken(SelectedContainer);
-        if (string.IsNullOrEmpty(sasToken))
-        {
-            SetError("No SAS token stored for this container. Add or refresh the token in Blob Storage config.");
-            return;
-        }
-
-        // What is about to be overwritten, read before the write. This is the only route by which
-        // a managed identity gets replaced by a SAS token, and it should say so afterwards rather
-        // than reporting a routine "updated" for a change to how the instance authenticates (#145).
-        var replaced = CredentialIdentityKind;
-
-        try
-        {
-            var change = await _sqlService.EnsureCredentialExistsAsync(
-                ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken,
-                _queryCancellation.Begin());
-            await RefreshCredentialStatusAsync();
-            SetStatus(change switch
-            {
-                CredentialChange.Created => "Credential created on server.",
-                _ when replaced == BlobCredentialIdentity.ManagedIdentity =>
-                    "Credential replaced on server: it authenticated as the instance's managed " +
-                    "identity and now holds the stored SAS token.",
-                _ => "Credential updated on server with the stored SAS token."
-            });
-            if (replaced == BlobCredentialIdentity.ManagedIdentity)
-                _log.ServerChange(ConnectedServer.ServerName,
-                    $"credential [{SqlCredentialName}] identity changed from Managed Identity to SAS");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to create credential: {ex.Message}");
-        }
-    }
-
-    // Deliberately available even when the credential is present and valid. SQL Server will not
-    // hand back a credential's secret, so "present and SAS" says nothing about whether the token
-    // inside it still works - a SAS that was rotated or has expired looks identical from here.
-    // Since Execute no longer rewrites the credential on every run, this button is the only way
-    // to push a fresh token, and hiding it left users with no route at all.
-    private bool CanCreateCredential() => IsConnectedToServer && SelectedContainer != null;
-
     [RelayCommand]
     private void CopyScript()
         => TryCopyToClipboard(GeneratedScript, "Script copied to clipboard.");
@@ -1774,75 +1633,15 @@ public partial class RestoreViewModel : ViewModelBase
                 return;
             }
 
-            if (SelectedContainer != null)
+            // Everything about the server-side credential lives on the child (#115 seam 5),
+            // including the decision not to touch one. A refusal has written nothing, so there is
+            // nothing to unwind - and nothing to file in the history either.
+            var preflight = await Credential.PrepareForRestoreAsync(server, AppendLog);
+            if (!preflight.CanProceed)
             {
-                var sasToken = _credentialStore.GetSasToken(SelectedContainer);
-                if (!string.IsNullOrEmpty(sasToken))
-                {
-                    // Only write to the server when the credential is genuinely missing or is not
-                    // a SAS credential. This used to drop and recreate on every single execute,
-                    // regardless of the status the panel above was displaying, which contradicted
-                    // the UI's own "creating it is optional" wording and briefly removed a
-                    // credential that other sessions may have been using.
-                    //
-                    // A credential that exists and is SAS is left alone. Its secret could still be
-                    // a rotated SAS that no longer works - that is unknowable from here, since the
-                    // secret cannot be read back - so the fix for that case is the explicit
-                    // refresh button, not silently rewriting server state on every run.
-                    //
-                    // A managed identity is left alone for a stronger reason: it restores perfectly
-                    // well, this app cannot create one, and ALTER would reset the identity. Reading
-                    // "not SAS" as "broken" is what silently converted somebody's working managed
-                    // identity into a SAS token here, taking every other job on that container with
-                    // it, under the log line "Credential updated on the server" (#145).
-                    var credential = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
-                    if (credential.CanRestoreFromUrl)
-                    {
-                        AppendLog(credential.Kind == BlobCredentialIdentity.ManagedIdentity
-                            ? $"Using the existing SQL credential [{SqlCredentialName}] (Managed Identity). Server state not modified."
-                            : $"Using the existing SQL credential [{SqlCredentialName}]. Server state not modified.");
-                    }
-                    else if (credential.Exists)
-                    {
-                        // Neither usable nor ours to reinterpret. Converting it is a real option -
-                        // it is what the button on the panel does - but it must be a decision
-                        // somebody made, not a side effect of pressing Execute. Stopping here costs
-                        // a restore that was about to fail on blob access anyway.
-                        attempted = false;
-                        var message =
-                            $"Credential [{SqlCredentialName}] exists with identity " +
-                            $"'{credential.Identity}', which a restore from URL cannot use. Left " +
-                            "untouched: replacing it with the stored SAS token is what " +
-                            "\"Create credential on server\" does, so that it is a deliberate change.";
-                        AppendLog(message);
-                        SetError(message);
-                        return;
-                    }
-                    else
-                    {
-                        AppendLog($"Credential [{SqlCredentialName}] is missing - creating it...");
-
-                        // This statement carries the SAS token to the server. It is the one moment
-                        // in a restore where a secret crosses the wire, so if the connection is
-                        // encrypted but unverified, say so here rather than only in settings (#17).
-                        if (server.TrustServerCertificate)
-                            AppendLog(
-                                "  Note: this connection trusts the server certificate without validating it, " +
-                                "and the SAS token is sent over it.");
-
-                        var change = await _sqlService.EnsureCredentialExistsAsync(
-                            server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
-
-                        AppendLog(change == CredentialChange.Created
-                            ? "Credential created on the server."
-                            : "Credential updated on the server.");
-
-                        // Changing a credential is a change to shared state on someone's instance.
-                        // It belongs in the file, not only in a console that closes with the app.
-                        _log.ServerChange(server.ServerName,
-                            $"credential [{SqlCredentialName}] {change.ToString().ToLowerInvariant()}");
-                    }
-                }
+                attempted = false;
+                SetError(preflight.Refusal!);
+                return;
             }
 
             _log.ServerChange(server.ServerName,

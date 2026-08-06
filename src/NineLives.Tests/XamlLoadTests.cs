@@ -258,17 +258,17 @@ public class XamlLoadTests(WpfFixture wpf)
                 ContainerUrl = "https://acct.blob.core.windows.net/backups"
             };
             vm.IsConnectedToServer = true;
-            vm.CredentialSectionVisible = true;
+            vm.Credential.SectionVisible = true;
 
             var view = new RestoreView { DataContext = vm };
 
-            vm.CredentialExistsOnServer = false;
-            vm.CredentialIdentityKind = BlobCredentialIdentity.Missing;
+            vm.Credential.ExistsOnServer = false;
+            vm.Credential.IdentityKind = BlobCredentialIdentity.Missing;
             Realise(view);
             Assert.Contains(FindAll<Button>(view), b => (b.Content as string) == "Create credential on server");
 
-            vm.CredentialExistsOnServer = true;
-            vm.CredentialIdentityKind = BlobCredentialIdentity.SharedAccessSignature;
+            vm.Credential.ExistsOnServer = true;
+            vm.Credential.IdentityKind = BlobCredentialIdentity.SharedAccessSignature;
             Realise(view);
             Assert.Contains(FindAll<Button>(view),
                 b => (b.Content as string) == "Refresh credential with stored SAS token");
@@ -293,14 +293,17 @@ public class XamlLoadTests(WpfFixture wpf)
                 ContainerUrl = "https://acct.blob.core.windows.net/backups"
             };
             vm.IsConnectedToServer = true;
-            vm.CredentialSectionVisible = true;
+            vm.Credential.SectionVisible = true;
 
             var view = new RestoreView { DataContext = vm };
 
-            vm.CredentialExistsOnServer = true;
-            vm.CredentialIdentityKind = BlobCredentialIdentity.ManagedIdentity;
+            vm.Credential.ExistsOnServer = true;
+            vm.Credential.IdentityKind = BlobCredentialIdentity.ManagedIdentity;
             Realise(view);
 
+            // Present, not shown: the panel lives inside a section that needs a loaded backup
+            // set, which this fixture deliberately does not stand up. That the panel's own
+            // visibility binding resolves at all is covered by RestoreViewLoads.
             Assert.Contains(FindAll<Button>(view),
                 b => (b.Content as string) == "Replace Managed Identity with stored SAS token");
         });

@@ -237,9 +237,15 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Lets a test hold a credential check open, or fail one. Without it the check completes
+    /// synchronously, so the sequencing between two overlapping checks cannot be reached.
+    /// </summary>
+    public Func<string, CancellationToken, Task<BlobCredentialStatus>>? OnCredentialCheck { get; set; }
+
     public Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default)
-        => Task.FromResult(Credential);
+        => OnCredentialCheck?.Invoke(credentialName, ct) ?? Task.FromResult(Credential);
 
     public Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
