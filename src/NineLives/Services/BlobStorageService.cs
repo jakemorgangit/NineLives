@@ -99,8 +99,13 @@ public class BlobStorageService : IBlobStorageService
 
         try
         {
-            var token = await CredentialFor(config.AuthMode).GetTokenAsync(
-                new TokenRequestContext([StorageScope]), ct);
+            // Off the UI thread for the same reason as the operations themselves (#152). Usually a
+            // cache read by the time this runs - it only happens after a failure - but "usually" is
+            // not a reason to block the window on a credential that might decide to prompt.
+            var token = await Task.Run(
+                () => CredentialFor(config.AuthMode)
+                    .GetTokenAsync(new TokenRequestContext([StorageScope]), ct).AsTask(),
+                ct);
 
             return EntraIdentity.Describe(token.Token);
         }
