@@ -681,7 +681,22 @@ public partial class BlobConfigViewModel : ViewModelBase
         BlobContainerConfig? config;
         if (IsEditing)
         {
-            if (HasStoredSasToken && string.IsNullOrWhiteSpace(EditSasToken))
+            if (IsEntraAuth)
+            {
+                // Nothing stored to fall back on, and nothing needed - the token comes from the
+                // signed-in account. Built from the form, so what is tested is the URL on screen.
+                //
+                // Carrying the mode is the whole point: without it this fell through to the SAS
+                // branch below and refused with "No SAS token found" for a container that is never
+                // going to have one (#29).
+                config = new BlobContainerConfig
+                {
+                    Name = EditName,
+                    ContainerUrl = EditContainerUrl,
+                    AuthMode = EditAuthMode
+                };
+            }
+            else if (HasStoredSasToken && string.IsNullOrWhiteSpace(EditSasToken))
                 config = SelectedContainer; // Use stored token for test
             else
             {

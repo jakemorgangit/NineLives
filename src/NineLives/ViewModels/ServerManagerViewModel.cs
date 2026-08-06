@@ -42,8 +42,6 @@ public partial class ServerManagerViewModel : ViewModelBase
     /// </summary>
     public bool ShowsUsername => EditAuthMode.AcceptsUsername();
 
-    public bool IsEntraAuth => EditAuthMode.IsEntra();
-
     public string UsernameLabel => EditAuthMode == AuthMode.EntraInteractive
         ? "USERNAME (OPTIONAL - PRE-SELECTS THE ACCOUNT)"
         : "USERNAME";
@@ -52,7 +50,6 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(IsSqlAuth));
         OnPropertyChanged(nameof(ShowsUsername));
-        OnPropertyChanged(nameof(IsEntraAuth));
         OnPropertyChanged(nameof(UsernameLabel));
     }
 

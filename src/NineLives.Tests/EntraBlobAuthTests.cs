@@ -234,6 +234,81 @@ public class EntraBlobAuthTests
         Assert.True(vm.HasUnsavedChanges);
     }
 
+    // ── Test Connection ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The regression. Test Connection builds its own config from the form rather than using the
+    /// saved one, and it was not carrying the authentication mode - so an Entra container fell
+    /// through to the SAS path and was refused with "No SAS token found. Please configure the SAS
+    /// token for this container" for a container that is never going to have one.
+    ///
+    /// The Save path had tests. This one did not, and it is the button people press first.
+    /// </summary>
+    [Theory]
+    [InlineData(BlobAuthMode.EntraInteractive)]
+    [InlineData(BlobAuthMode.EntraDefault)]
+    public async Task TestingANewEntraContainerUsesEntraRatherThanLookingForASasToken(BlobAuthMode mode)
+    {
+        var blob = new FakeBlobStorageService();
+        var vm = new BlobConfigViewModel(new FakeCredentialStore(), blob);
+
+        vm.AddNewCommand.Execute(null);
+        vm.EditName = "backups";
+        vm.EditContainerUrl = "https://mystorageaccount.blob.core.windows.net/backups";
+        vm.EditAuthMode = mode;
+
+        await vm.TestConnectionCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasError, vm.ErrorMessage);
+        Assert.NotNull(blob.LastConfig);
+        Assert.Equal(mode, blob.LastConfig.AuthMode);
+        Assert.Equal("https://mystorageaccount.blob.core.windows.net/backups", blob.LastConfig.ContainerUrl);
+    }
+
+    /// <summary>
+    /// And switching an existing SAS container to Entra tests as Entra, before it is saved -
+    /// otherwise Test Connection answers for the mode the container used to be in.
+    /// </summary>
+    [Fact]
+    public async Task TestingAfterSwitchingAnExistingContainerUsesTheNewMode()
+    {
+        var store = new FakeCredentialStore();
+        var existing = Container(BlobAuthMode.SasToken);
+        store.Config.BlobContainers.Add(existing);
+        store.SaveSasToken(existing, "sv=2024-01-01&sig=old");
+
+        var blob = new FakeBlobStorageService();
+        var vm = new BlobConfigViewModel(store, blob);
+        vm.SelectedContainer = vm.Containers.Single();
+        vm.EditCommand.Execute(null);
+
+        vm.EditAuthMode = BlobAuthMode.EntraInteractive;
+        await vm.TestConnectionCommand.ExecuteAsync(null);
+
+        Assert.Equal(BlobAuthMode.EntraInteractive, blob.LastConfig!.AuthMode);
+    }
+
+    /// <summary>
+    /// A SAS container still tests with the token being typed, unsaved - the #12 behaviour, which
+    /// the Entra branch must not have disturbed.
+    /// </summary>
+    [Fact]
+    public async Task TestingASasContainerStillUsesTheUnsavedToken()
+    {
+        var blob = new FakeBlobStorageService();
+        var vm = new BlobConfigViewModel(new FakeCredentialStore(), blob);
+
+        vm.AddNewCommand.Execute(null);
+        vm.EditName = "backups";
+        vm.EditContainerUrl = "https://mystorageaccount.blob.core.windows.net/backups";
+        vm.EditSasToken = "sv=2024-01-01&sig=being-typed";
+
+        await vm.TestConnectionCommand.ExecuteAsync(null);
+
+        Assert.Equal(BlobAuthMode.SasToken, blob.LastConfig!.AuthMode);
+        Assert.Equal("sv=2024-01-01&sig=being-typed", blob.LastConfig.UnsavedSasToken);
+    }
+
     /// <summary>
     /// The stored values are what config.json holds. Reordering would silently repoint every saved
     /// container at a different authentication mode, and a container written before this existed

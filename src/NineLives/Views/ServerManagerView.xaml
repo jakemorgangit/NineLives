@@ -303,18 +303,6 @@
                                              ToolTip="Lets the driver choose: environment, then managed identity, then the signed-in account, then a prompt. The one to pick for SQL Server on an Azure VM." />
                             </StackPanel>
 
-                            <!-- Untested against a real tenant - see the note in the README. Said
-                                 here rather than only in the docs, because the person who finds out
-                                 is the one standing in front of this screen. -->
-                            <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
-                                    BorderBrush="{DynamicResource WarningPanelBorderBrush}"
-                                    BorderThickness="1" CornerRadius="4" Padding="10"
-                                    Margin="0,0,0,16"
-                                    Visibility="{Binding IsEntraAuth, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap"
-                                           Text="Entra sign-in is built but has not been tested against a real tenant - there is no Entra-enabled instance to develop it against. The connection string is what Microsoft documents, and Test Connection will tell you honestly whether it works. Please report what happens either way." />
-                            </Border>
-
                             <!-- Username: required for SQL auth, an optional account hint for
                                  interactive Entra. Password: SQL auth only - the Entra modes have
                                  no secret for the app to hold, which is the point of using them. -->
