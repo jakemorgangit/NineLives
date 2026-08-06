@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Converters;
 
@@ -314,6 +315,29 @@ public class BackupSourceTypeToDisplayConverter : IValueConverter
             _ => value?.ToString() ?? ""
         };
     }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>How a container's authentication mode reads on the detail panel (#29).</summary>
+public class BlobAuthModeToDisplayConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is BlobAuthMode mode ? mode.Describe() : string.Empty;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Shows the SAS-only parts of the detail panel. An expiry line against an Entra container would
+/// send someone hunting for a token that does not exist.
+/// </summary>
+public class BlobAuthModeIsSasConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is BlobAuthMode mode && mode.NeedsSasToken() ? Visibility.Visible : Visibility.Collapsed;
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => throw new NotSupportedException();
