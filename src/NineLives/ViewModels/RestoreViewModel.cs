@@ -1380,16 +1380,16 @@ public partial class RestoreViewModel : ViewModelBase
             ChainLsnVerified = true;
 
             SetStatus(HasChainIssues
-                ? $"Chain validation found problems - see the panel above."
-                : $"Chain validated: {headers.Count} backup(s) read, LSN chain is intact.");
+                ? $"Chain check found problems - see the panel above."
+                : $"Chain checked: {headers.Count} header(s) read, the LSN chain is unbroken.");
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Chain validation cancelled.");
+            SetStatus("Chain check cancelled.");
         }
         catch (Exception ex)
         {
-            SetError($"Chain validation failed: {ex.Message}");
+            SetError($"Chain check failed: {ex.Message}");
         }
         finally
         {
@@ -1863,7 +1863,7 @@ public partial class RestoreViewModel : ViewModelBase
 
             FetchedFileMoves = new ObservableCollection<FileMoveOption>(list);
             HasFetchedFileMoves = FetchedFileMoves.Count > 0;
-            SetStatus($"RESTORE FILELISTONLY: {FetchedFileMoves.Count} logical file(s). Edit paths above and use WITH MOVE for correct restore.");
+            SetStatus($"Read {FetchedFileMoves.Count} logical file name(s) from the backup. Edit the target paths above, and tick WITH MOVE to use them.");
         }
         catch (Exception ex)
         {
@@ -1915,7 +1915,7 @@ public partial class RestoreViewModel : ViewModelBase
             sb.AppendLine($"Last LSN: {header.LastLsn?.ToString() ?? "(null)"}");
             sb.AppendLine($"Database backup LSN: {header.DatabaseBackupLsn?.ToString() ?? "(null)"}");
             BackupMetadataSummary = sb.ToString();
-            SetStatus("RESTORE HEADERONLY completed. See metadata summary below.");
+            SetStatus("Header read. See the metadata below.");
         }
         catch (Exception ex)
         {

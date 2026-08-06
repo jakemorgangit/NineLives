@@ -496,28 +496,32 @@
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         </TextBlock>
 
-                        <!-- On-demand LSN verification: one RESTORE HEADERONLY per chain member,
-                             so it is a deliberate action rather than automatic on selection. -->
+                        <!-- On-demand: one RESTORE HEADERONLY per chain member, so it is a
+                             deliberate action rather than automatic on selection.
+
+                             Named for the question it answers rather than for the word "validate".
+                             Two of the buttons on this screen used to say "verify" and mean
+                             different things, and a third said it while verifying nothing. -->
                         <Button Grid.Column="1"
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ValidateChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
-                                ToolTip="Read each backup's header and verify the LSN chain is unbroken. Requires a connected server.">
+                                ToolTip="Do these backups belong together? Reads each backup's header and compares the LSNs. Takes seconds. Requires a connected server.">
                             <Button.Content>
                                 <TextBlock>
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="Validate Chain" />
+                                            <Setter Property="Text" Value="Check chain (HEADERONLY)" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsValidatingChain}" Value="True">
-                                                    <Setter Property="Text" Value="Validating..." />
+                                                    <Setter Property="Text" Value="Checking..." />
                                                 </DataTrigger>
                                                 <MultiDataTrigger>
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding ChainLsnVerified}" Value="True" />
                                                         <Condition Binding="{Binding HasChainIssues}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Text" Value="Chain Verified" />
+                                                    <Setter Property="Text" Value="Chain checked" />
                                                 </MultiDataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -526,19 +530,20 @@
                             </Button.Content>
                         </Button>
 
-                        <!-- A different question from Validate Chain: that one reads headers and
+                        <!-- A different question from Check chain: that one reads headers and
                              checks the LSNs line up, this one reads each backup end to end and
-                             checks it is intact. A truncated blob passes the first and fails this. -->
+                             checks it is intact. A truncated blob passes the first and fails this.
+                             It is also the only one here that costs real time. -->
                         <Button Grid.Column="2"
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding VerifyChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
-                                ToolTip="Run RESTORE VERIFYONLY over every backup in the chain to check each one reads back intact, before committing to the restore. Requires a connected server.">
+                                ToolTip="Is each backup actually readable? Runs RESTORE VERIFYONLY over every backup in the chain, reading every byte - this can take as long as the restore itself. Requires a connected server.">
                             <Button.Content>
                                 <TextBlock>
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="Verify Backups" />
+                                            <Setter Property="Text" Value="Verify backups (VERIFYONLY)" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsVerifyingChain}" Value="True">
                                                     <Setter Property="Text" Value="Verifying..." />
@@ -549,7 +554,7 @@
                                                         <Condition Binding="{Binding HasVerifyFailures}" Value="False" />
                                                         <Condition Binding="{Binding IsVerifyingChain}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Text" Value="Backups Verified" />
+                                                    <Setter Property="Text" Value="Backups verified" />
                                                 </MultiDataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -590,6 +595,20 @@
                             </Button.Content>
                         </Button>
                     </Grid>
+
+                    <!-- The pair above are the genuinely subtle one: both act on the whole chain
+                         and both sound like the same thing. The difference that matters when you
+                         are deciding whether to press one is how long it takes. -->
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               FontSize="11" TextWrapping="Wrap"
+                               Margin="0,6,0,0"
+                               Visibility="{Binding HasValidChain, Converter={StaticResource BoolToVis}}">
+                        <Run Text="Check chain" FontWeight="SemiBold" />
+                        <Run Text="reads each header and compares the LSNs - do these backups belong together? Seconds." />
+                        <LineBreak />
+                        <Run Text="Verify backups" FontWeight="SemiBold" />
+                        <Run Text="reads every byte of every backup - is each one actually readable? Can take as long as the restore." />
+                    </TextBlock>
 
                     <!-- Per-set VERIFYONLY results. Green while everything reads back, red the
                          moment one does not - a failed member here means the chain cannot restore,
@@ -883,34 +902,39 @@
                                 <TextBlock Style="{StaticResource SecondaryText}"
                                            FontSize="10" TextWrapping="Wrap"
                                            Margin="0,0,0,4"
-                                           Text="Logical file names are inferred by default. Use Verify backup to get actual names from the backup (RESTORE FILELISTONLY) for correct WITH MOVE." />
+                                           Text="Logical file names are guessed from the database name by default, which is wrong for a database that has been renamed or has secondary files. Get file names reads the real ones out of the backup." />
 
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
-                                    <Button Content="Verify backup (FILELISTONLY)"
+                                <!-- Wraps rather than clips. Four buttons on one line runs off the
+                                     edge of the panel at anything less than a wide window, and a
+                                     StackPanel does not wrap - it just hides the last one. -->
+                                <WrapPanel Orientation="Horizontal" Margin="0,8,0,8">
+                                    <!-- Was "Verify backup (FILELISTONLY)", which verified nothing:
+                                         it reads the logical file names so WITH MOVE can name them
+                                         correctly instead of guessing. Opening the backup to list
+                                         them does incidentally prove the credential works, which is
+                                         probably where the old name came from. -->
+                                    <Button Content="Get file names (FILELISTONLY)"
                                             Style="{StaticResource SecondaryButton}"
                                             Command="{Binding FetchLogicalNamesCommand}"
-                                            Padding="8,4" FontSize="11"
-                                            ToolTip="Run RESTORE FILELISTONLY on the full backup to get logical file names for WITH MOVE."
-                                            Margin="0,0,8,0" />
+                                            Padding="8,4" FontSize="11" Margin="0,0,8,6"
+                                            ToolTip="Reads the logical file names out of the full backup, so WITH MOVE can name them correctly rather than guessing from the database name. Reads this one backup, not the chain." />
                                     <Button Content="Copy FILELISTONLY command"
                                             Style="{StaticResource SecondaryButton}"
                                             Command="{Binding CopyFileListOnlyCommandCommand}"
-                                            Padding="8,4" FontSize="11"
-                                            ToolTip="Copy the RESTORE FILELISTONLY T-SQL to clipboard to run in SSMS (e.g. when you get error 13)."
-                                            Margin="0,0,8,0" />
-                                    <Button Content="View metadata (HEADERONLY)"
+                                            Padding="8,4" FontSize="11" Margin="0,0,8,6"
+                                            ToolTip="Copy the RESTORE FILELISTONLY T-SQL to clipboard to run in SSMS (e.g. when you get error 13)." />
+                                    <Button Content="Read header (HEADERONLY)"
                                             Style="{StaticResource SecondaryButton}"
                                             Command="{Binding InspectBackupMetadataCommand}"
-                                            Padding="8,4" FontSize="11"
-                                            ToolTip="Run RESTORE HEADERONLY to inspect backup set metadata."
-                                            Margin="0,0,8,0" />
+                                            Padding="8,4" FontSize="11" Margin="0,0,8,6"
+                                            ToolTip="Shows what the full backup says about itself - database, type, when it was taken, LSNs. Reads this one backup, not the chain." />
                                     <Button Content="Copy HEADERONLY command"
                                             Style="{StaticResource SecondaryButton}"
                                             Command="{Binding CopyHeaderOnlyCommandCommand}"
-                                            Padding="8,4" FontSize="11"
+                                            Padding="8,4" FontSize="11" Margin="0,0,8,6"
                                             ToolTip="Copy the RESTORE HEADERONLY T-SQL to clipboard to run in SSMS (e.g. when you get error 13)."
-                                            Margin="0,0,8,0" />
-                                </StackPanel>
+                                            />
+                                </WrapPanel>
 
                                 <Border Visibility="{Binding HasFetchedFileMoves, Converter={StaticResource BoolToVis}}"
                                         Background="{DynamicResource InputBackgroundBrush}"
