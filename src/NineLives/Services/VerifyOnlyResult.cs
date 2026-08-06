@@ -11,7 +11,12 @@ namespace Blackcat.NineLives.Services;
 /// Kept verbatim - a DBA reading "The backup set on file 1 is valid." or "Cannot open backup
 /// device" knows exactly what happened, and a paraphrase would only lose detail.
 /// </param>
-public sealed record VerifyOnlyResult(bool IsValid, string Message);
+/// <param name="TargetPathsMissing">
+/// True when SQL Server said it could not find the directories a restore would write to. This
+/// arrives alongside "the backup set is valid", so a chain can be perfectly readable and still be
+/// certain to fail on restore (#129).
+/// </param>
+public sealed record VerifyOnlyResult(bool IsValid, string Message, bool TargetPathsMissing = false);
 
 /// <summary>
 /// One member of a restore chain paired with its verification result, for display.

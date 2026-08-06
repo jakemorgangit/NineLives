@@ -621,6 +621,12 @@
                                 <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
                                 <Setter Property="BorderThickness" Value="1" />
                                 <Style.Triggers>
+                                    <!-- Amber, not green: every backup read back, but the restore
+                                         will still fail because it has nowhere to write. -->
+                                    <DataTrigger Binding="{Binding HasTargetPathProblem}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource WarningPanelBorderBrush}" />
+                                    </DataTrigger>
                                     <DataTrigger Binding="{Binding HasVerifyFailures}" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource DangerPanelBackgroundBrush}" />
                                         <Setter Property="BorderBrush" Value="{DynamicResource DangerPanelBorderBrush}" />
@@ -630,6 +636,25 @@
                         </Border.Style>
                         <StackPanel>
                             <TextBlock Text="RESTORE VERIFYONLY" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+
+                            <!-- SQL Server reports this as an informational line next to "the
+                                 backup set is valid", which is four lines of grey text under a
+                                 green tick. Said properly here instead (#129). -->
+                            <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                    BorderThickness="1" CornerRadius="4"
+                                    Padding="10" Margin="0,0,0,10"
+                                    Visibility="{Binding HasTargetPathProblem, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="The restore will fail as it stands"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               Margin="0,0,0,4" />
+                                    <TextBlock Text="{Binding TargetPathProblemMessage}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
                             <ItemsControl ItemsSource="{Binding ChainVerifyResults}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>

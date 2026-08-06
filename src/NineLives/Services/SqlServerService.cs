@@ -318,10 +318,17 @@ public class SqlServerService : ISqlServerService
     /// Adds WITH CHECKSUM. Left off, SQL Server applies its own default; a backup taken without
     /// checksums FAILS this rather than skipping the check, so it is the caller's choice.
     /// </param>
+    /// <param name="fileMoves">
+    /// The same MOVE clauses the restore will use. VERIFYONLY checks whether a restore could
+    /// proceed, which includes looking for the file paths it would write to - so without these it
+    /// checks the paths recorded INSIDE the backup, which belong to the source server. Confirmed
+    /// against SQL Server 2025: passing MOVE makes it check the move targets instead.
+    /// </param>
     public async Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
         ServerConnection server,
         IReadOnlyList<string> blobUrls,
         bool withChecksum = false,
+        IReadOnlyList<FileMoveOption>? fileMoves = null,
         CancellationToken ct = default)
     {
         if (blobUrls.Count == 0)
@@ -339,7 +346,7 @@ public class SqlServerService : ISqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;
 
-        cmd.CommandText = BuildVerifyOnlyStatement(blobUrls, withChecksum);
+        cmd.CommandText = BuildVerifyOnlyStatement(blobUrls, withChecksum, fileMoves);
 
         try
         {
@@ -356,11 +363,11 @@ public class SqlServerService : ISqlServerService
             return new VerifyOnlyResult(false, ex.Message);
         }
 
-        return new VerifyOnlyResult(
-            true,
-            messages.Count > 0
-                ? string.Join(" ", messages.Select(m => m.Trim()))
-                : "The backup set is valid.");
+        var report = messages.Count > 0
+            ? string.Join(" ", messages.Select(m => m.Trim()))
+            : "The backup set is valid.";
+
+        return new VerifyOnlyResult(true, report, MentionsMissingDirectory(report));
     }
 
     /// <summary>
@@ -398,15 +405,45 @@ public class SqlServerService : ISqlServerService
     /// No WITH CREDENTIAL clause: SQL Server rejects that for SAS credentials with Msg 3225, and
     /// it matches the credential by URL anyway (#60).
     /// </summary>
-    public static string BuildVerifyOnlyStatement(IReadOnlyList<string> blobUrls, bool withChecksum)
+    public static string BuildVerifyOnlyStatement(
+        IReadOnlyList<string> blobUrls,
+        bool withChecksum,
+        IReadOnlyList<FileMoveOption>? fileMoves = null)
     {
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
 
+        var options = new List<string>();
+
         // Omitted rather than set to NO_CHECKSUM when off, so SQL Server's own default applies.
-        return withChecksum
-            ? $"RESTORE VERIFYONLY FROM {urlClauses} WITH CHECKSUM"
-            : $"RESTORE VERIFYONLY FROM {urlClauses}";
+        if (withChecksum) options.Add("CHECKSUM");
+
+        // The same MOVE clauses the restore will use. Both names are string literals, not
+        // identifiers - LogicalName comes from RESTORE FILELISTONLY (sysname, so an apostrophe is
+        // legal) and NewPhysicalName is a user-editable path.
+        if (fileMoves != null)
+        {
+            options.AddRange(fileMoves
+                .Where(m => !string.IsNullOrWhiteSpace(m.NewPhysicalName))
+                .Select(m => $"MOVE N'{TSql.EscapeLiteral(m.LogicalName)}' " +
+                             $"TO N'{TSql.EscapeLiteral(m.NewPhysicalName)}'"));
+        }
+
+        return options.Count == 0
+            ? $"RESTORE VERIFYONLY FROM {urlClauses}"
+            : $"RESTORE VERIFYONLY FROM {urlClauses} WITH {string.Join(", ", options)}";
     }
+
+    /// <summary>
+    /// Did VERIFYONLY complain that it could not find the directories a restore would write to?
+    ///
+    /// Matched on SQL Server's own wording. It reports this as an informational message alongside
+    /// "the backup set is valid", so a chain can be perfectly readable and still be certain to
+    /// fail on restore - which is worth saying out loud rather than leaving in four lines of grey
+    /// text under a green tick (#129).
+    /// </summary>
+    private static bool MentionsMissingDirectory(string report)
+        => report.Contains("Directory lookup for the file", StringComparison.OrdinalIgnoreCase)
+        || report.Contains("may encounter storage space problems", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetStringFromReader(SqlDataReader reader, string columnName)
     {

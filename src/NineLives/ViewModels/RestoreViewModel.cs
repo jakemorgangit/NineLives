@@ -1423,6 +1423,12 @@ public partial class RestoreViewModel : ViewModelBase
         ChainVerifyResults.Clear();
         HasVerifyResults = false;
 
+        // The same MOVE clauses the restore would use. Without them VERIFYONLY checks the paths
+        // recorded inside the backup - the SOURCE server's - and reports directory-lookup failures
+        // for a restore that was never going to touch them (#129).
+        var fileMoves = BuildFileMoves();
+        VerifiedWithMove = fileMoves.Count > 0;
+
         try
         {
             var sets = RestoreChain.AllSets;
@@ -1433,7 +1439,7 @@ public partial class RestoreViewModel : ViewModelBase
 
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 var result = await _sqlService.RestoreVerifyOnlyAsync(
-                    ConnectedServer, urls, WithChecksum, ct);
+                    ConnectedServer, urls, WithChecksum, fileMoves, ct);
 
                 ChainVerifyResults.Add(new ChainVerifyResult { Set = set, Result = result });
                 HasVerifyResults = true;
@@ -1442,9 +1448,13 @@ public partial class RestoreViewModel : ViewModelBase
             var failed = ChainVerifyResults.Count(r => !r.IsValid);
             HasVerifyFailures = failed > 0;
 
+            UpdateTargetPathWarning();
+
             SetStatus(failed > 0
                 ? $"{failed} of {ChainVerifyResults.Count} backup(s) failed verification - see below. Do not rely on this chain."
-                : $"All {ChainVerifyResults.Count} backup(s) in the chain verified.");
+                : HasTargetPathProblem
+                    ? $"All {ChainVerifyResults.Count} backup(s) read back intact, but the restore will fail - see below."
+                    : $"All {ChainVerifyResults.Count} backup(s) in the chain verified.");
         }
         catch (OperationCanceledException)
         {
@@ -1465,11 +1475,47 @@ public partial class RestoreViewModel : ViewModelBase
     private bool CanVerifyChain() =>
         IsConnectedToServer && RestoreChain != null && !IsVerifyingChain && !IsExecuting;
 
+    /// <summary>
+    /// Turns SQL Server's directory-lookup complaint into something that says what to do about it.
+    ///
+    /// Backups can read back perfectly and still be certain to fail on restore, because the
+    /// directories they would be written to do not exist on this server. VERIFYONLY reports that
+    /// as an informational message next to "the backup set is valid", which is four lines of grey
+    /// text under a green tick - so it gets said properly here instead (#129).
+    /// </summary>
+    private void UpdateTargetPathWarning()
+    {
+        HasTargetPathProblem = ChainVerifyResults.Any(r => r.Result.TargetPathsMissing);
+
+        TargetPathProblemMessage = !HasTargetPathProblem
+            ? string.Empty
+            : VerifiedWithMove
+                ? "The target directories do not exist on this server. Create them, or change the "
+                  + "file paths above - as it stands the restore will fail once it has already "
+                  + "dropped the target database."
+                : "The file paths recorded inside these backups do not exist on this server, and "
+                  + "no WITH MOVE is set - so the restore will fail once it has already dropped "
+                  + "the target database. Tick WITH MOVE and give it paths that exist here.";
+    }
+
+    /// <summary>True when the last verification found directories a restore could not write to.</summary>
+    [ObservableProperty]
+    private bool _hasTargetPathProblem;
+
+    [ObservableProperty]
+    private string _targetPathProblemMessage = string.Empty;
+
+    /// <summary>Whether the last verification was given MOVE clauses, which changes what to say.</summary>
+    [ObservableProperty]
+    private bool _verifiedWithMove;
+
     private void ClearVerifyResults()
     {
         ChainVerifyResults.Clear();
         HasVerifyResults = false;
         HasVerifyFailures = false;
+        HasTargetPathProblem = false;
+        TargetPathProblemMessage = string.Empty;
     }
 
     private void UpdateChainIssues(BackupChain? chain, IReadOnlyList<ChainHeader>? headers = null)
@@ -1705,6 +1751,58 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// The WITH MOVE clauses the restore would use, or an empty list when it is not moving files.
+    ///
+    /// Shared with the verification, which passes the same list to RESTORE VERIFYONLY - otherwise
+    /// VERIFYONLY checks the paths recorded inside the backup, which belong to the SOURCE server,
+    /// and reports directory-lookup failures for a restore that was never going to use them (#129).
+    /// </summary>
+    private List<FileMoveOption> BuildFileMoves()
+    {
+        var fileMoves = new List<FileMoveOption>();
+        if (!UseWithMove) return fileMoves;
+
+        if (HasFetchedFileMoves && FetchedFileMoves.Count > 0)
+        {
+            foreach (var m in FetchedFileMoves)
+            {
+                if (!string.IsNullOrWhiteSpace(m.NewPhysicalName))
+                {
+                    fileMoves.Add(new FileMoveOption
+                    {
+                        LogicalName = m.LogicalName,
+                        PhysicalName = m.PhysicalName,
+                        NewPhysicalName = m.NewPhysicalName,
+                        Type = m.Type
+                    });
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(MoveDataFilePath))
+        {
+            // Guessed logical names. Wrong for a renamed database or one with secondary files,
+            // which is what Get file names exists to fix.
+            var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
+            fileMoves.Add(new FileMoveOption
+            {
+                LogicalName = sourceDbName,
+                PhysicalName = string.Empty,
+                NewPhysicalName = MoveDataFilePath,
+                Type = "ROWS"
+            });
+            fileMoves.Add(new FileMoveOption
+            {
+                LogicalName = sourceDbName + "_log",
+                PhysicalName = string.Empty,
+                NewPhysicalName = MoveLogFilePath,
+                Type = "LOG"
+            });
+        }
+
+        return fileMoves;
+    }
+
+    /// <summary>
     /// Rebuilds the script from the current settings, silently.
     ///
     /// Called from UpdateRestoreSummary, so every option change keeps the script in step. It used
@@ -1730,24 +1828,7 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        var fileMoves = new List<FileMoveOption>();
-        if (UseWithMove)
-        {
-            if (HasFetchedFileMoves && FetchedFileMoves.Count > 0)
-            {
-                foreach (var m in FetchedFileMoves)
-                {
-                    if (!string.IsNullOrWhiteSpace(m.NewPhysicalName))
-                        fileMoves.Add(new FileMoveOption { LogicalName = m.LogicalName, PhysicalName = m.PhysicalName, NewPhysicalName = m.NewPhysicalName, Type = m.Type });
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(MoveDataFilePath))
-            {
-                var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
-                fileMoves.Add(new FileMoveOption { LogicalName = sourceDbName, PhysicalName = string.Empty, NewPhysicalName = MoveDataFilePath, Type = "ROWS" });
-                fileMoves.Add(new FileMoveOption { LogicalName = sourceDbName + "_log", PhysicalName = string.Empty, NewPhysicalName = MoveLogFilePath, Type = "LOG" });
-            }
-        }
+        var fileMoves = BuildFileMoves();
 
         var options = new RestoreOptions
         {
