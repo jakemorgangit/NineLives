@@ -366,11 +366,7 @@
                                      HorizontalAlignment="Left"
                                      Margin="0,0,0,16" />
 
-                            <TextBlock Text="{Binding ErrorMessage}"
-                                       Foreground="{DynamicResource ErrorBrush}"
-                                       Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
-                                       Margin="0,0,0,12"
-                                       TextWrapping="Wrap" />
+                            <ContentControl Style="{StaticResource ErrorBanner}" />
 
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                 <Button Content="Save"

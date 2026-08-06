@@ -82,12 +82,7 @@
                         Margin="0,0,0,12"
                         ToolTip="{Binding LogFolder}" />
 
-                <TextBlock Text="{Binding ErrorMessage}"
-                           Style="{StaticResource SecondaryText}"
-                           TextWrapping="Wrap"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,12"
-                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+                <ContentControl Style="{StaticResource ErrorBanner}" />
 
                 <TextBlock HorizontalAlignment="Center"
                            Style="{StaticResource SecondaryText}">
