@@ -93,6 +93,9 @@ public class CredentialLifecycleTests
     /// <summary>
     /// A credential sitting there under some other identity cannot serve a RESTORE FROM URL, so
     /// ALTER resets IDENTITY too rather than leaving a broken credential to fail the restore.
+    ///
+    /// This is the service doing what it is told. Since #145 only the explicit button asks for it -
+    /// the execute path stops rather than converting an identity it did not create.
     /// </summary>
     [RequiresSqlFact]
     public async Task NonSasCredential_IsConvertedToSharedAccessSignature()
@@ -103,14 +106,48 @@ public class CredentialLifecycleTests
             await DropCredentialIfExists(name);
             await CreateNonSasCredential(name);
 
-            Assert.False((await Service().CredentialExistsAsync(TestServer(), name)).IsSharedAccessSignature);
+            var before = await Service().CredentialExistsAsync(TestServer(), name);
+            Assert.Equal(BlobCredentialIdentity.Other, before.Kind);
+            Assert.False(before.CanRestoreFromUrl);
 
             var change = await Service().EnsureCredentialExistsAsync(TestServer(), name, Url, FirstSas);
 
             Assert.Equal(CredentialChange.Updated, change);
-            var (exists, isSas) = await Service().CredentialExistsAsync(TestServer(), name);
-            Assert.True(exists);
-            Assert.True(isSas);
+            var after = await Service().CredentialExistsAsync(TestServer(), name);
+            Assert.True(after.Exists);
+            Assert.Equal(BlobCredentialIdentity.SharedAccessSignature, after.Kind);
+        }
+        finally
+        {
+            await DropCredentialIfExists(name);
+        }
+    }
+
+    /// <summary>
+    /// A managed-identity credential read back off a real instance (#145).
+    ///
+    /// The classification is a string comparison against what sys.credentials returns, and this is
+    /// the only way to know that is the text SQL Server actually stores rather than the text the
+    /// documentation prints. It proves the read, not the restore: authenticating with a managed
+    /// identity needs an Azure VM, an Arc-enabled instance or SQL MI, and CREATE CREDENTIAL takes
+    /// the identity as free text on any of them, so this runs anywhere.
+    /// </summary>
+    [RequiresSqlFact]
+    public async Task ManagedIdentityCredential_IsRecognisedRatherThanTreatedAsBroken()
+    {
+        const string name = "ninelives-test-lifecycle-managed-identity";
+        try
+        {
+            await DropCredentialIfExists(name);
+            await CreateManagedIdentityCredential(name);
+
+            var credential = await Service().CredentialExistsAsync(TestServer(), name);
+
+            Assert.True(credential.Exists);
+            Assert.Equal(BlobCredentialIdentity.ManagedIdentity, credential.Kind);
+
+            // The bit that matters: the execute path reads this and leaves the credential alone.
+            Assert.True(credential.CanRestoreFromUrl);
         }
         finally
         {
@@ -126,10 +163,10 @@ public class CredentialLifecycleTests
         const string name = "ninelives-test-lifecycle-absent";
         await DropCredentialIfExists(name);
 
-        var (exists, isSas) = await Service().CredentialExistsAsync(TestServer(), name);
+        var credential = await Service().CredentialExistsAsync(TestServer(), name);
 
-        Assert.False(exists);
-        Assert.False(isSas);
+        Assert.False(credential.Exists);
+        Assert.Equal(BlobCredentialIdentity.Missing, credential.Kind);
         Assert.False(await CredentialExists(name));
     }
 
@@ -171,6 +208,19 @@ public class CredentialLifecycleTests
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"CREATE CREDENTIAL {TSql.QuoteName(name)} WITH IDENTITY = 'ninelives-test-identity', SECRET = 'not-a-sas'";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// No SECRET, which is how a managed-identity credential is written. SQL Server takes the
+    /// identity as free text, so this creates on any edition - it only fails when something tries
+    /// to authenticate with it.
+    /// </summary>
+    private static async Task CreateManagedIdentityCredential(string name)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"CREATE CREDENTIAL {TSql.QuoteName(name)} WITH IDENTITY = 'Managed Identity'";
         await cmd.ExecuteNonQueryAsync();
     }
 

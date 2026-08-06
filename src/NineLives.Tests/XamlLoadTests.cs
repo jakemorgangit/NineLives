@@ -263,15 +263,46 @@ public class XamlLoadTests(WpfFixture wpf)
             var view = new RestoreView { DataContext = vm };
 
             vm.CredentialExistsOnServer = false;
-            vm.CredentialIsValidSas = false;
+            vm.CredentialIdentityKind = BlobCredentialIdentity.Missing;
             Realise(view);
             Assert.Contains(FindAll<Button>(view), b => (b.Content as string) == "Create credential on server");
 
             vm.CredentialExistsOnServer = true;
-            vm.CredentialIsValidSas = true;
+            vm.CredentialIdentityKind = BlobCredentialIdentity.SharedAccessSignature;
             Realise(view);
             Assert.Contains(FindAll<Button>(view),
                 b => (b.Content as string) == "Refresh credential with stored SAS token");
+        });
+    }
+
+    /// <summary>
+    /// The same button under a managed identity. "Refresh credential with stored SAS token" reads
+    /// as a harmless top-up, and the press would convert the instance's managed identity into a
+    /// SAS credential - so the label has to say that before it is pressed, not after (#145).
+    /// </summary>
+    [Fact]
+    public void TheCredentialButtonSaysItWouldReplaceAManagedIdentity()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.SelectedContainer = new BlobContainerConfig
+            {
+                Id = BlobContainerConfig.NewId(),
+                Name = "prod",
+                ContainerUrl = "https://acct.blob.core.windows.net/backups"
+            };
+            vm.IsConnectedToServer = true;
+            vm.CredentialSectionVisible = true;
+
+            var view = new RestoreView { DataContext = vm };
+
+            vm.CredentialExistsOnServer = true;
+            vm.CredentialIdentityKind = BlobCredentialIdentity.ManagedIdentity;
+            Realise(view);
+
+            Assert.Contains(FindAll<Button>(view),
+                b => (b.Content as string) == "Replace Managed Identity with stored SAS token");
         });
     }
 

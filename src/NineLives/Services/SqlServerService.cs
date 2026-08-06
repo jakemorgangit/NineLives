@@ -624,12 +624,19 @@ public class SqlServerService : ISqlServerService
 
     private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
 
-    /// <summary>Checks if a credential with the given name exists on the server and has identity SHARED ACCESS SIGNATURE (for blob URL restores).</summary>
-    public async Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(
+    /// <summary>
+    /// Which credential of that name is on the server, if any, and what it authenticates as.
+    ///
+    /// Reports the identity rather than "is it SAS" (#145). The two identities a restore from URL
+    /// can use are SHARED ACCESS SIGNATURE and, on SQL Server 2022+ or Azure SQL MI, Managed
+    /// Identity; collapsing them into one bool told the caller a working managed-identity
+    /// credential was broken, and the caller then overwrote it.
+    /// </summary>
+    public async Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(credentialName))
-            return (false, false);
+            return BlobCredentialStatus.Missing;
 
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
@@ -643,11 +650,24 @@ public class SqlServerService : ISqlServerService
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
-            return (false, false);
+            return BlobCredentialStatus.Missing;
 
-        var identity = reader["credential_identity"]?.ToString() ?? "";
-        var isSas = identity.Equals("SHARED ACCESS SIGNATURE", StringComparison.OrdinalIgnoreCase);
-        return (true, isSas);
+        var identity = (reader["credential_identity"]?.ToString() ?? "").Trim();
+        return new BlobCredentialStatus(ClassifyIdentity(identity), identity);
+    }
+
+    /// <summary>
+    /// The identity text as stored in sys.credentials, matched loosely. Case is not guaranteed -
+    /// the docs write 'Managed Identity' and 'MANAGED IDENTITY' in different places, and whoever
+    /// created the credential typed one of them.
+    /// </summary>
+    internal static BlobCredentialIdentity ClassifyIdentity(string identity)
+    {
+        if (identity.Equals("SHARED ACCESS SIGNATURE", StringComparison.OrdinalIgnoreCase))
+            return BlobCredentialIdentity.SharedAccessSignature;
+        if (identity.Equals("Managed Identity", StringComparison.OrdinalIgnoreCase))
+            return BlobCredentialIdentity.ManagedIdentity;
+        return BlobCredentialIdentity.Other;
     }
 
     // CREATE/DROP CREDENTIAL cannot take the name as a parameter - it is an identifier, not a
@@ -682,8 +702,14 @@ public class SqlServerService : ISqlServerService
         checkCmd.Parameters.AddWithValue("@name", credentialName);
         var exists = (int)(await checkCmd.ExecuteScalarAsync(ct))! > 0;
 
-        // ALTER also resets IDENTITY, so a credential that exists under some other identity is
-        // converted rather than left in place to fail the restore later.
+        // ALTER resets IDENTITY as well as the secret, so a credential sitting under some other
+        // identity is converted rather than left to fail the restore later.
+        //
+        // That conversion is destructive and this method cannot tell a mistake from a deliberate
+        // setup, so it must only ever be reached because somebody asked for it. The execute path
+        // no longer calls this to "fix" an identity it does not recognise - it stops and says what
+        // it found, because the identity it would have replaced could be a managed identity the
+        // instance genuinely restores with (#145).
         var cleanSas = sasToken.TrimStart('?');
         await using var writeCmd = conn.CreateCommand();
         writeCmd.CommandText = $@"

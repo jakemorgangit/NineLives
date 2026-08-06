@@ -25,6 +25,11 @@ more detail on the user-facing changes; this file is the short history.
 - A **Stop** button for the server queries — verify, validate, the metadata reads and the
   post-failure recovery actions (#111)
 - Execute now says *why* it is disabled instead of just being greyed out (#117)
+- **Entra ID authentication for blob containers**, as an alternative to a SAS token, for
+  organisations that do not allow long-lived SAS. A permission failure names the account that was
+  refused and the role it is missing, which Azure's own error does not (#29)
+- **Entra MFA for SQL Server connections** (`ActiveDirectoryInteractive`), with the sign-in prompt
+  parented to the app window (#30)
 
 ### Fixed
 
@@ -43,6 +48,12 @@ more detail on the user-facing changes; this file is the short history.
 - Saving now writes the config *before* the secret, so a refused save cannot leave Credential
   Manager holding a password the config file does not match (#113)
 - The credential check no longer races itself and reports the container you just left (#111)
+- **A Managed Identity blob credential is no longer converted to SAS by running a restore.** The
+  check reduced every identity to "is it a SAS credential", so a credential authenticating as the
+  instance's own identity was reported as broken and then altered into a SAS one — changing how
+  anything else on that instance reached the same container. Execute now leaves any usable
+  credential alone, and never converts one it did not create: replacing an identity is what the
+  button on the panel is for, and it says so before it is pressed (#145)
 
 ### Changed
 

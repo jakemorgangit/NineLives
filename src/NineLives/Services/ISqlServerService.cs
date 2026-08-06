@@ -49,7 +49,7 @@ public interface ISqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default);
 
-    Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(
+    Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default);
 
     Task<CredentialChange> EnsureCredentialExistsAsync(

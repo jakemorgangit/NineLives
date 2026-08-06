@@ -150,8 +150,12 @@ public sealed class FakeSqlServerService : ISqlServerService
 
     public List<string> VerifiedUrls { get; } = [];
 
-    public bool CredentialExists { get; set; } = true;
-    public bool CredentialIsSas { get; set; } = true;
+    /// <summary>What a credential lookup finds. Defaults to the happy path: a SAS credential.</summary>
+    public BlobCredentialStatus Credential { get; set; } =
+        new(BlobCredentialIdentity.SharedAccessSignature, "SHARED ACCESS SIGNATURE");
+
+    /// <summary>Every name a credential write was asked for, so a test can prove none happened.</summary>
+    public List<string> CredentialWrites { get; } = [];
 
     public VerifyOnlyResult VerifyResult { get; set; } = new(true, "The backup set is valid.");
 
@@ -233,12 +237,15 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.CompletedTask;
     }
 
-    public Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(
+    public Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default)
-        => Task.FromResult((CredentialExists, CredentialIsSas));
+        => Task.FromResult(Credential);
 
     public Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
         CancellationToken ct = default)
-        => Task.FromResult(CredentialChange.None);
+    {
+        CredentialWrites.Add(credentialName);
+        return Task.FromResult(CredentialChange.None);
+    }
 }
