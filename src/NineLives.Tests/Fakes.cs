@@ -173,10 +173,23 @@ public sealed class FakeSqlServerService : ISqlServerService
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
         => Task.FromResult<BackupFileInfo?>(null);
 
+    /// <summary>Called with the token the viewmodel supplied, so a test can see it was cancellable.</summary>
+    public Action<CancellationToken>? OnVerify { get; set; }
+
+    /// <summary>Every token handed to a verify call, so a test can prove one was passed at all.</summary>
+    public List<CancellationToken> VerifyTokens { get; } = [];
+
     public Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, bool withChecksum = false, CancellationToken ct = default)
     {
         VerifiedUrls.AddRange(blobUrls);
+        VerifyTokens.Add(ct);
+        OnVerify?.Invoke(ct);
+
+        // The real service translates a cancelled command into this; the fake has to as well, or a
+        // test would pass against a viewmodel that ignores the token entirely.
+        ct.ThrowIfCancellationRequested();
+
         return Task.FromResult(VerifyResult);
     }
 

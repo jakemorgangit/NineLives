@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Security;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
@@ -191,7 +191,9 @@ public class SqlServerService : ISqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;
         cmd.CommandText = sql;
-        await cmd.ExecuteNonQueryAsync(ct);
+
+        await CancellableAsync(
+            () => cmd.ExecuteNonQueryAsync(ct), ct, "The recovery action");
     }
 
     public async Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
@@ -243,19 +245,22 @@ public class SqlServerService : ISqlServerService
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}";
 
-        var files = new List<FileMoveOption>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        return await CancellableAsync(async () =>
         {
-            files.Add(new FileMoveOption
+            var files = new List<FileMoveOption>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
-                LogicalName = reader.GetString(reader.GetOrdinal("LogicalName")),
-                PhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
-                Type = reader.GetString(reader.GetOrdinal("Type")),
-                NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName"))
-            });
-        }
-        return files;
+                files.Add(new FileMoveOption
+                {
+                    LogicalName = reader.GetString(reader.GetOrdinal("LogicalName")),
+                    PhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
+                    Type = reader.GetString(reader.GetOrdinal("Type")),
+                    NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName"))
+                });
+            }
+            return files;
+        }, ct, "Reading the file list");
     }
 
     /// <summary>RESTORE HEADERONLY across the files of one backup set, striped or not.</summary>
@@ -272,6 +277,8 @@ public class SqlServerService : ISqlServerService
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}";
 
+        return await CancellableAsync<BackupFileInfo?>(async () =>
+        {
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
 
@@ -294,6 +301,7 @@ public class SqlServerService : ISqlServerService
             DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
             CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
         };
+        }, ct, "Reading the backup header");
     }
 
     /// <summary>
@@ -354,6 +362,33 @@ public class SqlServerService : ISqlServerService
                 ? string.Join(" ", messages.Select(m => m.Trim()))
                 : "The backup set is valid.");
     }
+
+    /// <summary>
+    /// Runs something against SQL Server and translates a cancellation into the exception the
+    /// caller expects.
+    ///
+    /// SqlClient reports a command cancelled mid-flight as a SqlException - "A severe error
+    /// occurred on the current command" - not an OperationCanceledException. Every call site that
+    /// takes a token needs the same trap, and writing it out at each one is how three of them came
+    /// to be missing it. Only when the token was actually signalled, so a genuine severe error
+    /// still propagates as the failure it is.
+    /// </summary>
+    private static async Task<T> CancellableAsync<T>(
+        Func<Task<T>> work, CancellationToken ct, string what)
+    {
+        try
+        {
+            return await work();
+        }
+        catch (SqlException) when (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException($"{what} was cancelled.", ct);
+        }
+    }
+
+    private static async Task CancellableAsync(
+        Func<Task> work, CancellationToken ct, string what)
+        => await CancellableAsync<bool>(async () => { await work(); return true; }, ct, what);
 
     /// <summary>
     /// The exact T-SQL a verification runs. Every file of a striped set goes into one statement -

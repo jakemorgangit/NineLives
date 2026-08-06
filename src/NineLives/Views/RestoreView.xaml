@@ -485,6 +485,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
@@ -557,7 +558,19 @@
                             </Button.Content>
                         </Button>
 
+                        <!-- Only while something is running. RESTORE VERIFYONLY reads every byte
+                             of every backup in the chain at CommandTimeout = 0, so on a large
+                             chain this is the difference between waiting and killing the app. -->
                         <Button Grid.Column="3"
+                                Content="Stop"
+                                Command="{Binding CancelQueryCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                Foreground="{DynamicResource WarningBrush}"
+                                Visibility="{Binding CanCancelQuery, Converter={StaticResource BoolToVis}}"
+                                ToolTip="Stop the server query that is running." />
+
+                        <Button Grid.Column="4"
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">
