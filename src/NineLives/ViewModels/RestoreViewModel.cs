@@ -74,32 +74,12 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _targetDatabaseName = string.Empty;
 
-    // Restore points (replaces continuous slider)
-    [ObservableProperty]
-    private ObservableCollection<RestorePoint> _restorePoints = [];
-
-    [ObservableProperty]
-    private RestorePoint? _selectedRestorePoint;
-
-    [ObservableProperty]
-    private bool _hasRestorePoints;
-
-    [ObservableProperty]
-    private string _restoreWindowText = string.Empty;
-
     /// <summary>
-    /// Left-hand label under the timeline. A plain property rather than the old
-    /// {Binding RestorePoints[0].Timestamp}, which threw an index error into WPF's binding trace
-    /// on every layout while the collection was empty.
+    /// The restore-point timeline: the points, the filters over them, the layout and the
+    /// selection (#115 seam 2). Its selection is the one everything downstream hangs off, so this
+    /// class watches it in the constructor.
     /// </summary>
-    [ObservableProperty]
-    private string _timelineStartText = string.Empty;
-
-    [ObservableProperty]
-    private ObservableCollection<TimelineTick> _timelineTicks = [];
-
-    [ObservableProperty]
-    private int _timelineHeight = 60;
+    public RestoreTimelineViewModel Timeline { get; } = new();
 
     // Restore chain
     [ObservableProperty]
@@ -312,37 +292,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     public bool IsBusyWithAnything => BusyDescription.Length > 0;
 
-    // ── restore point filters (#27) ─────────────────────────────────────────────
-
-    /// <summary>True when the container holds any restore points at all.</summary>
-    [ObservableProperty]
-    private bool _hasVisiblePoints;
-
-    [ObservableProperty]
-    private string _pointCountText = string.Empty;
-
-    [ObservableProperty]
-    private bool _showFullPoints = true;
-
-    [ObservableProperty]
-    private bool _showDiffPoints = true;
-
-    [ObservableProperty]
-    private bool _showLogPoints = true;
-
-    [ObservableProperty]
-    private string _pointsFromText = string.Empty;
-
-    [ObservableProperty]
-    private string _pointsToText = string.Empty;
-
-    /// <summary>Parsed from the text boxes; null means no bound on that end.</summary>
-    [ObservableProperty]
-    private DateTime? _pointsFrom;
-
-    [ObservableProperty]
-    private DateTime? _pointsTo;
-
     /// <summary>Per-set RESTORE VERIFYONLY results for the selected chain.</summary>
     public ObservableCollection<ChainVerifyResult> ChainVerifyResults { get; } = [];
 
@@ -461,7 +410,6 @@ public partial class RestoreViewModel : ViewModelBase
         _allBackups = [];
         _allSets = [];
         _dbSets = [];
-        _allPoints = [];
 
         BackupsLoaded = false;
         DiscoveredServers = [];
@@ -469,17 +417,9 @@ public partial class RestoreViewModel : ViewModelBase
         SelectedServerName = null;
         SelectedDatabaseName = null;
 
-        RestorePoints = [];
-        HasRestorePoints = false;
-        HasVisiblePoints = false;
-        PointCountText = string.Empty;
-        RestoreWindowText = string.Empty;
-        TimelineTicks.Clear();
-        TimelineHeight = 50;
-
-        // Assigning null runs the selection handler, which clears the chain, the script, the
-        // verification results and the inventory findings.
-        SelectedRestorePoint = null;
+        // Clearing the timeline drops its selection, which runs the selection handler below and
+        // clears the chain, the script, the verification results and the inventory findings.
+        Timeline.Clear();
 
         // Disarm. An armed Execute that survives a container change is an armed Execute aimed at
         // something the user is no longer looking at.
@@ -661,6 +601,14 @@ public partial class RestoreViewModel : ViewModelBase
                 RefreshCheckState();
         };
 
+        // The selection now lives on the timeline (#115 seam 2), which is a different object, so
+        // this is a subscription rather than a generated partial hook.
+        Timeline.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RestoreTimelineViewModel.SelectedPoint))
+                OnSelectedRestorePointChanged(Timeline.SelectedPoint);
+        };
+
         RefreshContainers();
     }
 
@@ -740,19 +688,21 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void SelectRestorePoint(RestorePoint? point)
-    {
-        if (point != null)
-            SelectedRestorePoint = point;
-    }
-
-    [RelayCommand]
     private void ToggleChainDetails()
     {
         ShowChainDetails = !ShowChainDetails;
     }
 
-    partial void OnSelectedRestorePointChanged(RestorePoint? value)
+    /// <summary>
+    /// Everything downstream of the timeline: the chain, the script, the point-in-time window and
+    /// the verification results all belong to the selected point, and are rebuilt or thrown away
+    /// when it moves.
+    ///
+    /// A plain PropertyChanged subscription rather than a partial hook - the property now lives on
+    /// <see cref="Timeline"/>, and a partial hook can only be written for a property the same class
+    /// declares.
+    /// </summary>
+    private void OnSelectedRestorePointChanged(RestorePoint? value)
     {
         ShowChainDetails = false;
 
@@ -935,14 +885,11 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Every computed restore point, before the view's filters. The timeline and the list both
-    /// show a subset of this (#27).
+    /// Works out which points this database can be restored to, and hands them to the timeline.
     /// </summary>
-    private List<RestorePoint> _allPoints = [];
-
     private void ComputeAndDisplayRestorePoints()
     {
-        _allPoints = _chainBuilder.ComputeRestorePoints(_dbSets);
+        var points = _chainBuilder.ComputeRestorePoints(_dbSets);
 
         // Inventory-level findings: backups that exist but can never be offered. These belong to
         // the discovered set rather than to any one chain, so they are held separately and survive
@@ -952,286 +899,18 @@ public partial class RestoreViewModel : ViewModelBase
         // orphaned logs and "no full backup at all" were being computed nowhere and shown nowhere.
         InventoryIssues = new ObservableCollection<ChainIssue>(
             _chainValidator.ValidateInventory(_dbSets)
-                .Concat(_chainValidator.ValidateReachability(_dbSets, _allPoints)));
+                .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
         HasInventoryIssues = InventoryIssues.Count > 0;
 
-        // A fresh load starts wide open. Carrying a previous database's date range over would
-        // silently hide points that have nothing to do with it.
-        _suppressPointFilterRefresh = true;
-        ShowFullPoints = ShowDiffPoints = ShowLogPoints = true;
-        PointsFromText = string.Empty;
-        PointsToText = string.Empty;
-        _suppressPointFilterRefresh = false;
+        Timeline.Load(points);
 
-        HasRestorePoints = _allPoints.Count > 0;
-
-        if (_allPoints.Count == 0)
+        if (points.Count == 0)
         {
-            RestorePoints = [];
-            HasVisiblePoints = false;
-            RestoreWindowText = string.Empty;
-            PointCountText = string.Empty;
-            TimelineTicks.Clear();
-            TimelineHeight = 50;
             SetError("No valid restore points found. Ensure there is at least one full backup.");
             return;
         }
 
-        ApplyPointFilters(selectLatest: true);
         ClearStatus();
-    }
-
-    /// <summary>
-    /// Narrows the timeline and the list to the points the filters allow, then lays the timeline
-    /// out over just those.
-    ///
-    /// Laying out over the VISIBLE set rather than all of them is what makes the date range behave
-    /// like a zoom: narrow to a two-hour window and those points spread across the whole track
-    /// instead of staying bunched in the sliver they occupied before (#27).
-    /// </summary>
-    private void ApplyPointFilters(bool selectLatest = false)
-    {
-        var previous = SelectedRestorePoint;
-        var visible = _allPoints.Where(PointMatchesFilters).ToList();
-
-        LayOutTimeline(visible);
-
-        RestorePoints = new ObservableCollection<RestorePoint>(visible);
-        HasVisiblePoints = visible.Count > 0;
-
-        PointCountText = visible.Count == _allPoints.Count
-            ? $"{_allPoints.Count} restore point(s)"
-            : $"Showing {visible.Count} of {_allPoints.Count} restore point(s)";
-
-        if (visible.Count == 0)
-        {
-            RestoreWindowText = string.Empty;
-            return;
-        }
-
-        // Keep the selection when it survives the filter - changing a type toggle should not throw
-        // away the point someone had already chosen.
-        SelectedRestorePoint = !selectLatest && previous != null && visible.Contains(previous)
-            ? previous
-            : visible[^1];
-    }
-
-    private bool PointMatchesFilters(RestorePoint p)
-    {
-        var typeAllowed = p.Type switch
-        {
-            BackupType.Full => ShowFullPoints,
-            BackupType.Differential => ShowDiffPoints,
-            BackupType.TransactionLog => ShowLogPoints,
-            _ => true
-        };
-        if (!typeAllowed) return false;
-
-        if (PointsFrom.HasValue && p.Timestamp < PointsFrom.Value) return false;
-        if (PointsTo.HasValue && p.Timestamp > PointsTo.Value) return false;
-
-        return true;
-    }
-
-    private void LayOutTimeline(List<RestorePoint> points)
-    {
-        if (points.Count > 1)
-        {
-            var minTicks = points[0].Timestamp.Ticks;
-            var maxTicks = points[^1].Timestamp.Ticks;
-            var range = (double)(maxTicks - minTicks);
-            foreach (var p in points)
-                p.TimelinePosition = range > 0 ? (p.Timestamp.Ticks - minTicks) / range : 0.5;
-        }
-        else if (points.Count == 1)
-        {
-            points[0].TimelinePosition = 0.5;
-        }
-
-        // Vertical stacking, so points too close together to draw side by side are not drawn on
-        // top of each other.
-        ComputeRows(points);
-
-        if (points.Count == 0)
-        {
-            TimelineTicks.Clear();
-            TimelineHeight = 50;
-            return;
-        }
-
-        var first = points[0].Timestamp;
-        var last = points[^1].Timestamp;
-        RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
-        TimelineStartText = $"{first:yyyy-MM-dd HH:mm}";
-
-        TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
-
-        int maxRow = points.Max(p => p.Row);
-        TimelineHeight = Math.Max(50, 30 + (maxRow + 1) * 18);
-    }
-
-    /// <summary>Set while the filters are being reset in bulk, so each one does not re-filter.</summary>
-    private bool _suppressPointFilterRefresh;
-
-    private void OnPointFilterChanged()
-    {
-        if (_suppressPointFilterRefresh || _allPoints.Count == 0) return;
-        ApplyPointFilters();
-    }
-
-    partial void OnShowFullPointsChanged(bool value) => OnPointFilterChanged();
-    partial void OnShowDiffPointsChanged(bool value) => OnPointFilterChanged();
-    partial void OnShowLogPointsChanged(bool value) => OnPointFilterChanged();
-
-    partial void OnPointsFromTextChanged(string value)
-    {
-        PointsFrom = ParseFilterDate(value);
-        OnPointFilterChanged();
-    }
-
-    partial void OnPointsToTextChanged(string value)
-    {
-        PointsTo = ParseFilterDate(value);
-        OnPointFilterChanged();
-    }
-
-    /// <summary>
-    /// Invariant, and forgiving about how much of a timestamp was typed - "2026-01-10" is a
-    /// perfectly reasonable thing to enter into a date box. Unparsable means no bound rather than
-    /// an error, so half-typed input does not blank the timeline mid-keystroke.
-    /// </summary>
-    private static DateTime? ParseFilterDate(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-
-        return DateTime.TryParse(
-            text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
-            ? parsed
-            : null;
-    }
-
-    /// <summary>Back to every point, without reloading anything from the container.</summary>
-    [RelayCommand]
-    private void ResetPointFilters()
-    {
-        _suppressPointFilterRefresh = true;
-        ShowFullPoints = ShowDiffPoints = ShowLogPoints = true;
-        PointsFromText = string.Empty;
-        PointsToText = string.Empty;
-        _suppressPointFilterRefresh = false;
-
-        if (_allPoints.Count > 0) ApplyPointFilters();
-    }
-
-    /// <summary>
-    /// Narrows the range to the day the selected point falls on. A week of 15-minute logs is
-    /// roughly 670 points; picking one precisely means getting to a day first, and doing that by
-    /// typing two timestamps is a chore when the answer is nearly always "the day it broke".
-    /// </summary>
-    [RelayCommand]
-    private void ZoomToSelectedDay()
-    {
-        if (SelectedRestorePoint == null) return;
-
-        var day = SelectedRestorePoint.Timestamp.Date;
-
-        _suppressPointFilterRefresh = true;
-        PointsFromText = day.ToString("yyyy-MM-dd HH:mm:ss");
-        PointsToText = day.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss");
-        _suppressPointFilterRefresh = false;
-
-        ApplyPointFilters();
-    }
-
-    private static void ComputeRows(List<RestorePoint> points)
-    {
-        const double minSeparation = 0.025;
-        var rows = new List<List<double>>();
-
-        foreach (var p in points)
-        {
-            bool placed = false;
-            for (int row = 0; row < rows.Count; row++)
-            {
-                bool overlaps = rows[row].Any(pos => Math.Abs(pos - p.TimelinePosition) < minSeparation);
-                if (!overlaps)
-                {
-                    p.Row = row;
-                    rows[row].Add(p.TimelinePosition);
-                    placed = true;
-                    break;
-                }
-            }
-            if (!placed)
-            {
-                p.Row = rows.Count;
-                rows.Add([p.TimelinePosition]);
-            }
-        }
-    }
-
-    private static List<TimelineTick> ComputeTicks(DateTime first, DateTime last)
-    {
-        var ticks = new List<TimelineTick>();
-        var range = last - first;
-        var totalTicks = (double)(last.Ticks - first.Ticks);
-        if (totalTicks <= 0) return ticks;
-
-        // Choose interval based on range
-        TimeSpan interval;
-        string format;
-        if (range.TotalDays > 60)
-        {
-            interval = TimeSpan.FromDays(14);
-            format = "MMM dd";
-        }
-        else if (range.TotalDays > 14)
-        {
-            interval = TimeSpan.FromDays(7);
-            format = "MMM dd";
-        }
-        else if (range.TotalDays > 3)
-        {
-            interval = TimeSpan.FromDays(1);
-            format = "MMM dd";
-        }
-        else if (range.TotalHours > 12)
-        {
-            interval = TimeSpan.FromHours(6);
-            format = "HH:mm";
-        }
-        else
-        {
-            interval = TimeSpan.FromHours(1);
-            format = "HH:mm";
-        }
-
-        // Round start to the next clean interval boundary
-        var cursor = RoundUp(first, interval);
-
-        while (cursor < last)
-        {
-            double pos = (cursor.Ticks - first.Ticks) / totalTicks;
-            if (pos >= 0.02 && pos <= 0.98)
-            {
-                ticks.Add(new TimelineTick { Position = pos, Label = cursor.ToString(format) });
-            }
-            cursor += interval;
-        }
-
-        return ticks;
-    }
-
-    private static DateTime RoundUp(DateTime dt, TimeSpan interval)
-    {
-        if (interval.TotalDays >= 1)
-        {
-            var next = dt.Date.AddDays(1);
-            while (next <= dt) next = next.AddDays((int)interval.TotalDays);
-            return next;
-        }
-        var ticks = (dt.Ticks + interval.Ticks - 1) / interval.Ticks * interval.Ticks;
-        return new DateTime(ticks);
     }
 
     private void AutoPopulateMoveDefaults()
@@ -1315,8 +994,8 @@ public partial class RestoreViewModel : ViewModelBase
 
         if (EffectiveStopAt is DateTime stopAt)
             parts.Add($"Stop at {stopAt:yyyy-MM-dd HH:mm:ss} (point-in-time recovery).");
-        else if (SelectedRestorePoint != null && SelectedRestorePoint.Type == BackupType.TransactionLog)
-            parts.Add($"Restore to end of log backup at {SelectedRestorePoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
+        else if (Timeline.SelectedPoint is { Type: BackupType.TransactionLog } logPoint)
+            parts.Add($"Restore to end of log backup at {logPoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
 
         var optionsList = new List<string>();
 
@@ -2346,7 +2025,7 @@ public partial class RestoreViewModel : ViewModelBase
             TargetDatabase = TargetDatabaseName,
             ContainerName = SelectedContainer?.Name,
             SourceDatabase = SelectedDatabaseName,
-            RestorePointTimestamp = SelectedRestorePoint?.Timestamp,
+            RestorePointTimestamp = Timeline.SelectedPoint?.Timestamp,
             ChainSummary = RestoreChain?.Summary ?? "no chain",
             Outcome = outcome,
             ErrorMessage = failure,
@@ -2537,8 +2216,8 @@ public partial class RestoreViewModel : ViewModelBase
         header.AppendLine($"Target:     {TargetDatabaseName}");
         if (SelectedContainer != null)
             header.AppendLine($"Container:  {SelectedContainer.Name}");
-        if (SelectedRestorePoint != null)
-            header.AppendLine($"Point:      {SelectedRestorePoint.TimestampDisplay}");
+        if (Timeline.SelectedPoint != null)
+            header.AppendLine($"Point:      {Timeline.SelectedPoint.TimestampDisplay}");
         header.AppendLine($"Chain:      {RestoreChain?.Summary ?? "none"}");
         header.AppendLine($"Outcome:    {(ExecutionComplete ? (ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
         header.AppendLine(new string('-', 60));

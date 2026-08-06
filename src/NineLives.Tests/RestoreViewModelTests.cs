@@ -28,14 +28,15 @@ public class RestoreViewModelTests
 
     private static readonly DateTime T0 = new(2026, 1, 10, 22, 0, 0);
 
-    private static BackupFileInfo File(string blobName, BackupType type, DateTime lastModified)
+    private static BackupFileInfo File(
+        string blobName, BackupType type, DateTime lastModified, string database = "MyDb")
         => new()
         {
             BlobName = blobName,
             BlobUrl = $"https://mystorageaccount.blob.core.windows.net/backups/{blobName}",
             Type = type,
             InferredServerName = "SRV01",
-            InferredDatabaseName = "MyDb",
+            InferredDatabaseName = database,
             SizeBytes = 1000,
             LastModified = new DateTimeOffset(lastModified, TimeSpan.Zero)
         };
@@ -79,14 +80,14 @@ public class RestoreViewModelTests
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
         Assert.True(vm.BackupsLoaded);
-        Assert.True(vm.HasRestorePoints);
+        Assert.True(vm.Timeline.HasPoints);
 
         // A full plus three logs: the full itself, then one point per log.
-        Assert.Equal(4, vm.RestorePoints.Count);
+        Assert.Equal(4, vm.Timeline.Points.Count);
 
         // The default selection is the latest point, which is what someone restoring after an
         // incident almost always wants.
-        Assert.Equal(T0.AddHours(3), vm.SelectedRestorePoint!.Timestamp);
+        Assert.Equal(T0.AddHours(3), vm.Timeline.SelectedPoint!.Timestamp);
         Assert.True(vm.HasValidChain);
     }
 
@@ -99,7 +100,7 @@ public class RestoreViewModelTests
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
         // The second log: full + the logs up to and including it, and nothing after.
-        vm.SelectedRestorePoint = vm.RestorePoints.Single(
+        vm.Timeline.SelectedPoint = vm.Timeline.Points.Single(
             p => p.Timestamp == T0.AddHours(2) && p.Type == BackupType.TransactionLog);
 
         Assert.NotNull(vm.RestoreChain);
@@ -117,10 +118,10 @@ public class RestoreViewModelTests
         await vm.LoadBackupsCommand.ExecuteAsync(null);
         vm.TargetDatabaseName = "MyDb_Restored";
 
-        vm.SelectedRestorePoint = vm.RestorePoints.First(p => p.Type == BackupType.Full);
+        vm.Timeline.SelectedPoint = vm.Timeline.Points.First(p => p.Type == BackupType.Full);
         var fullOnly = vm.GeneratedScript;
 
-        vm.SelectedRestorePoint = vm.RestorePoints.Last();
+        vm.Timeline.SelectedPoint = vm.Timeline.Points.Last();
         var withLogs = vm.GeneratedScript;
 
         Assert.DoesNotContain("RESTORE LOG", fullOnly);
@@ -139,7 +140,7 @@ public class RestoreViewModelTests
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        Assert.False(vm.HasRestorePoints);
+        Assert.False(vm.Timeline.HasPoints);
 
         // The explanation has to survive the rest of the load. It used to be overwritten by
         // "Loaded 1 files in 1 backup set(s)...", leaving an empty timeline and a status bar
@@ -149,60 +150,6 @@ public class RestoreViewModelTests
 
         // And the inventory panel says the same thing in the place that persists.
         Assert.True(vm.HasInventoryIssues);
-    }
-
-    // ── timeline maths ──────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task TimelinePositionsSpanTheWholeTrack()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(3);
-        vm.SelectedContainer = Container();
-
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        var ordered = vm.RestorePoints.OrderBy(p => p.Timestamp).ToList();
-        Assert.Equal(0.0, ordered.First().TimelinePosition, 6);
-        Assert.Equal(1.0, ordered.Last().TimelinePosition, 6);
-
-        // Evenly spaced points must stay evenly spaced, and monotonic.
-        Assert.All(ordered, p => Assert.InRange(p.TimelinePosition, 0.0, 1.0));
-        for (int i = 1; i < ordered.Count; i++)
-            Assert.True(ordered[i].TimelinePosition >= ordered[i - 1].TimelinePosition);
-    }
-
-    [Fact]
-    public async Task ASinglePointSitsInTheMiddleRatherThanAtZero()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(0);
-        vm.SelectedContainer = Container();
-
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        var only = Assert.Single(vm.RestorePoints);
-        Assert.Equal(0.5, only.TimelinePosition, 6);
-    }
-
-    [Fact]
-    public async Task PointsTooCloseToDrawSideBySideAreStackedIntoRows()
-    {
-        var vm = NewViewModel();
-
-        // 60 hourly logs over a fixed track: the gap between neighbours falls below the
-        // separation the row packer allows, so they cannot all sit on one row.
-        _blob.Files = FullPlusLogs(60);
-        vm.SelectedContainer = Container();
-
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        Assert.True(vm.RestorePoints.Max(p => p.Row) > 0,
-            "Every point was placed on row 0, so they would be drawn on top of each other.");
-
-        // The track grows to fit however many rows were needed, otherwise the upper rows are
-        // drawn outside the control.
-        Assert.True(vm.TimelineHeight > 50);
     }
 
     // ── changing container ──────────────────────────────────────────────────────
@@ -224,15 +171,15 @@ public class RestoreViewModelTests
         vm.TargetDatabaseName = "MyDb_Restored";
 
         Assert.True(vm.BackupsLoaded);
-        Assert.NotEmpty(vm.RestorePoints);
+        Assert.NotEmpty(vm.Timeline.Points);
         Assert.NotEmpty(vm.GeneratedScript);
 
         vm.SelectedContainer = Container();   // a different container
 
         Assert.False(vm.BackupsLoaded);
-        Assert.Empty(vm.RestorePoints);
-        Assert.False(vm.HasRestorePoints);
-        Assert.Null(vm.SelectedRestorePoint);
+        Assert.Empty(vm.Timeline.Points);
+        Assert.False(vm.Timeline.HasPoints);
+        Assert.Null(vm.Timeline.SelectedPoint);
         Assert.Null(vm.RestoreChain);
         Assert.Empty(vm.GeneratedScript);
         Assert.False(vm.HasScript);
@@ -263,187 +210,48 @@ public class RestoreViewModelTests
         Assert.False(vm.IsExecuteArmed);
     }
 
-    // ── narrowing the restore points (#27) ──────────────────────────────────────
-
-    [Fact]
-    public async Task TurningOffATypeRemovesThosePointsFromBothSelectors()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(3);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        Assert.Equal(4, vm.RestorePoints.Count);
-
-        vm.ShowLogPoints = false;
-
-        // The list and the timeline are the same collection, so this is both.
-        var only = Assert.Single(vm.RestorePoints);
-        Assert.Equal(BackupType.Full, only.Type);
-        Assert.Contains("Showing 1 of 4", vm.PointCountText);
-    }
-
-    [Fact]
-    public async Task ADateRangeNarrowsToTheWindowAsked()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(5);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        vm.PointsFromText = T0.AddHours(2).ToString("yyyy-MM-dd HH:mm:ss");
-        vm.PointsToText = T0.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss");
-
-        Assert.Equal(3, vm.RestorePoints.Count);
-        Assert.All(vm.RestorePoints, p => Assert.InRange(p.Timestamp, T0.AddHours(2), T0.AddHours(4)));
-    }
+    // ── changing database ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// The point of the range: the surviving points spread across the whole track rather than
-    /// staying bunched in the sliver they occupied before. Without this it filters but does not
-    /// zoom, and picking one of them is no easier than it was.
+    /// Switching to a database with no restore points has to take the chain and the script with it.
+    ///
+    /// It did not. The timeline emptied and the error appeared, but the selected point belonged to
+    /// the previous database and nothing cleared it - so a complete RESTORE stayed on screen,
+    /// naming the previous database's backups, underneath a timeline with nothing on it and a
+    /// message saying there was nothing to restore to. Found while splitting the timeline out
+    /// (#115 seam 2).
+    ///
+    /// A database with logs but no full is not a contrived setup: it is what a container looks like
+    /// when the fulls have aged out of the retention window.
     /// </summary>
     [Fact]
-    public async Task NarrowingTheRangeSpreadsTheRemainingPointsAcrossTheTrack()
+    public async Task SwitchingToADatabaseWithNoRestorePointsClearsTheChainAndTheScript()
     {
         var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(20);
+        _blob.Files =
+        [
+            .. FullPlusLogs(3),
+            File("LOG/SRV01/OtherDb/20260110_230000.trn", BackupType.TransactionLog, T0.AddHours(1), "OtherDb"),
+            File("LOG/SRV01/OtherDb/20260111_000000.trn", BackupType.TransactionLog, T0.AddHours(2), "OtherDb")
+        ];
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        var before = vm.RestorePoints
-            .Where(p => p.Timestamp >= T0.AddHours(2) && p.Timestamp <= T0.AddHours(4))
-            .Select(p => p.TimelinePosition)
-            .ToList();
+        Assert.NotNull(vm.Timeline.SelectedPoint);
+        Assert.NotEmpty(vm.GeneratedScript);
 
-        // Before narrowing, three of twenty-one points sit inside a tenth of the track.
-        Assert.True(before.Max() - before.Min() < 0.2);
+        // OtherDb has logs but no full, so there is nothing it can be restored to.
+        vm.SelectedDatabaseName = "OtherDb";
 
-        vm.PointsFromText = T0.AddHours(2).ToString("yyyy-MM-dd HH:mm:ss");
-        vm.PointsToText = T0.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss");
-
-        var after = vm.RestorePoints.Select(p => p.TimelinePosition).ToList();
-        Assert.Equal(0.0, after.Min(), 6);
-        Assert.Equal(1.0, after.Max(), 6);
+        Assert.Empty(vm.Timeline.Points);
+        Assert.Null(vm.Timeline.SelectedPoint);
+        Assert.Null(vm.RestoreChain);
+        Assert.Empty(vm.GeneratedScript);
+        Assert.False(vm.HasScript);
+        Assert.True(vm.HasError);
     }
 
-    [Fact]
-    public async Task AHalfTypedDateDoesNotBlankTheTimeline()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(3);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        // Mid-keystroke. Unparsable means no bound rather than an error.
-        vm.PointsFromText = "2026-01-";
-
-        Assert.Equal(4, vm.RestorePoints.Count);
-        Assert.Null(vm.PointsFrom);
-    }
-
-    [Fact]
-    public async Task ADateIsReadTheSameWayWhateverTheMachinesCulture()
-    {
-        var original = System.Globalization.CultureInfo.CurrentCulture;
-        try
-        {
-            // en-US would read 02/03 as February; en-GB as March. The box is documented as
-            // yyyy-MM-dd, which is unambiguous, and it is parsed invariantly so it stays that way.
-            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-US");
-
-            var vm = NewViewModel();
-            _blob.Files = FullPlusLogs(3);
-            vm.SelectedContainer = Container();
-            await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-            vm.PointsFromText = "2026-01-10 23:30:00";
-
-            Assert.Equal(new DateTime(2026, 1, 10, 23, 30, 0), vm.PointsFrom);
-        }
-        finally
-        {
-            System.Globalization.CultureInfo.CurrentCulture = original;
-        }
-    }
-
-    [Fact]
-    public async Task AFilterThatMatchesNothingSaysSoRatherThanLookingEmpty()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(3);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        vm.ShowFullPoints = false;
-        vm.ShowLogPoints = false;
-        vm.ShowDiffPoints = false;
-
-        Assert.Empty(vm.RestorePoints);
-        Assert.False(vm.HasVisiblePoints);
-
-        // Still true - the container HAS restore points, they are just all filtered out. The two
-        // are different states and the view shows different things for them.
-        Assert.True(vm.HasRestorePoints);
-    }
-
-    [Fact]
-    public async Task AnExistingSelectionSurvivesAFilterThatStillIncludesIt()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(5);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        var chosen = vm.RestorePoints.First(p => p.Timestamp == T0.AddHours(2));
-        vm.SelectedRestorePoint = chosen;
-
-        // Narrow to a window that still contains it.
-        vm.PointsFromText = T0.AddHours(1).ToString("yyyy-MM-dd HH:mm:ss");
-
-        Assert.Same(chosen, vm.SelectedRestorePoint);
-    }
-
-    [Fact]
-    public async Task ZoomToDayNarrowsToTheSelectedPointsDay()
-    {
-        var vm = NewViewModel();
-
-        // Two days of hourly logs.
-        _blob.Files = FullPlusLogs(30);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        // T0 is 22:00, so hourly logs cross midnight - the day being zoomed to is the selected
-        // point's, not the first point's.
-        var chosen = vm.RestorePoints.First(p => p.Timestamp == T0.AddHours(5));
-        vm.SelectedRestorePoint = chosen;
-        vm.ZoomToSelectedDayCommand.Execute(null);
-
-        Assert.All(vm.RestorePoints, p => Assert.Equal(chosen.Timestamp.Date, p.Timestamp.Date));
-        Assert.True(vm.RestorePoints.Count < 31);
-        Assert.Contains(vm.RestorePoints, p => p.Timestamp == chosen.Timestamp);
-    }
-
-    [Fact]
-    public async Task ResetPutsEveryPointBack()
-    {
-        var vm = NewViewModel();
-        _blob.Files = FullPlusLogs(5);
-        vm.SelectedContainer = Container();
-        await vm.LoadBackupsCommand.ExecuteAsync(null);
-
-        // Logs off leaves only the full, which sits before the range - so nothing at all.
-        vm.ShowLogPoints = false;
-        vm.PointsFromText = T0.AddHours(3).ToString("yyyy-MM-dd HH:mm:ss");
-        Assert.Empty(vm.RestorePoints);
-
-        vm.ResetPointFiltersCommand.Execute(null);
-
-        Assert.Equal(6, vm.RestorePoints.Count);
-        Assert.Equal(string.Empty, vm.PointsFromText);
-        Assert.True(vm.ShowLogPoints);
-    }
+    // ── narrowing the restore points (#27) ──────────────────────────────────────
 
     [Fact]
     public async Task LoadingADifferentDatabaseDoesNotInheritThePreviousFilters()
@@ -453,14 +261,14 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        vm.PointsFromText = T0.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss");
-        Assert.Equal(2, vm.RestorePoints.Count);
+        vm.Timeline.FromText = T0.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss");
+        Assert.Equal(2, vm.Timeline.Points.Count);
 
         // A range typed for one database would silently hide points belonging to the next.
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        Assert.Equal(6, vm.RestorePoints.Count);
-        Assert.Equal(string.Empty, vm.PointsFromText);
+        Assert.Equal(6, vm.Timeline.Points.Count);
+        Assert.Equal(string.Empty, vm.Timeline.FromText);
     }
 
     /// <summary>
@@ -479,15 +287,15 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        Assert.Equal(3, vm.RestorePoints.Count);
+        Assert.Equal(3, vm.Timeline.Points.Count);
 
         // A new log arrives in the container, and the user presses Load again.
         var fresh = T0.AddHours(3);
         _blob.Files = FullPlusLogs(3);
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        Assert.Equal(4, vm.RestorePoints.Count);
-        Assert.Contains(vm.RestorePoints, p => p.Timestamp == fresh);
+        Assert.Equal(4, vm.Timeline.Points.Count);
+        Assert.Contains(vm.Timeline.Points, p => p.Timestamp == fresh);
     }
 
     // ── filtering ───────────────────────────────────────────────────────────────

@@ -150,7 +150,7 @@ public class ChainCheckStateTests
         Assert.True(vm.VerifyPassed);
 
         // The result belongs to the chain that was checked.
-        vm.SelectedRestorePoint = vm.RestorePoints.First();
+        vm.Timeline.SelectedPoint = vm.Timeline.Points.First();
 
         Assert.False(vm.ChainCheckPassed);
         Assert.False(vm.VerifyPassed);
