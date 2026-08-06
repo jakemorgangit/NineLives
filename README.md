@@ -242,7 +242,7 @@ Three modes, all of which store nothing:
 
 | Mode | What it does | When to pick it |
 | --- | --- | --- |
-| **Interactive (MFA)** | Opens a browser to sign in | The mode that satisfies multi-factor authentication. Optionally give a username to pre-select the account |
+| **Interactive (MFA)** | Signs in through the Windows account broker, parented to the app window | The mode that satisfies multi-factor authentication. Optionally give a username to pre-select the account |
 | **Integrated** | Uses the Windows account you are already signed in with, no prompt | Machine joined to the directory |
 | **Default** | Environment, then managed identity, then the signed-in account, then a prompt | SQL Server on an Azure VM, where the managed identity should be used |
 

@@ -38,6 +38,11 @@ public class SqlServerService : ISqlServerService
         // the token through MSAL, and the app never sees or stores a secret for it (#30).
         if (server.AuthMode.IsEntra())
         {
+            // Before the connection string names a method, make sure the provider servicing it has
+            // a window to parent its prompt to - otherwise the sign-in fails with
+            // "a window handle must be configured" rather than showing anything.
+            EntraAuthentication.Register(EntraAuthentication.ActiveWindowHandle);
+
             builder.Authentication = server.AuthMode switch
             {
                 AuthMode.EntraInteractive => SqlAuthenticationMethod.ActiveDirectoryInteractive,

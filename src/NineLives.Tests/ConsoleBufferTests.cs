@@ -13,7 +13,16 @@ namespace Blackcat.NineLives.Tests;
 /// </summary>
 public class ConsoleBufferTests
 {
-    private static ConsoleBuffer New(Action<string>? alsoLog = null) => new(alsoLog);
+    /// <summary>
+    /// No dispatcher, said outright rather than inferred from the thread.
+    ///
+    /// These used to construct the plain way and rely on an xUnit worker thread having no
+    /// dispatcher on it. That is not something a test can assume: a worker that had already run
+    /// something which left a dispatcher behind made the buffer wait for a timer nothing was
+    /// pumping, and every assertion here saw an empty console. It reproduced only on CI, because
+    /// fewer cores means more thread reuse.
+    /// </summary>
+    private static ConsoleBuffer New(Action<string>? alsoLog = null) => new(alsoLog, dispatcher: null);
 
     [Fact]
     public void AMessageBecomesALine()
@@ -132,6 +141,29 @@ public class ConsoleBufferTests
         Assert.Empty(console.Text);
     }
 
+    /// <summary>
+    /// The CI failure, reproduced deterministically.
+    ///
+    /// Eight tests in this class went red on CI and nowhere else. The cause was not the console at
+    /// all: a worker thread had been used for something that left a Dispatcher on it, and the
+    /// buffer used to ask the CURRENT thread whether one existed. It found one, waited for a timer
+    /// nothing was pumping, and every assertion here saw an empty console. Fewer cores on CI meant
+    /// more thread reuse, which is why a local run never showed it.
+    ///
+    /// The buffer now takes its dispatcher at construction instead of sniffing for one, so what the
+    /// thread happens to be carrying no longer decides anything.
+    /// </summary>
+    [Fact]
+    public void AThreadThatAlreadyCarriesADispatcherChangesNothing()
+    {
+        _ = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+
+        var console = New();
+        console.Append("first\nsecond");
+
+        Assert.Equal(["first", "second"], console.Lines.Select(l => l.Text));
+    }
+
     [Fact]
     public void ClearingDropsAnythingStillBuffered()
     {
@@ -164,7 +196,9 @@ public class ConsoleBufferBatchingTests(WpfFixture wpf)
     {
         wpf.Invoke(() =>
         {
+            // Constructed on the dispatcher thread, so it picks one up the ordinary way.
             var console = new ConsoleBuffer { IsRunning = true };
+            Assert.True(console.HasDispatcher, "the batching test needs a real dispatcher to batch on");
 
             console.Append("first");
             console.Append("second");
@@ -187,7 +221,7 @@ public class ConsoleBufferBatchingTests(WpfFixture wpf)
     [Fact]
     public async Task WithNoDispatcherTheLinesApplyImmediately()
     {
-        var console = new ConsoleBuffer { IsRunning = true };
+        var console = new ConsoleBuffer(null, dispatcher: null) { IsRunning = true };
 
         await Task.Run(() => console.Append("from a thread with no dispatcher"));
 
