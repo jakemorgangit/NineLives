@@ -544,10 +544,10 @@ public class XamlLoadTests(WpfFixture wpf)
             };
 
             var vm = NewRestoreViewModel();
-            vm.HasRestorePoints = true;
-            vm.HasVisiblePoints = true;
-            vm.PointCountText = "Showing 1 of 4 restore point(s)";
-            vm.RestorePoints =
+            vm.Timeline.HasPoints = true;
+            vm.Timeline.HasVisiblePoints = true;
+            vm.Timeline.CountText = "Showing 1 of 4 restore point(s)";
+            vm.Timeline.Points =
             [
                 new RestorePoint
                 {

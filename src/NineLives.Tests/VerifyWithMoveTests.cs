@@ -272,7 +272,7 @@ public class VerifyWithMoveViewModelTests(WpfFixture wpf)
             await vm.VerifyChainCommand.ExecuteAsync(null);
 
             // The warning belongs to the chain that was verified.
-            vm.SelectedRestorePoint = null;
+            vm.Timeline.SelectedPoint = null;
             problem = vm.HasTargetPathProblem;
         });
 

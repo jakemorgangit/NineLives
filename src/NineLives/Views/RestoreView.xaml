@@ -108,7 +108,7 @@
                             <Run Text="{Binding SetCount, Mode=OneWay}" FontWeight="SemiBold" />
                             <Run Text=" total sets" />
                         </TextBlock>
-                        <TextBlock Grid.Column="4" Text="{Binding RestoreWindowText}"
+                        <TextBlock Grid.Column="4" Text="{Binding Timeline.WindowText}"
                                    Style="{StaticResource SecondaryText}"
                                    VerticalAlignment="Center" HorizontalAlignment="Right" />
                     </Grid>
@@ -153,7 +153,7 @@
 
             <!-- Step 2: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding HasRestorePoints, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Timeline.HasPoints, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <TextBlock Text="2. SELECT RESTORE POINT"
                                Style="{StaticResource SubHeaderText}"
@@ -175,29 +175,29 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <CheckBox Content="Full" IsChecked="{Binding ShowFullPoints}"
+                                <CheckBox Content="Full" IsChecked="{Binding Timeline.ShowFull}"
                                           Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
-                                <CheckBox Content="Diff" IsChecked="{Binding ShowDiffPoints}"
+                                <CheckBox Content="Diff" IsChecked="{Binding Timeline.ShowDiff}"
                                           Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
-                                <CheckBox Content="Log" IsChecked="{Binding ShowLogPoints}"
+                                <CheckBox Content="Log" IsChecked="{Binding Timeline.ShowLog}"
                                           Style="{StaticResource DarkCheckBox}" Margin="0,0,20,0" />
 
                                 <TextBlock Text="From" Style="{StaticResource SecondaryText}"
                                            VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <TextBox Text="{Binding PointsFromText, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Text="{Binding Timeline.FromText, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource DarkTextBox}"
                                          Width="150" Margin="0,0,12,0"
                                          ToolTip="yyyy-MM-dd or yyyy-MM-dd HH:mm:ss. Leave empty for no lower bound." />
 
                                 <TextBlock Text="To" Style="{StaticResource SecondaryText}"
                                            VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <TextBox Text="{Binding PointsToText, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Text="{Binding Timeline.ToText, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource DarkTextBox}"
                                          Width="150"
                                          ToolTip="yyyy-MM-dd or yyyy-MM-dd HH:mm:ss. Leave empty for no upper bound." />
                             </StackPanel>
 
-                            <TextBlock Grid.Column="1" Text="{Binding PointCountText}"
+                            <TextBlock Grid.Column="1" Text="{Binding Timeline.CountText}"
                                        Style="{StaticResource SecondaryText}"
                                        VerticalAlignment="Center"
                                        HorizontalAlignment="Right"
@@ -205,12 +205,12 @@
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal">
                                 <Button Content="Zoom to day"
-                                        Command="{Binding ZoomToSelectedDayCommand}"
+                                        Command="{Binding Timeline.ZoomToSelectedDayCommand}"
                                         Style="{StaticResource SecondaryButton}"
                                         Padding="10,4" FontSize="11" Margin="0,0,8,0"
                                         ToolTip="Narrows the range to the day the selected point falls on." />
                                 <Button Content="Reset"
-                                        Command="{Binding ResetPointFiltersCommand}"
+                                        Command="{Binding Timeline.ResetFiltersCommand}"
                                         Style="{StaticResource SecondaryButton}"
                                         Padding="10,4" FontSize="11"
                                         ToolTip="Show every restore point again." />
@@ -223,7 +223,7 @@
                                Foreground="{DynamicResource WarningBrush}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,12"
-                               Visibility="{Binding HasVisiblePoints, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                               Visibility="{Binding Timeline.HasVisiblePoints, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
 
                     <!-- ========== VISUAL TIMELINE ========== -->
                     <Border Background="{DynamicResource InputBackgroundBrush}"
@@ -247,9 +247,9 @@
                             </StackPanel>
 
                             <!-- Dots area (stacked vertically) -->
-                            <Grid Grid.Row="1" Height="{Binding TimelineHeight}" Margin="7,0">
+                            <Grid Grid.Row="1" Height="{Binding Timeline.TrackHeight}" Margin="7,0">
                                 <!-- Vertical guide lines at tick positions -->
-                                <ItemsControl ItemsSource="{Binding TimelineTicks}" IsHitTestVisible="False">
+                                <ItemsControl ItemsSource="{Binding Timeline.Ticks}" IsHitTestVisible="False">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <Grid />
@@ -271,7 +271,7 @@
                                 </ItemsControl>
 
                                 <!-- Clickable restore point dots -->
-                                <ItemsControl ItemsSource="{Binding RestorePoints}"
+                                <ItemsControl ItemsSource="{Binding Timeline.Points}"
                                               x:Name="TimelineDots">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -282,7 +282,7 @@
                                         <DataTemplate>
                                             <Button HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                                     Cursor="Hand"
-                                                    Command="{Binding DataContext.SelectRestorePointCommand,
+                                                    Command="{Binding DataContext.Timeline.SelectPointCommand,
                                                               RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                     CommandParameter="{Binding}">
                                                 <Button.Template>
@@ -334,7 +334,7 @@
                                         VerticalAlignment="Top" CornerRadius="1.5" />
 
                                 <!-- Tick marks with labels -->
-                                <ItemsControl ItemsSource="{Binding TimelineTicks}">
+                                <ItemsControl ItemsSource="{Binding Timeline.Ticks}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <Grid />
@@ -363,12 +363,16 @@
                             <!-- Start/End date labels -->
                             <Grid Grid.Row="3" Margin="7,2,7,0">
                                 <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Left"
-                                           Text="{Binding TimelineStartText}"
+                                           Text="{Binding Timeline.StartText}"
                                            FontSize="10" />
+                                <!-- The END of the range, not the whole range: this label sits at
+                                     the right-hand end of the track and was showing "start to end",
+                                     so the start time appeared twice and the end was buried in it.
+                                     The full range is in the header above (#115 seam 2). -->
                                 <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Right"
                                            FontSize="10">
                                     <TextBlock.Text>
-                                        <Binding Path="RestoreWindowText"
+                                        <Binding Path="Timeline.EndText"
                                                  FallbackValue=""
                                                  TargetNullValue="" />
                                     </TextBlock.Text>
@@ -383,16 +387,16 @@
                          actually trying to do. Sortable, and its selection is the same selection
                          as the timeline's (#27). -->
                     <TextBlock Text="RESTORE POINTS" Style="{StaticResource LabelText}" Margin="0,4,0,4"
-                               Visibility="{Binding HasVisiblePoints, Converter={StaticResource BoolToVis}}" />
-                    <DataGrid ItemsSource="{Binding RestorePoints}"
-                              SelectedItem="{Binding SelectedRestorePoint}"
+                               Visibility="{Binding Timeline.HasVisiblePoints, Converter={StaticResource BoolToVis}}" />
+                    <DataGrid ItemsSource="{Binding Timeline.Points}"
+                              SelectedItem="{Binding Timeline.SelectedPoint}"
                               Style="{StaticResource DarkDataGrid}"
                               MaxHeight="240"
                               Margin="0,0,0,12"
                               CanUserSortColumns="True"
                               ScrollViewer.CanContentScroll="True"
                               EnableRowVirtualization="True"
-                              Visibility="{Binding HasVisiblePoints, Converter={StaticResource BoolToVis}}">
+                              Visibility="{Binding Timeline.HasVisiblePoints, Converter={StaticResource BoolToVis}}">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Point in time" Width="180"
                                                 SortMemberPath="Timestamp"
@@ -490,7 +494,7 @@
 
                         <TextBlock Grid.Column="0" VerticalAlignment="Center">
                             <Run Text="Selected: " Foreground="{DynamicResource SecondaryTextBrush}" />
-                            <Run Text="{Binding SelectedRestorePoint.TimestampDisplay, Mode=OneWay}"
+                            <Run Text="{Binding Timeline.SelectedPoint.TimestampDisplay, Mode=OneWay}"
                                  FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
                             <Run Text="  |  " Foreground="{DynamicResource SecondaryTextBrush}" />
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{DynamicResource SecondaryTextBrush}" />
