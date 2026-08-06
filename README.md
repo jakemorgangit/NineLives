@@ -199,19 +199,22 @@ The executable will be created at `./publish/NineLives.exe`.
 
 #### Entra ID for Blob Storage
 
-> **Untested against a real tenant.** There is no Entra-enabled storage account to develop this
-> against, so what is verified is which credential the app uses and what it stops storing — not that
-> a token is accepted. **Test Connection** will tell you honestly whether it works; please open an
-> issue either way.
-
 | Mode | What it does | When to pick it |
 | --- | --- | --- |
 | **Interactive (MFA)** | Opens a browser to sign in. The sign-in lasts as long as the app is running and is written nowhere | Any Entra-enabled account, including MFA |
 | **Default** | Environment, then managed identity, then Azure CLI / Visual Studio sign-in, then a prompt | Running the app on an Azure VM with a managed identity |
 
-Your account needs **Storage Blob Data Reader** on the container. Owner or Contributor on the
-subscription is not enough on its own — the data-plane roles are separate from the management-plane
-ones, which is the usual first surprise.
+Your account needs **Storage Blob Data Reader** on the container. Owner or Contributor is **not**
+enough — blob *data* access is a separate set of roles from the ones that administer the account,
+which is the usual first surprise.
+
+If another tool works with the same account, that is not a contradiction. Azure Storage Explorer
+commonly falls back to the storage **account key**, which Owner *can* fetch through the management
+plane, so it never exercises the role at all.
+
+When a permission error does appear, **Test Connection names the account it signed in as**. Checking
+that first is worth doing — a 403 against an account that demonstrably has access usually means a
+different account or tenant was used than the one being thought about.
 
 Switching a container from SAS to Entra deletes its stored token from Windows Credential Manager. An
 organisation that has banned long-lived SAS has banned it wherever it is sitting.

@@ -98,7 +98,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
                 var labels = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
                 Assert.DoesNotContain("SAS TOKEN", labels);
-                Assert.Contains(labels, t => t.Contains("has not been tested", StringComparison.Ordinal));
+                Assert.Contains(labels, t => t.Contains("Owner or Contributor is NOT enough", StringComparison.Ordinal));
                 Assert.Contains(labels, t => t.Contains("Storage Blob Data Reader", StringComparison.Ordinal));
 
                 listener.AssertNone("BlobConfigView Entra");
@@ -123,7 +123,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             var labels = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
             Assert.Contains("SAS TOKEN", labels);
-            Assert.DoesNotContain(labels, t => t.Contains("has not been tested", StringComparison.Ordinal));
+            Assert.DoesNotContain(labels, t => t.Contains("Owner or Contributor is NOT enough", StringComparison.Ordinal));
         });
     }
 

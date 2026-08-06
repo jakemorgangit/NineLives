@@ -360,9 +360,9 @@
                                     Visibility="{Binding IsEntraAuth, Converter={StaticResource BoolToVis}}">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap"
-                                               Text="Entra sign-in is built but has not been tested against a real tenant - there is no Entra-enabled storage account to develop it against. Test Connection will tell you honestly whether it works. Please report what happens either way." />
+                                               Text="Your account needs the Storage Blob Data Reader role on this container. Owner or Contributor is NOT enough - blob data access is a separate set of roles from the ones that administer the account, which is the usual reason a permission error appears against an account that can plainly see the container in the portal." />
                                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,0"
-                                               Text="Your account needs the Storage Blob Data Reader role on this container - Owner or Contributor on the subscription is not enough on its own. This covers browsing only: the RESTORE itself runs on SQL Server, which needs its own credential for the container URL." />
+                                               Text="This covers browsing only: the RESTORE itself runs on SQL Server, which needs its own credential for the container URL. Test Connection names the account it signed in as, which is worth checking first if the permission looks right." />
                                 </StackPanel>
                             </Border>
 

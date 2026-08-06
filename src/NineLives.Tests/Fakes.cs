@@ -90,6 +90,13 @@ public sealed class FakeBlobStorageService : IBlobStorageService
         return Task.FromResult(true);
     }
 
+    /// <summary>What DescribeSignedInIdentityAsync should answer.</summary>
+    public string? SignedInIdentity { get; set; }
+
+    public Task<string?> DescribeSignedInIdentityAsync(
+        BlobContainerConfig config, CancellationToken ct = default)
+        => Task.FromResult(config.AuthMode.IsEntra() ? SignedInIdentity : null);
+
     public Task<List<string>> ListTopLevelFoldersAsync(BlobContainerConfig config, CancellationToken ct = default)
         => Task.FromResult(new List<string>());
 
