@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Tests;
@@ -101,7 +101,8 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
     public ContainerSummary GetContainerSummary(List<BackupFileInfo> files) => _real.GetContainerSummary(files);
     public ContainerSummary GetSetBasedSummary(List<BackupSet> sets) => _real.GetSetBasedSummary(sets);
-    public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files) => _real.GroupIntoBackupSets(files);
+    public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files, string? backupServerTimeZoneId = null)
+        => _real.GroupIntoBackupSets(files, backupServerTimeZoneId);
     public List<string> GetDiscoveredDatabases(List<BackupFileInfo> files) => _real.GetDiscoveredDatabases(files);
     public List<string> GetDiscoveredServers(List<BackupFileInfo> files) => _real.GetDiscoveredServers(files);
 }

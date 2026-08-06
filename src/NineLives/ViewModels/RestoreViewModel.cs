@@ -789,7 +789,8 @@ public partial class RestoreViewModel : ViewModelBase
             var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
 
             _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer, scope, progress, ct);
-            _allSets = _blobService.GroupIntoBackupSets(_allBackups);
+            _allSets = _blobService.GroupIntoBackupSets(
+                _allBackups, SelectedContainer?.BackupServerTimeZoneId);
 
             var servers = _blobService.GetDiscoveredServers(_allBackups);
             DiscoveredServers = new ObservableCollection<string>(servers);

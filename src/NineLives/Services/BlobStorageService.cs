@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Blackcat.NineLives.Models;
@@ -257,7 +257,8 @@ public class BlobStorageService : IBlobStorageService
     /// <summary>
     /// Groups individual backup files into logical BackupSets, handling striped backups.
     /// </summary>
-    public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files)
+    public List<BackupSet> GroupIntoBackupSets(
+        List<BackupFileInfo> files, string? backupServerTimeZoneId = null)
     {
         var groups = new Dictionary<string, List<BackupFileInfo>>();
 
@@ -304,18 +305,24 @@ public class BlobStorageService : IBlobStorageService
             var (setId, _) = BackupSet.ParseFileName(first.FileName);
 
             // The filename is the backup server's local clock; the blob's LastModified is UTC.
-            // Nothing here can reconcile them, so record WHICH one this set got and let the UI
-            // mark the fallback as approximate rather than presenting both as one timeline.
+            //
+            // With the container's backup server time zone configured they can be put on ONE clock
+            // (#102). Without it they can only be labelled - so record which one this set got, and
+            // let the UI say so rather than presenting both as a single exact timeline (#47).
             var parsed = BackupSet.ParseTimestamp(setId);
+            var converted = parsed == null
+                ? BackupTime.ToBackupServerTime(first.LastModified, backupServerTimeZoneId)
+                : null;
 
             sets.Add(new BackupSet
             {
                 SetId = setId,
                 Type = first.Type,
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
-                Timestamp = parsed ?? BackupTime.WallClock(first.LastModified),
-                TimestampSource = parsed != null
-                    ? BackupTimestampSource.FileName
+                Timestamp = parsed ?? converted ?? BackupTime.WallClock(first.LastModified),
+                TimestampSource =
+                    parsed != null ? BackupTimestampSource.FileName
+                    : converted != null ? BackupTimestampSource.BlobLastModifiedConverted
                     : BackupTimestampSource.BlobLastModified,
                 DatabaseName = first.InferredDatabaseName,
                 ServerName = first.InferredServerName,

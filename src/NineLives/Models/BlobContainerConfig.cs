@@ -64,6 +64,21 @@ public class BlobContainerConfig : INotifyPropertyChanged
     /// </summary>
     public string? AgPathPattern { get; set; }
 
+    /// <summary>
+    /// The time zone the backup SERVER runs in, if known (#102).
+    ///
+    /// A backup's time comes from either its filename - which the backup job wrote in the server's
+    /// local time - or the blob's LastModified, which is UTC. Without this they cannot be put on
+    /// one clock, only labelled; with it, the UTC readings convert and sort correctly against the
+    /// rest.
+    ///
+    /// Stored as a system id (Windows or IANA - .NET accepts both since 6.0). Null means unknown,
+    /// which is the default and behaves exactly as before. An id this machine does not recognise
+    /// is treated as unknown rather than as an error: someone browsing a container should not be
+    /// stopped by a setting that only affects how a few timestamps are displayed.
+    /// </summary>
+    public string? BackupServerTimeZoneId { get; set; }
+
     private ObservableCollection<string> _tags = [];
 
     /// <summary>
