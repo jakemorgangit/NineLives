@@ -25,10 +25,11 @@
         <KeyBinding Modifiers="Ctrl" Key="D1" Command="{Binding NavigateToCommand}" CommandParameter="Blob Storage" />
         <KeyBinding Modifiers="Ctrl" Key="D2" Command="{Binding NavigateToCommand}" CommandParameter="SQL Servers" />
         <KeyBinding Modifiers="Ctrl" Key="D3" Command="{Binding NavigateToCommand}" CommandParameter="Browse Backups" />
-        <KeyBinding Modifiers="Ctrl" Key="D4" Command="{Binding NavigateToCommand}" CommandParameter="Restore" />
-        <KeyBinding Modifiers="Ctrl" Key="D5" Command="{Binding NavigateToCommand}" CommandParameter="History" />
-        <KeyBinding Modifiers="Ctrl" Key="D6" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
-        <KeyBinding Modifiers="Ctrl" Key="D7" Command="{Binding NavigateToCommand}" CommandParameter="About" />
+        <KeyBinding Modifiers="Ctrl" Key="D4" Command="{Binding NavigateToCommand}" CommandParameter="Back Up" />
+        <KeyBinding Modifiers="Ctrl" Key="D5" Command="{Binding NavigateToCommand}" CommandParameter="Restore" />
+        <KeyBinding Modifiers="Ctrl" Key="D6" Command="{Binding NavigateToCommand}" CommandParameter="History" />
+        <KeyBinding Modifiers="Ctrl" Key="D7" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
+        <KeyBinding Modifiers="Ctrl" Key="D8" Command="{Binding NavigateToCommand}" CommandParameter="About" />
         <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
         <KeyBinding Modifiers="Ctrl" Key="G" Command="{Binding GenerateScriptCommand}" />
         <KeyBinding Key="Escape" Command="{Binding CancelCurrentCommand}" />
@@ -50,6 +51,9 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:BlobBrowserViewModel}">
             <views:BlobBrowserView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:BackupViewModel}">
+            <views:BackupView />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RestoreViewModel}">
             <views:RestoreView />
@@ -259,6 +263,16 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x1F4C2;" FontSize="15" VerticalAlignment="Center" Width="24" />
                                 <TextBlock Text="Browse Backups" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Back Up'}"
+                                     Command="{Binding NavigateToCommand}"
+                                     CommandParameter="Back Up">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x1F4BE;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                                <TextBlock Text="Back Up" VerticalAlignment="Center" />
                             </StackPanel>
                         </RadioButton>
 

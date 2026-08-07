@@ -215,7 +215,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             AppendLog("Beginning restore execution...\n");
 
-            await _sql.ExecuteRestoreWithProgressAsync(
+            await _sql.ExecuteWithProgressAsync(
                 run.Server,
                 run.Script,
                 // InvokeAsync, not Invoke. This callback runs on the connection's thread when SQL
