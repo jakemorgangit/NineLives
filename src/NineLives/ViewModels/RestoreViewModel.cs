@@ -28,8 +28,6 @@ public partial class RestoreViewModel : ViewModelBase
     // Two separate operations, two separate sources: browsing a container and running a restore
     // can both be in flight, and cancelling one must not touch the other (#25).
     private readonly OperationCancellation _loadCancellation = new();
-    private readonly OperationCancellation _executeCancellation = new();
-
     /// <summary>
     /// The server queries a user starts and might want to abandon: verify, validate, the two
     /// metadata reads, creating the credential, and the post-failure recovery actions (#111).
@@ -46,6 +44,13 @@ public partial class RestoreViewModel : ViewModelBase
     /// say about it, and what Execute should do before it runs (#115 seam 5).
     /// </summary>
     public ServerCredentialViewModel Credential { get; }
+
+    /// <summary>
+    /// Running the restore: arming, the countdown, execution, cancellation, the recovery guidance
+    /// afterwards and the history entry (#115 seam 6). The only code on this screen that writes to
+    /// somebody's database.
+    /// </summary>
+    public RestoreExecutionViewModel Execution { get; }
 
     #region Observable Properties
 
@@ -156,29 +161,14 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasInventoryIssues;
 
-    // ── Aftermath of a failed restore (#14) ─────────────────────────────────────
-    // A chain that stops part-way leaves the target in RESTORING, and in SINGLE_USER too if
-    // Disconnect sessions was on, because the closing SET MULTI_USER never ran. Both block other
-    // connections, at the worst possible moment.
-
-    [ObservableProperty]
-    private string _recoveryStateMessage = string.Empty;
-
-    [ObservableProperty]
-    private ObservableCollection<RecoveryAction> _recoveryActions = [];
-
-    [ObservableProperty]
-    private bool _hasRecoveryActions;
+    // The aftermath of a failed restore (#14) lives on the execution seam with the run that
+    // produced it (#115 seam 6).
 
     // ── Cancellation (#25) ──────────────────────────────────────────────────────
 
     /// <summary>True while a backup listing is running and has not been asked to stop.</summary>
     [ObservableProperty]
     private bool _canCancelLoad;
-
-    /// <summary>True while a restore is running and has not been asked to stop.</summary>
-    [ObservableProperty]
-    private bool _canCancelExecute;
 
     /// <summary>True while a server query is running and has not been asked to stop (#111).</summary>
     [ObservableProperty]
@@ -211,10 +201,10 @@ public partial class RestoreViewModel : ViewModelBase
     private void RefreshCancelState()
     {
         CanCancelLoad = _loadCancellation.CanCancel;
-        CanCancelExecute = _executeCancellation.CanCancel;
+
         CanCancelQuery = _queryCancellation.CanCancel;
         IsCancelling = _loadCancellation.IsCancelling
-            || _executeCancellation.IsCancelling
+            || Execution.IsCancelling
             || _queryCancellation.IsCancelling;
     }
 
@@ -374,9 +364,7 @@ public partial class RestoreViewModel : ViewModelBase
 
         // Disarm. An armed Execute that survives a container change is an armed Execute aimed at
         // something the user is no longer looking at.
-        IsExecuteArmed = false;
-        ExecuteButtonText = "Execute on Server";
-        _armTimeoutCts?.Cancel();
+        Execution.Disarm();
     }
 
     [ObservableProperty]
@@ -428,25 +416,11 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerName = string.Empty;
 
-    [ObservableProperty]
-    private bool _isExecuting;
-
-    [ObservableProperty]
-    private bool _executionComplete;
-
-    [ObservableProperty]
-    private bool _executionSuccess;
-
-    [ObservableProperty]
-    private bool _isExecuteArmed;
-
-    [ObservableProperty]
-    private int _executeCountdown;
-
-    [ObservableProperty]
-    private string _executeButtonText = "Execute on Server";
-
-    private CancellationTokenSource? _armTimeoutCts;
+    /// <summary>
+    /// Whether a restore is running. The state belongs to the execution seam; this reads it, so
+    /// the things on this screen that must not happen mid-restore still have one thing to ask.
+    /// </summary>
+    public bool IsExecuting => Execution.IsExecuting;
 
     // Backup summary
     [ObservableProperty]
@@ -485,9 +459,27 @@ public partial class RestoreViewModel : ViewModelBase
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
 
-        // Every console message is written to the log file as it arrives, so the file cannot drift
-        // from what was on screen.
-        Console = new ConsoleBuffer(message => _log.Info($"[execute] {message.Trim()}"));
+        Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation);
+
+        // The run reports through the same status line as the rest of the screen, and its cancel
+        // state feeds the one Stop button that covers every server call here.
+        Execution.CancelStateChanged += RefreshCancelState;
+        Execution.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(ViewModelBase.StatusMessage):
+                    if (!Execution.HasError) SetStatus(Execution.StatusMessage);
+                    break;
+                case nameof(ViewModelBase.ErrorMessage) when Execution.HasError:
+                    SetError(Execution.ErrorMessage);
+                    break;
+                case nameof(RestoreExecutionViewModel.IsExecuting):
+                    OnExecutionRunningChanged();
+                    OnPropertyChanged(nameof(IsBusyWithAnything));
+                    break;
+            }
+        };
 
         // Shares _queryCancellation so the Stop button stops a credential write too (#111), and
         // reports through the same status line as everything else on this screen (#115 seam 5).
@@ -1274,8 +1266,10 @@ public partial class RestoreViewModel : ViewModelBase
 
     // Verification opens its own connection and reads whole backups. Letting it start while a
     // restore is running would put a second heavy reader on the same server at the worst moment.
-    partial void OnIsExecutingChanged(bool value)
+    // Called from the execution seam's own IsExecuting, which is where that state now lives.
+    private void OnExecutionRunningChanged()
     {
+        OnPropertyChanged(nameof(IsExecuting));
         VerifyChainCommand.NotifyCanExecuteChanged();
         RefreshExecuteBlockedReason();
         RefreshCheckState();
@@ -1637,6 +1631,14 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Arms the button, then hands the run to the execution seam (#115 seam 6).
+    ///
+    /// What stays here is what belongs to this screen rather than to the run: whether the script
+    /// on display is the one the options currently produce, and whether the chain can restore at
+    /// all. Both are checked on the CONFIRM press as well as when arming - validation can finish
+    /// during the five-second countdown and find an error that was not known when it was armed.
+    /// </summary>
     [RelayCommand]
     private async Task ExecuteScriptAsync()
     {
@@ -1651,355 +1653,56 @@ public partial class RestoreViewModel : ViewModelBase
         if (string.IsNullOrEmpty(GeneratedScript))
         {
             SetError("The current options do not produce a script. Check the settings above.");
-            IsExecuteArmed = false;
-            ExecuteButtonText = "Execute on Server";
+            Execution.Disarm();
             return;
         }
 
-        // Refuse to run when the chain cannot possibly restore. This is the last safe moment:
-        // once execution starts, WITH REPLACE drops the target database, and a chain that fails
-        // partway leaves nothing usable behind. Failing here costs the user a few seconds;
-        // failing mid-restore costs them the database they were restoring over.
-        //
-        // Checked on the confirm press as well as when arming: validation can finish during the
-        // five-second countdown and find an error that was not known when the button was armed.
+        // Once execution starts, WITH REPLACE drops the target database, and a chain that fails
+        // partway leaves nothing usable behind. Failing here costs a few seconds; failing
+        // mid-restore costs the database being restored over.
         if (HasChainErrors)
         {
             var first = ChainIssues.First(i => i.IsError);
             SetError($"Cannot execute: {first.Title}. {first.Detail}");
-            IsExecuteArmed = false;
-            ExecuteButtonText = "Execute on Server";
+            Execution.Disarm();
             return;
         }
 
-        if (!IsExecuteArmed)
+        if (!Execution.IsArmed)
         {
-            IsExecuteArmed = true;
-            ExecuteButtonText = "Confirm Execute (5)";
-            ExecuteCountdown = 5;
-
-            _armTimeoutCts?.Cancel();
-            _armTimeoutCts = new CancellationTokenSource();
-
-            _ = RunArmCountdownAsync(_armTimeoutCts.Token);
+            Execution.Arm();
             return;
         }
 
-        _armTimeoutCts?.Cancel();
-        IsExecuteArmed = false;
-        ExecuteButtonText = "Execute on Server";
-
-        var startedAt = DateTime.Now;
-        var outcome = RestoreOutcome.Failed;
-        string? failure = null;
-
-        // Set false when the run is abandoned before anything was attempted, so history records
-        // executions rather than button presses.
-        var attempted = true;
-
-        var executeToken = _executeCancellation.Begin();
-        IsExecuting = true;
-        Console.IsRunning = true;
-        // Reset alongside ExecutionComplete. Left over from a previous run it could combine with an
-        // early bail-out to show the success banner - and write "Outcome: Succeeded" into a saved
-        // log - for a restore that never ran.
-        ExecutionSuccess = false;
-        ExecutionComplete = false;
-        Console.Clear();
-        RecoveryActions = [];
-        HasRecoveryActions = false;
-        RefreshCancelState();
-
-        try
+        // Execute against the server we are actually connected to, not one looked up by name. This
+        // used to re-read config.json and take the first entry whose ServerName matched, which is a
+        // different object whenever two entries share a host and differ in auth, port or encryption
+        // - so the restore ran under credentials the user never connected with or tested.
+        var server = ConnectedServer;
+        if (server == null)
         {
-            // Execute against the server we are actually connected to, not one looked up by name.
-            // This used to re-read config.json and take the first entry whose ServerName matched,
-            // which is a different object whenever two entries share a host and differ in auth,
-            // port or encryption - a Windows-auth and a SQL-auth entry for the same box, say. The
-            // restore would then run under credentials the user never connected with or tested.
-            // Every other server call on this screen already uses ConnectedServer.
-            var server = ConnectedServer;
-            if (server == null)
-            {
-                attempted = false;
-                SetError("Not connected to a server.");
-                return;
-            }
+            Execution.Disarm();
+            SetError("Not connected to a server.");
+            return;
+        }
 
-            // Everything about the server-side credential lives on the child (#115 seam 5),
-            // including the decision not to touch one. A refusal has written nothing, so there is
-            // nothing to unwind - and nothing to file in the history either.
-            var preflight = await Credential.PrepareForRestoreAsync(server, AppendLog);
-            if (!preflight.CanProceed)
-            {
-                attempted = false;
-                SetError(preflight.Refusal!);
-                return;
-            }
-
-            _log.ServerChange(server.ServerName,
-                $"restore starting: target [{TargetDatabaseName}], " +
-                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={Options.WithReplace}, " +
-                $"recovery={Options.RecoveryMode}, stopAt={PointInTime.Effective?.ToString("s") ?? "none"}");
-
-            AppendLog("Beginning restore execution...\n");
-
-            await _sqlService.ExecuteRestoreWithProgressAsync(
+        await Execution.RunAsync(
+            new RestoreRun(
                 server,
                 GeneratedScript,
-                // InvokeAsync, not Invoke. This callback runs on the connection's thread when SQL
-                // Server sends an info message, and a synchronous Invoke BLOCKS that thread until
-                // the UI has finished handling it. With the UI busy re-rendering, progress backed
-                // up and then arrived in bursts - which is precisely what "not live" looked like.
-                // Posting instead lets the restore keep streaming while the UI catches up.
-                msg => Application.Current.Dispatcher.InvokeAsync(() => AppendLog(msg)),
-                executeToken);
-
-            ExecutionSuccess = true;
-            outcome = RestoreOutcome.Succeeded;
-            AppendLog("\nRestore completed successfully!");
-            SetStatus("Restore execution completed successfully.");
-        }
-        catch (OperationCanceledException)
-        {
-            outcome = RestoreOutcome.Cancelled;
-            failure = "Cancelled by the user part-way through the chain.";
-            // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
-            // the client waiting and SQL Server rolls back the statement that was in flight, but
-            // the target stays mid-restore - so this must be as loud as a failure, and it goes
-            // through the same recovery guidance (#14, #25).
-            ExecutionSuccess = false;
-            AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
-                      "restore stopped part-way through the chain.");
-
-            _log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
-                $"restore CANCELLED by user, target [{TargetDatabaseName}]");
-
-            SetError("Restore cancelled. The target database has been left mid-restore - see below.");
-
-            if (ConnectedServer != null)
-                await ReportRecoveryStateAsync(ConnectedServer);
-        }
-        catch (Exception ex)
-        {
-            ExecutionSuccess = false;
-            outcome = RestoreOutcome.Failed;
-            failure = ex.Message;
-            AppendLog($"\nERROR: {ex.Message}");
-            SetError($"Restore failed: {ex.Message}");
-
-            // The restore has stopped part-way and the target is almost certainly not usable.
-            // Find out exactly how, and say so, while the connection is still open (#14).
-            if (ConnectedServer != null)
-                await ReportRecoveryStateAsync(ConnectedServer);
-        }
-        finally
-        {
-            _executeCancellation.End();
-            IsExecuting = false;
-            Console.IsRunning = false;
-            ExecutionComplete = true;
-            Console.Flush();   // nothing buffered may outlive the run
-            RefreshCancelState();
-
-            // After the flush, so the recorded log is the whole console rather than whatever had
-            // made it out of the batching buffer. Recorded for every outcome including cancelled -
-            // "I stopped it" is exactly the kind of thing a change ticket needs to say.
-            if (attempted) RecordHistory(startedAt, outcome, failure);
-        }
+                TargetDatabaseName,
+                SelectedDatabaseName,
+                SelectedContainer?.Name,
+                RestoreChain?.Summary ?? "no chain",
+                Timeline.SelectedPoint?.Timestamp,
+                $"WITH REPLACE={Options.WithReplace}, recovery={Options.RecoveryMode}, " +
+                $"stopAt={PointInTime.Effective?.ToString("s") ?? "none"}"),
+            appendLog => Credential.PrepareForRestoreAsync(server, appendLog));
     }
 
-    /// <summary>
-    /// Files this execution in the history (#31). Never throws: the store swallows its own
-    /// failures, and a restore must not be reported as failed because a record could not be kept.
-    /// </summary>
-    private void RecordHistory(DateTime startedAt, RestoreOutcome outcome, string? failure)
-    {
-        _history.Append(new RestoreHistoryEntry
-        {
-            StartedAt = startedAt,
-            CompletedAt = DateTime.Now,
-            ServerName = ConnectedServer?.ServerName ?? "unknown",
-            TargetDatabase = TargetDatabaseName,
-            ContainerName = SelectedContainer?.Name,
-            SourceDatabase = SelectedDatabaseName,
-            RestorePointTimestamp = Timeline.SelectedPoint?.Timestamp,
-            ChainSummary = RestoreChain?.Summary ?? "no chain",
-            Outcome = outcome,
-            ErrorMessage = failure,
-            Script = GeneratedScript,
-            Log = Console.Text
-        });
-    }
-
-    /// <summary>
-    /// Stops a running restore.
-    ///
-    /// Deliberately worded as a warning rather than a neutral action: stopping a restore part-way
-    /// leaves the target database in RESTORING, which is not a state anyone wants to discover by
-    /// accident. The recovery panel that appears afterwards explains how to get out of it.
-    /// </summary>
-    [RelayCommand]
-    private void CancelExecute()
-    {
-        if (!_executeCancellation.CanCancel) return;
-
-        _executeCancellation.Cancel();
-        RefreshCancelState();
-        AppendLog("\nCancellation requested - waiting for SQL Server to roll back the current statement...");
-    }
-
-    /// <summary>
-    /// After a failed restore, works out what state the target database was left in and offers the
-    /// statements that put it right.
-    ///
-    /// This is the moment of maximum stress - a restore has failed mid-incident and the database is
-    /// now in a state that blocks other connections. Leaving someone to work that out from a raw
-    /// SQL error, when the app is still holding the connection that could tell them, is the wrong
-    /// place to stop.
-    /// </summary>
-    private async Task ReportRecoveryStateAsync(ServerConnection server)
-    {
-        RecoveryActions = [];
-        HasRecoveryActions = false;
-        RecoveryStateMessage = string.Empty;
-
-        try
-        {
-            var state = await _sqlService.GetDatabaseRecoveryStateAsync(server, TargetDatabaseName);
-            if (!state.NeedsAttention)
-            {
-                if (!state.Exists)
-                    AppendLog($"\n[{TargetDatabaseName}] is not on the server - nothing was left behind.");
-                return;
-            }
-
-            RecoveryStateMessage = state.Explain(TargetDatabaseName);
-            RecoveryActions = new ObservableCollection<RecoveryAction>(
-                state.SuggestedActions(TargetDatabaseName));
-            HasRecoveryActions = RecoveryActions.Count > 0;
-
-            AppendLog($"\n{RecoveryStateMessage}");
-            foreach (var action in RecoveryActions)
-                AppendLog($"\n  {action.Title}:  {action.Sql}");
-        }
-        catch (Exception ex)
-        {
-            // Best effort. The restore failure is the news; failing to describe the aftermath must
-            // not replace the error the user actually needs to read.
-            AppendLog($"\nCould not check the state of [{TargetDatabaseName}]: {ex.Message}");
-        }
-    }
-
-    /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
-    [RelayCommand]
-    private async Task RunRecoveryActionAsync(RecoveryAction? action)
-    {
-        if (action == null || ConnectedServer == null) return;
-
-        // Cancellable, and it needs it more than most: this runs when a restore has already
-        // failed, RESTORE ... WITH RECOVERY can take a long time on a large database, and it goes
-        // out at CommandTimeout = 0. Without a Stop the only way out was killing the process - at
-        // the exact moment the user is trying to get their database back.
-        var ct = _queryCancellation.Begin();
-        RefreshCancelState();
-
-        try
-        {
-            AppendLog($"\nRunning: {action.Sql}");
-            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql, ct);
-            AppendLog("Completed.");
-            await ReportRecoveryStateAsync(ConnectedServer);
-
-            if (!HasRecoveryActions)
-                SetStatus($"[{TargetDatabaseName}] is back to a usable state.");
-        }
-        catch (OperationCanceledException)
-        {
-            // SQL Server rolls back the statement that was in flight, so the database is where it
-            // was before this step - which is still whatever the failed restore left behind.
-            AppendLog("\nCancelled. The database is in the same state as before this step.");
-            SetStatus("Recovery step cancelled.");
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"\nERROR: {ex.Message}");
-            SetError($"Recovery step failed: {ex.Message}");
-        }
-        finally
-        {
-            _queryCancellation.End();
-            RefreshCancelState();
-        }
-    }
-
-    [RelayCommand]
-    private void CopyRecoveryAction(RecoveryAction? action)
-    {
-        if (action != null)
-            TryCopyToClipboard(action.Sql, "Recovery statement copied to clipboard.");
-    }
-
-    /// <summary>
-    /// Appends to the on-screen console and to the log file at the same time.
-    ///
-    /// One call rather than two so the file cannot drift from what the user was shown - and so a
-    /// restore that ends with the window being closed still leaves a record of how far it got.
-    /// Redaction happens inside the log, not here (#40).
-    /// </summary>
-    /// <summary>
-    /// The execution console. Its batching and line handling live in ConsoleBuffer (#115) - this
-    /// screen only feeds it and shows it.
-    /// </summary>
-    public ConsoleBuffer Console { get; }
-
-    /// <summary>
-    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
-    /// drift from what the user was shown.
-    /// </summary>
-    private void AppendLog(string message) => Console.Append(message);
 
 
 
-    [RelayCommand]
-    private void CopyConsole()
-        => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
-
-    /// <summary>
-    /// Writes the console to a file, with a header saying what it was (#31). The clipboard is fine
-    /// for pasting into a chat window; a change ticket or an incident write-up wants a file, and
-    /// wants it to say which server and which database on its own.
-    /// </summary>
-    [RelayCommand]
-    private void SaveConsole()
-    {
-        if (string.IsNullOrEmpty(Console.Text))
-        {
-            SetError("There is no execution log to save yet.");
-            return;
-        }
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = "Text Files (*.txt)|*.txt|Log Files (*.log)|*.log|All Files (*.*)|*.*",
-            DefaultExt = ".txt",
-            FileName = $"ninelives_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
-        };
-
-        if (dialog.ShowDialog() != true) return;
-
-        try
-        {
-            File.WriteAllText(dialog.FileName, BuildSavedLog());
-            SetStatus($"Execution log saved to {dialog.FileName}");
-        }
-        catch (Exception ex)
-        {
-            // Read-only location, full disk, or a path the database name made invalid. Any of
-            // those used to take the whole app down from inside a synchronous command (#13).
-            SetError($"Could not save the execution log: {ex.Message}");
-        }
-    }
 
     /// <summary>
     /// The console plus the context needed to read it a week later. Redacted on the way out for
@@ -2017,33 +1720,11 @@ public partial class RestoreViewModel : ViewModelBase
         if (Timeline.SelectedPoint != null)
             header.AppendLine($"Point:      {Timeline.SelectedPoint.TimestampDisplay}");
         header.AppendLine($"Chain:      {RestoreChain?.Summary ?? "none"}");
-        header.AppendLine($"Outcome:    {(ExecutionComplete ? (ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
+        header.AppendLine($"Outcome:    {(Execution.ExecutionComplete ? (Execution.ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
         header.AppendLine(new string('-', 60));
         header.AppendLine();
 
-        return LogRedactor.Redact(header + Console.Text);
+        return LogRedactor.Redact(header + Execution.Console.Text);
     }
 
-    private async Task RunArmCountdownAsync(CancellationToken ct)
-    {
-        try
-        {
-            for (int i = 5; i >= 1; i--)
-            {
-                ct.ThrowIfCancellationRequested();
-                ExecuteCountdown = i;
-                ExecuteButtonText = $"Confirm Execute ({i})";
-                await Task.Delay(1000, ct);
-            }
-
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                IsExecuteArmed = false;
-                ExecuteButtonText = "Execute on Server";
-            });
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
 }

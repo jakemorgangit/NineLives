@@ -319,7 +319,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void CancelCurrent()
     {
-        if (Restore.CancelExecuteCommand.CanExecute(null)) { Restore.CancelExecuteCommand.Execute(null); return; }
+        if (Restore.Execution.CancelCommand.CanExecute(null)) { Restore.Execution.CancelCommand.Execute(null); return; }
         if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
         if (Restore.CancelLoadCommand.CanExecute(null)) Restore.CancelLoadCommand.Execute(null);
     }

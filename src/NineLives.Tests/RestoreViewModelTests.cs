@@ -281,11 +281,11 @@ public class RestoreViewModelTests
         };
 
         await vm.ExecuteScriptCommand.ExecuteAsync(null);
-        Assert.True(vm.IsExecuteArmed);
+        Assert.True(vm.Execution.IsArmed);
 
         vm.SelectedContainer = Container();
 
-        Assert.False(vm.IsExecuteArmed);
+        Assert.False(vm.Execution.IsArmed);
     }
 
     // ── point in time (#115 seam 3) ─────────────────────────────────────────────

@@ -53,7 +53,7 @@
                                     <Style TargetType="Ellipse">
                                         <Setter Property="Fill" Value="{DynamicResource ConsoleMutedBrush}" />
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsExecuting}" Value="True">
+                                            <DataTrigger Binding="{Binding Execution.IsExecuting}" Value="True">
                                                 <Setter Property="Fill" Value="{DynamicResource ConsoleSuccessBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -66,16 +66,16 @@
                                        FontSize="11" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <TextBlock Text="{Binding Console.Lines.Count, StringFormat='{}{0} lines'}"
+                            <TextBlock Text="{Binding Execution.Console.Lines.Count, StringFormat='{}{0} lines'}"
                                        Foreground="{DynamicResource ConsoleMutedBrush}"
                                        FontFamily="{StaticResource ConsoleFont}"
                                        FontSize="11" VerticalAlignment="Center" Margin="0,0,12,0" />
                             <Button Content="Copy output"
-                                    Command="{Binding CopyConsoleCommand}"
+                                    Command="{Binding Execution.CopyConsoleCommand}"
                                     Style="{StaticResource SecondaryButton}"
                                     Padding="8,2" FontSize="11" Margin="0,0,8,0" />
                             <Button Content="Save output"
-                                    Command="{Binding SaveConsoleCommand}"
+                                    Command="{Binding Execution.SaveConsoleCommand}"
                                     Style="{StaticResource SecondaryButton}"
                                     Padding="8,2" FontSize="11"
                                     ToolTip="Writes the console to a file, with a header naming the server, the target database and the outcome." />
@@ -87,7 +87,7 @@
                      unbounded height realises every row and virtualisation silently does nothing.
                      A ListBox brings its own virtualising scroll viewer. -->
                 <ListBox Grid.Row="1" x:Name="ConsoleList"
-                         ItemsSource="{Binding Console.Lines}"
+                         ItemsSource="{Binding Execution.Console.Lines}"
                          Style="{StaticResource ConsoleListBox}" />
             </Grid>
         </Border>
@@ -95,14 +95,14 @@
         <!-- What a failed or cancelled restore left behind (#14). -->
         <Border Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,12,0,0"
                 Background="{DynamicResource DangerPanelBackgroundBrush}" BorderBrush="{DynamicResource DangerPanelBorderBrush}" BorderThickness="1"
-                Visibility="{Binding HasRecoveryActions, Converter={StaticResource BoolToVis}}">
+                Visibility="{Binding Execution.HasRecoveryActions, Converter={StaticResource BoolToVis}}">
             <StackPanel>
                 <TextBlock Text="THE TARGET DATABASE NEEDS ATTENTION"
                            Style="{StaticResource LabelText}" Margin="0,0,0,8" />
-                <TextBlock Text="{Binding RecoveryStateMessage}"
+                <TextBlock Text="{Binding Execution.RecoveryStateMessage}"
                            Style="{StaticResource BodyText}"
                            TextWrapping="Wrap" Margin="0,0,0,10" />
-                <ItemsControl ItemsSource="{Binding RecoveryActions}">
+                <ItemsControl ItemsSource="{Binding Execution.RecoveryActions}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Border Background="{DynamicResource InputBackgroundBrush}"
@@ -121,13 +121,13 @@
                                                TextWrapping="Wrap" Margin="0,0,0,8" />
                                     <StackPanel Orientation="Horizontal">
                                         <Button Content="Run this"
-                                                Command="{Binding DataContext.RunRecoveryActionCommand,
+                                                Command="{Binding DataContext.Execution.RunRecoveryActionCommand,
                                                           RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource SecondaryButton}"
                                                 Padding="10,6" Margin="0,0,8,0" />
                                         <Button Content="Copy"
-                                                Command="{Binding DataContext.CopyRecoveryActionCommand,
+                                                Command="{Binding DataContext.Execution.CopyRecoveryActionCommand,
                                                           RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource SecondaryButton}"
@@ -143,9 +143,9 @@
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="Stop restore"
-                    Command="{Binding CancelExecuteCommand}"
+                    Command="{Binding Execution.CancelCommand}"
                     Style="{StaticResource DangerButton}"
-                    Visibility="{Binding CanCancelExecute, Converter={StaticResource BoolToVis}}"
+                    Visibility="{Binding Execution.CanCancel, Converter={StaticResource BoolToVis}}"
                     Padding="14,7" Margin="0,0,8,0"
                     ToolTip="Asks SQL Server to abort the statement in flight. It rolls that statement back, but the target database is left mid-restore." />
             <!-- Enabled only once it has finished. Closing mid-restore would hide the one thing
@@ -153,7 +153,7 @@
             <Button Content="Close"
                     Click="OnClose"
                     Style="{StaticResource SecondaryButton}"
-                    IsEnabled="{Binding ExecutionComplete}"
+                    IsEnabled="{Binding Execution.ExecutionComplete}"
                     Padding="20,7" MinWidth="90" />
         </StackPanel>
     </Grid>

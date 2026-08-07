@@ -218,14 +218,14 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.RecoveryStateMessage = "[MyDb] is in RESTORING state.";
-            vm.RecoveryActions =
+            vm.Execution.RecoveryStateMessage = "[MyDb] is in RESTORING state.";
+            vm.Execution.RecoveryActions =
             [
                 new RecoveryAction("Bring the database online", "RESTORE DATABASE [MyDb] WITH RECOVERY", "Ends the sequence."),
                 new RecoveryAction("Allow other connections again", "ALTER DATABASE [MyDb] SET MULTI_USER", "Safe at any point.")
             ];
-            vm.HasRecoveryActions = true;
-            vm.ExecutionComplete = true;
+            vm.Execution.HasRecoveryActions = true;
+            vm.Execution.ExecutionComplete = true;
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
@@ -356,11 +356,11 @@ public class XamlLoadTests(WpfFixture wpf)
             var view = new RestoreView { DataContext = vm };
 
             // Not running: nothing to stop, so the button must not be offered.
-            vm.CanCancelExecute = false;
+            vm.Execution.CanCancel = false;
             Realise(view);
             Assert.DoesNotContain(VisibleButtons(view), b => (b.Content as string) == "Stop restore");
 
-            vm.CanCancelExecute = true;
+            vm.Execution.CanCancel = true;
             Realise(view);
 
             var stop = Assert.Single(VisibleButtons(view), b => (b.Content as string) == "Stop restore");
@@ -426,15 +426,15 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.BackupsLoaded = true;
             vm.HasScript = true;
             vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
-            vm.Console.Lines =
+            vm.Execution.Console.Lines =
             [
                 new ConsoleLine("Beginning restore execution...", ConsoleLineKind.Step),
                 new ConsoleLine("50 percent processed."),
                 new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
             ];
-            vm.Console.HasOutput = true;
-            vm.IsExecuting = false;
-            vm.ExecutionComplete = true;
+            vm.Execution.Console.HasOutput = true;
+            vm.Execution.IsExecuting = false;
+            vm.Execution.ExecutionComplete = true;
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
@@ -480,8 +480,8 @@ public class XamlLoadTests(WpfFixture wpf)
         {
             var vm = NewRestoreViewModel();
             vm.BackupsLoaded = true;
-            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
-            vm.Console.HasOutput = true;
+            vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Execution.Console.HasOutput = true;
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
@@ -512,10 +512,10 @@ public class XamlLoadTests(WpfFixture wpf)
         {
             var vm = NewRestoreViewModel();
             vm.BackupsLoaded = true;
-            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
-            vm.Console.HasOutput = true;
+            vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Execution.Console.HasOutput = true;
             vm.IsConsoleDetached = false;   // as if the wiring failed
-            vm.IsExecuting = true;
+            vm.Execution.IsExecuting = true;
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
