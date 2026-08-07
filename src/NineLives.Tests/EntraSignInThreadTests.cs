@@ -36,14 +36,31 @@ public class EntraSignInThreadTests(WpfFixture wpf) : IDisposable
     {
         public List<int> CalledOnThreads { get; } = [];
 
+        /// <summary>Set by the dispatcher, proving the UI thread was still processing messages.</summary>
+        public ManualResetEventSlim UiPumped { get; } = new(false);
+
+        /// <summary>False when the sign-in gave up waiting for the UI thread to do anything.</summary>
+        public bool UiRespondedDuringSignIn { get; private set; }
+
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken ct)
         {
-            lock (CalledOnThreads) CalledOnThreads.Add(Environment.CurrentManagedThreadId);
+            var first = false;
+            lock (CalledOnThreads)
+            {
+                first = CalledOnThreads.Count == 0;
+                CalledOnThreads.Add(Environment.CurrentManagedThreadId);
+            }
 
-            // Stands in for somebody completing a sign-in in a browser. Short, but long enough that
-            // a blocked dispatcher would fail the pumping check below.
-            Thread.Sleep(300);
-            stopAfterFirst.Cancel();
+            // Stands in for somebody completing a sign-in in a browser: it does not finish until
+            // the UI thread has demonstrably pumped. That makes the check deterministic instead of
+            // a race - the operation cannot complete, and the frame cannot exit, before the probe
+            // has had its turn. If the sign-in were running ON the UI thread, nothing could set
+            // this and the wait times out, which is the failure being tested for.
+            if (first)
+            {
+                UiRespondedDuringSignIn = UiPumped.Wait(TimeSpan.FromSeconds(5));
+                stopAfterFirst.Cancel();
+            }
 
             return new AccessToken("token", DateTimeOffset.UtcNow.AddHours(1));
         }
@@ -71,7 +88,6 @@ public class EntraSignInThreadTests(WpfFixture wpf) : IDisposable
         BlobStorageService.CredentialFactoryForTests = _ => credential;
 
         var uiThreadId = 0;
-        var dispatcherKeptPumping = false;
 
         wpf.Invoke(() =>
         {
@@ -80,11 +96,10 @@ public class EntraSignInThreadTests(WpfFixture wpf) : IDisposable
             var service = new BlobStorageService(new FakeCredentialStore());
             var frame = new DispatcherFrame();
 
-            // Queued at a lower priority than the work: it can only run if the dispatcher is still
-            // processing messages, which is exactly what "the window is frozen" means it is not.
+            // The probe. A frozen window is one whose dispatcher never gets to this.
             _ = Dispatcher.CurrentDispatcher.BeginInvoke(
                 DispatcherPriority.Background,
-                new Action(() => dispatcherKeptPumping = true));
+                new Action(() => credential.UiPumped.Set()));
 
             _ = service.VerifyConnectionAsync(EntraContainer(), stop.Token)
                 .ContinueWith(_ => frame.Continue = false, TaskScheduler.FromCurrentSynchronizationContext());
@@ -95,7 +110,7 @@ public class EntraSignInThreadTests(WpfFixture wpf) : IDisposable
         Assert.NotEmpty(credential.CalledOnThreads);
         var signIn = credential.CalledOnThreads[0];
         Assert.NotEqual(uiThreadId, signIn);
-        Assert.True(dispatcherKeptPumping, "the dispatcher stopped processing while signing in");
+        Assert.True(credential.UiRespondedDuringSignIn, "the dispatcher stopped processing while signing in");
     }
 
     /// <summary>A SAS container has no sign-in to do, and must not be made to wait for one.</summary>
