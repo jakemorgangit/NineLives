@@ -19,8 +19,24 @@ namespace Blackcat.NineLives.Services;
 /// </summary>
 public sealed class OperationLog
 {
-    /// <summary>Files older than this are removed on startup.</summary>
-    private const int RetentionDays = 30;
+    /// <summary>What retention is when nobody has said otherwise.</summary>
+    public const int DefaultRetentionDays = 30;
+
+    /// <summary>The floor. A log the app deletes the moment it writes it is not a log.</summary>
+    public const int MinimumRetentionDays = 1;
+
+    private int _retentionDays = DefaultRetentionDays;
+
+    /// <summary>
+    /// Files older than this are removed by <see cref="Prune"/>. Settable from the Settings screen
+    /// (#117 item 2), and clamped: the value comes from config.json, which is hand-editable, and a
+    /// 0 there would delete today's file - the one recording the restore currently running.
+    /// </summary>
+    public int RetentionDays
+    {
+        get => _retentionDays;
+        set => _retentionDays = Math.Max(MinimumRetentionDays, value);
+    }
 
     /// <summary>A single day's file is rolled once it passes this, so one runaway loop cannot fill the disk.</summary>
     private const long MaxFileBytes = 5 * 1024 * 1024;

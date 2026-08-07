@@ -1331,10 +1331,7 @@
                         </TextBlock>
                     </Border>
 
-                    <TextBlock Text="{Binding ErrorMessage}"
-                               Foreground="{DynamicResource ErrorBrush}"
-                               Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
-                               Margin="0,0,0,12" TextWrapping="Wrap" />
+                    <ContentControl Style="{StaticResource ErrorBanner}" />
 
                     <!-- The generated script. Stays visible during and after execution: it used to
                          be hidden the moment Execute was pressed, so the script and the console

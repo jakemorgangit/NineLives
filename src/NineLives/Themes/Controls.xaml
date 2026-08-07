@@ -949,5 +949,50 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- The error surface, one definition for every screen (#117 item 6).
+
+         Four views each had their own bare TextBlock bound to ErrorMessage, which is why an error
+         read as ordinary body text on some screens, and why none of them offered any way to clear
+         one. Now that an error persists until it is superseded or dismissed, it has to be both
+         visibly an error and closeable.
+
+         Usage: <ContentControl Style="{StaticResource ErrorBanner}" /> - it binds itself to the
+         ViewModelBase members on the inherited DataContext. -->
+    <Style x:Key="ErrorBanner" TargetType="ContentControl">
+        <Setter Property="Visibility" Value="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Border Background="{DynamicResource DangerPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource ErrorBrush}"
+                            BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding ErrorMessage}"
+                                       Foreground="{DynamicResource ErrorBrush}"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding DismissErrorCommand}"
+                                    Content="&#x2715;"
+                                    ToolTip="Dismiss this error"
+                                    Margin="10,0,0,0"
+                                    VerticalAlignment="Top"
+                                    Foreground="{DynamicResource ErrorBrush}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="6,2"
+                                    Cursor="Hand"
+                                    FontSize="12" />
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
 </ResourceDictionary>

@@ -19,7 +19,9 @@ public partial class MainViewModel : ViewModelBase
     private ViewModelBase? _currentView;
 
     [ObservableProperty]
-    private string _currentViewName = "Blob Storage";
+    // The sidebar's selection is bound to this, so it also decides which button is highlighted at
+    // startup - it used to be a hardcoded IsChecked="True" on the first one (#117 item 5).
+    private string _currentViewName = Nav.BlobStorage;
 
     [ObservableProperty]
     private string _globalStatus = "Ready";
@@ -50,6 +52,7 @@ public partial class MainViewModel : ViewModelBase
     public BlobBrowserViewModel BlobBrowser { get; }
     public RestoreViewModel Restore { get; }
     public HistoryViewModel History { get; }
+    public SettingsViewModel Settings { get; }
     public AboutViewModel About { get; }
 
     /// <summary>
@@ -94,7 +97,14 @@ public partial class MainViewModel : ViewModelBase
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
         History = new HistoryViewModel(_historyStore);
-        About = new AboutViewModel(_credentialStore);
+        Settings = new SettingsViewModel(_credentialStore);
+        About = new AboutViewModel();
+
+        // After the config is loaded, not at startup in App: pruning first and reading the setting
+        // afterwards would delete files the user had asked to keep, using the default of 30 to
+        // decide (#117 item 2).
+        App.Log.RetentionDays = Settings.LogRetentionDays;
+        App.Log.Prune();
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
@@ -262,6 +272,58 @@ public partial class MainViewModel : ViewModelBase
         ServerManager.DisconnectCommand.Execute(null);
     }
 
+    // ── keyboard (#117 item 5) ──────────────────────────────────────────────────
+    //
+    // The shortcuts are declared on the window, but what they DO is decided here, because a key
+    // that reaches the whole app has to mean something sensible on every screen. F5 bound straight
+    // to the Restore screen's loader would run a blob listing while somebody was reading About -
+    // no visible effect, real network traffic, and a status line changing on a page that has none.
+    //
+    // Each of these routes to the current screen and does nothing where it has no meaning, rather
+    // than being disabled globally because one screen cannot use it.
+
+    /// <summary>F5: reload whatever the current screen lists.</summary>
+    [RelayCommand]
+    private void Reload()
+    {
+        switch (CurrentViewName)
+        {
+            case Nav.Restore:
+                if (Restore.LoadBackupsCommand.CanExecute(null)) Restore.LoadBackupsCommand.Execute(null);
+                break;
+            case Nav.BrowseBackups:
+                BlobBrowser.RefreshContainers();
+                break;
+            case Nav.History:
+                History.Refresh();
+                break;
+        }
+    }
+
+    /// <summary>Ctrl+G: generate the restore script. Only the Restore screen generates anything.</summary>
+    [RelayCommand]
+    private void GenerateScript()
+    {
+        if (CurrentViewName != Nav.Restore) return;
+        if (Restore.GenerateScriptCommand.CanExecute(null)) Restore.GenerateScriptCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Esc: stop whatever is running.
+    ///
+    /// Not gated on the current screen. A restore or a verify keeps running while somebody
+    /// navigates away, and the whole point of a stop key is that it works when you reach for it.
+    /// Ordered by cost of letting it continue: an execute is writing to a database, a query is
+    /// only reading, a load is only listing.
+    /// </summary>
+    [RelayCommand]
+    private void CancelCurrent()
+    {
+        if (Restore.CancelExecuteCommand.CanExecute(null)) { Restore.CancelExecuteCommand.Execute(null); return; }
+        if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
+        if (Restore.CancelLoadCommand.CanExecute(null)) Restore.CancelLoadCommand.Execute(null);
+    }
+
     /// <summary>
     /// The sidebar's view names. Constants rather than literals scattered across the switch,
     /// because an unrecognised name here silently lands on Blob Storage rather than failing -
@@ -277,10 +339,11 @@ public partial class MainViewModel : ViewModelBase
         public const string BrowseBackups = "Browse Backups";
         public const string Restore = "Restore";
         public const string History = "History";
+        public const string Settings = "Settings";
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Restore, History, About];
+            [BlobStorage, SqlServers, BrowseBackups, Restore, History, Settings, About];
     }
 
     [RelayCommand]
@@ -294,6 +357,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.BrowseBackups => BlobBrowser,
             Nav.Restore => Restore,
             Nav.History => History,
+            Nav.Settings => Settings,
             Nav.About => About,
             _ => BlobConfig
         };

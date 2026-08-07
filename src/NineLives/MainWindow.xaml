@@ -15,12 +15,35 @@
          built a MainViewModel against the real %LOCALAPPDATA% config and ran the secret-key
          migration over it. -->
 
+    <!-- Keyboard shortcuts (#117 item 5). Every action needed the mouse: no menu bar, no
+         accelerators, nothing. Ctrl+1..6 follow the sidebar's own order, so the numbering is
+         readable off the screen rather than something to memorise.
+
+         What each one does is decided on MainViewModel, not bound straight to a screen's command -
+         see the comment there. -->
+    <Window.InputBindings>
+        <KeyBinding Modifiers="Ctrl" Key="D1" Command="{Binding NavigateToCommand}" CommandParameter="Blob Storage" />
+        <KeyBinding Modifiers="Ctrl" Key="D2" Command="{Binding NavigateToCommand}" CommandParameter="SQL Servers" />
+        <KeyBinding Modifiers="Ctrl" Key="D3" Command="{Binding NavigateToCommand}" CommandParameter="Browse Backups" />
+        <KeyBinding Modifiers="Ctrl" Key="D4" Command="{Binding NavigateToCommand}" CommandParameter="Restore" />
+        <KeyBinding Modifiers="Ctrl" Key="D5" Command="{Binding NavigateToCommand}" CommandParameter="History" />
+        <KeyBinding Modifiers="Ctrl" Key="D6" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
+        <KeyBinding Modifiers="Ctrl" Key="D7" Command="{Binding NavigateToCommand}" CommandParameter="About" />
+        <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
+        <KeyBinding Modifiers="Ctrl" Key="G" Command="{Binding GenerateScriptCommand}" />
+        <KeyBinding Key="Escape" Command="{Binding CancelCurrentCommand}" />
+    </Window.InputBindings>
+
     <Window.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
 
         <DataTemplate DataType="{x:Type vm:BlobConfigViewModel}">
             <views:BlobConfigView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+            <views:SettingsView />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ServerManagerViewModel}">
             <views:ServerManagerView />
@@ -137,9 +160,25 @@
                             Background="{DynamicResource CardBorderBrush}"
                             Margin="16,8,16,8" />
 
+                    <!-- Settings and About, pinned to the bottom. Settings is declared first so
+                         it docks BELOW About - DockPanel stacks bottom-docked children in
+                         declaration order, from the edge inwards. -->
+                    <RadioButton DockPanel.Dock="Bottom"
+                                 Style="{StaticResource SidebarButton}"
+                                 IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Settings'}"
+                                 Command="{Binding NavigateToCommand}"
+                                 CommandParameter="Settings"
+                                 Margin="0,0,0,4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#x2699;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                            <TextBlock Text="Settings" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </RadioButton>
+
                     <!-- About Button -->
                     <RadioButton DockPanel.Dock="Bottom"
                                  Style="{StaticResource SidebarButton}"
+                                 IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='About'}"
                                  Command="{Binding NavigateToCommand}"
                                  CommandParameter="About"
                                  Margin="0,0,0,4">
@@ -184,7 +223,7 @@
                                    FontFamily="Segoe UI" />
 
                         <RadioButton Style="{StaticResource SidebarButton}"
-                                     IsChecked="True"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Blob Storage'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="Blob Storage">
                             <StackPanel Orientation="Horizontal">
@@ -194,6 +233,7 @@
                         </RadioButton>
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='SQL Servers'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="SQL Servers">
                             <StackPanel Orientation="Horizontal">
@@ -213,6 +253,7 @@
                                    FontFamily="Segoe UI" />
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Browse Backups'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="Browse Backups">
                             <StackPanel Orientation="Horizontal">
@@ -222,6 +263,7 @@
                         </RadioButton>
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Restore'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="Restore">
                             <StackPanel Orientation="Horizontal">
@@ -231,6 +273,7 @@
                         </RadioButton>
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='History'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="History">
                             <StackPanel Orientation="Horizontal">
