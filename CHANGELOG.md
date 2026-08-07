@@ -68,6 +68,10 @@ also stops the app quietly rewriting one it did not create.
 - **Verify Backups now passes the MOVE clauses**, so it verifies the restore that is actually going
   to run rather than a different one (#129)
 - White text on the yellow accent was unreadable under high contrast (#126)
+- **The app no longer freezes while the Entra sign-in browser is open.** `InteractiveBrowserCredential`
+  waits for the sign-in on whatever thread asked for the token, and every blob operation starts on
+  the UI thread — so the window stopped painting for as long as the browser was open, which is to
+  say it asked you to go and authenticate while appearing to have crashed (#152)
 - **A Managed Identity blob credential is no longer converted to SAS by running a restore.** The
   check reduced every identity to "is it a SAS credential", so a credential authenticating as the
   instance's own identity was reported as broken and then altered into a SAS one — changing how
