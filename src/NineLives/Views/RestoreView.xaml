@@ -13,7 +13,36 @@
         <converters:TickPositionConverter x:Key="TickPos" />
     </UserControl.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <DockPanel>
+        <!-- The live summary of what a restore would do, PINNED (#117 item 3, and then some).
+
+             It is not a step - it is the answer the steps are building towards, and it changes with
+             every option above it. It was moved out of the accordion because it was invisible
+             whenever another pane was open; it is docked here because it was then invisible whenever
+             anybody scrolled, which on this screen is constantly. The steps run well past a screen
+             height, so the sentence describing what is about to happen to a database was off-screen
+             at exactly the moment somebody was setting up the thing it describes.
+
+             Docked rather than overlaid, so it never covers the controls underneath it - the same
+             way the connection status sits above the content rather than floating on top of it. -->
+        <Border DockPanel.Dock="Top"
+                CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                Background="{DynamicResource WarningPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource WarningBrush}"
+                BorderThickness="1"
+                Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
+            <StackPanel>
+                <TextBlock Text="THIS RESTORE WILL"
+                           Style="{StaticResource LabelText}"
+                           Margin="0,0,0,6" />
+                <TextBlock Text="{Binding RestoreSummaryText}"
+                           Style="{StaticResource BodyText}"
+                           TextWrapping="Wrap"
+                           LineHeight="22" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
             <!-- Header -->
             <StackPanel Margin="0,0,0,20">
@@ -52,28 +81,6 @@
                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
                         <Run Text="Add one on the Blob Storage screen and it will appear here. A restore also needs a SQL Server connection, on the SQL Servers screen, to run against." />
                     </TextBlock>
-                </StackPanel>
-            </Border>
-
-            <!-- The live summary of what a restore would do, at the top rather than buried
-                 between steps 3 and 4 (#117 item 3).
-
-                 It is not a step - it is the answer the steps are building towards, and it changes
-                 with every option above it. Sitting inside the accordion it was invisible whenever
-                 another pane was open, which is most of the time. -->
-            <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
-                    Background="{DynamicResource WarningPanelBackgroundBrush}"
-                    BorderBrush="{DynamicResource WarningBrush}"
-                    BorderThickness="1"
-                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
-                <StackPanel>
-                    <TextBlock Text="THIS RESTORE WILL"
-                               Style="{StaticResource LabelText}"
-                               Margin="0,0,0,6" />
-                    <TextBlock Text="{Binding RestoreSummaryText}"
-                               Style="{StaticResource BodyText}"
-                               TextWrapping="Wrap"
-                               LineHeight="22" />
                 </StackPanel>
             </Border>
 
@@ -1956,5 +1963,6 @@
                        Margin="0,4,0,16"
                        Visibility="{Binding StatusMessage, Converter={StaticResource NullToVis}}" />
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>
