@@ -496,6 +496,99 @@ public class SqlServerService : ISqlServerService
 
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
+
+        return await ReadHeaderAsync(conn, blobUrls, ct);
+    }
+
+    /// <summary>
+    /// Reads several headers over ONE connection, and reports where the time went (#130).
+    ///
+    /// The measurement that prompted this: three statements over nine striped files took 17.4s on a
+    /// real container. Every one of them opened its own connection first, so what was reported as a
+    /// per-file cost was partly a per-CONNECTION one - and a read that is about to happen a hundred
+    /// times should pay that once rather than each time.
+    ///
+    /// The timing is split into connecting and reading rather than given as a total, because the
+    /// two lead to different conclusions about what an audit over a whole database would cost, and
+    /// a total cannot tell them apart.
+    /// </summary>
+    public async Task<List<BackupFileInfo?>> RestoreHeaderOnlyBatchAsync(
+        ServerConnection server,
+        IReadOnlyList<IReadOnlyList<string>> requests,
+        IProgress<int>? progress = null,
+        Action<string>? timing = null,
+        CancellationToken ct = default)
+    {
+        var results = new List<BackupFileInfo?>();
+        if (requests.Count == 0) return results;
+
+        var connectTimer = System.Diagnostics.Stopwatch.StartNew();
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        connectTimer.Stop();
+
+        var readTimer = System.Diagnostics.Stopwatch.StartNew();
+        var files = 0;
+
+        foreach (var urls in requests)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                results.Add(await ReadHeaderAsync(conn, urls, ct));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // A container legitimately holds things that are not backups. One unreadable member
+                // must not abort the rest - it comes back null and the caller reports it.
+                results.Add(null);
+            }
+
+            files += urls.Count;
+            progress?.Report(results.Count);
+        }
+
+        readTimer.Stop();
+        timing?.Invoke(DescribeBatchTiming(requests.Count, files, connectTimer.Elapsed, readTimer.Elapsed));
+
+        return results;
+    }
+
+    /// <summary>
+    /// What the reads cost, in the terms #130 needs to settle its design.
+    ///
+    /// Per STATEMENT as well as per file, because the earlier per-file figure was the wrong unit: a
+    /// striped set is ONE statement covering several files, so dividing by files understated what
+    /// each read costs by the stripe count - a nine-file, three-set measurement read as 1.9s per
+    /// file when the reads were actually about 5.8s each.
+    ///
+    /// And connecting separately from reading, because only the reading part scales with the size
+    /// of an audit.
+    /// </summary>
+    internal static string DescribeBatchTiming(
+        int statements, int files, TimeSpan connecting, TimeSpan reading)
+    {
+        if (statements == 0) return string.Empty;
+
+        var perStatement = reading.TotalMilliseconds / statements;
+        var perFile = files == 0 ? 0 : reading.TotalMilliseconds / files;
+
+        return $"{statements} statement(s) over {files} file(s): " +
+               $"{connecting.TotalMilliseconds:N0} ms connecting, " +
+               $"{reading.TotalMilliseconds:N0} ms reading " +
+               $"({perStatement:N0} ms per statement, {perFile:N0} ms per file).";
+    }
+
+    private static async Task<BackupFileInfo?> ReadHeaderAsync(
+        SqlConnection conn, IReadOnlyList<string> blobUrls, CancellationToken ct)
+    {
+        if (blobUrls.Count == 0) return null;
+
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 

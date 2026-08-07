@@ -156,7 +156,11 @@ public partial class BackupInventoryViewModel : ViewModelBase
             var progress = new Progress<int>(
                 n => IdentifyProgressText = $"Read {n:N0} of {unidentified.Count:N0} header(s)...");
 
-            var settled = await identifier.IdentifyAsync(server, unidentified, progress, ct);
+            // The timing goes to the log rather than the screen: it is the number #130 needs to
+            // settle what a container-wide audit would cost, and it is worth having from every run
+            // rather than only from a deliberate measurement.
+            var settled = await identifier.IdentifyAsync(
+                server, unidentified, progress, t => App.Log.Info($"[headeronly] {t}"), ct);
 
             // Regroup: what the headers said changes which set a file belongs to, and a set is
             // keyed on the database and type that have just been corrected.

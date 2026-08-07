@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -44,44 +44,34 @@ public class BackupHeaderIdentifier(ISqlServerService sql)
         ServerConnection server,
         IReadOnlyList<BackupFileInfo> files,
         IProgress<int>? progress = null,
+        Action<string>? timing = null,
         CancellationToken ct = default)
     {
+        // Blob only. A file discovered through an instance's msdb was never unidentified - msdb
+        // recorded its database, its type and its LSNs - so this path is only ever reached by a
+        // container listing, and a HEADERONLY built out of URL clauses would be wrong for a path.
+        var readable = files
+            .Where(f => !f.IsOnDisk && !string.IsNullOrWhiteSpace(f.BlobUrl))
+            .ToList();
+
+        if (readable.Count == 0) return 0;
+
+        // One connection for the whole sweep. Measured on a real container, a header read is
+        // seconds rather than milliseconds, and a fresh connection per file paid the connect cost
+        // every one of those times (#130).
+        //
+        // A null result is a file the server could not read - a container legitimately holds things
+        // that are not backups - and leaves the app exactly where it started for that file, which
+        // is not a worse position and must not stop the rest.
+        var requests = readable
+            .Select(f => (IReadOnlyList<string>)new[] { BlobUrlEncoder.Encode(f.BlobUrl) })
+            .ToList();
+
+        var headers = await sql.RestoreHeaderOnlyBatchAsync(server, requests, progress, timing, ct);
+
         var identified = 0;
-        var done = 0;
-
-        foreach (var file in files)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // Blob only. A file discovered through an instance's msdb was never unidentified -
-            // msdb recorded its database, its type and its LSNs - so this path is only ever reached
-            // by a container listing.
-            if (file.IsOnDisk || string.IsNullOrWhiteSpace(file.BlobUrl))
-            {
-                progress?.Report(++done);
-                continue;
-            }
-
-            try
-            {
-                var header = await sql.RestoreHeaderOnlyMultiAsync(
-                    server, [BlobUrlEncoder.Encode(file.BlobUrl)], ct);
-
-                if (header != null && Apply(file, header)) identified++;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // One unreadable file does not stop the rest. A container legitimately holds things
-                // that are not backups at all, and a file this cannot read is simply one the app
-                // still cannot place - which is where it started, not a worse position.
-            }
-
-            progress?.Report(++done);
-        }
+        for (var i = 0; i < readable.Count && i < headers.Count; i++)
+            if (headers[i] != null && Apply(readable[i], headers[i]!)) identified++;
 
         return identified;
     }

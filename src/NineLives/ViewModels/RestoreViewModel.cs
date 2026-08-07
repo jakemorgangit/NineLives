@@ -829,19 +829,6 @@ public partial class RestoreViewModel : ViewModelBase
     private string _headerReadTiming = string.Empty;
 
     /// <summary>
-    /// Per FILE rather than per set: a striped set is several reads, and the question #130 asks is
-    /// what it would cost to read every file in a container.
-    /// </summary>
-    internal static string DescribeHeaderTiming(int setCount, int fileCount, TimeSpan elapsed)
-    {
-        if (fileCount == 0) return string.Empty;
-
-        var perFile = elapsed.TotalMilliseconds / fileCount;
-        return $"{fileCount} file(s) in {setCount} set(s) took {elapsed.TotalMilliseconds:N0} ms " +
-               $"({perFile:N0} ms per file).";
-    }
-
-    /// <summary>
     /// Works out which points this database can be restored to, and hands them to the timeline.
     /// </summary>
     private void ComputeAndDisplayRestorePoints()
@@ -1090,37 +1077,31 @@ public partial class RestoreViewModel : ViewModelBase
             // only sensible if that number is small, and the whole design in that issue is written
             // around an assumption that it is not. This is the cheapest place to find out - the
             // work is already being done, one read per chain member, against real backups.
-            var headerTimer = System.Diagnostics.Stopwatch.StartNew();
-            var filesRead = 0;
+            // One connection for the whole chain, not one per member.
+            //
+            // The first measurement on a real container - three statements over nine striped files,
+            // 17.4 seconds - was taken with a fresh connection per read, so part of what it reported
+            // was the connect cost paid three times. Batching removes that, and the timing now says
+            // which part was which (#130).
+            //
+            // A null result is an unreadable member rather than a failure of the whole validation:
+            // the validator reports it and carries on with the rest.
+            var requests = RestoreChain.AllSets
+                .Select(s => (IReadOnlyList<string>)s.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList())
+                .ToList();
 
-            foreach (var set in RestoreChain.AllSets)
-            {
-                ct.ThrowIfCancellationRequested();
+            var read = await _sqlService.RestoreHeaderOnlyBatchAsync(
+                ConnectedServer, requests,
+                progress: null,
+                timing: t =>
+                {
+                    HeaderReadTiming = t;
+                    _log.Info($"[headeronly] {t}");
+                },
+                ct: ct);
 
-                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-                try
-                {
-                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
-                    headers.Add(new ChainHeader(set, header));
-                    filesRead += urls.Count;
-                }
-                catch (OperationCanceledException)
-                {
-                    // Asked for. Must not be swallowed by the per-member catch below, which exists
-                    // so ONE unreadable backup does not abort the rest.
-                    throw;
-                }
-                catch (Exception)
-                {
-                    // One unreadable member must not abort the whole validation - the validator
-                    // reports it and carries on checking everything else.
-                    headers.Add(new ChainHeader(set, null));
-                }
-            }
-
-            headerTimer.Stop();
-            HeaderReadTiming = DescribeHeaderTiming(headers.Count, filesRead, headerTimer.Elapsed);
-            _log.Info($"[headeronly] {HeaderReadTiming}");
+            headers.AddRange(RestoreChain.AllSets.Select((set, i) =>
+                new ChainHeader(set, i < read.Count ? read[i] : null)));
 
             UpdateChainIssues(RestoreChain, headers);
             ChainLsnVerified = true;
