@@ -39,7 +39,10 @@
                                Style="{StaticResource SubHeaderText}"
                                Margin="0,0,0,12" />
 
-                    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                    <!-- Docked TOP, not bottom. On a fresh install this is the only thing to click and it
+                         was the furthest thing from the eye, at the foot of a tall empty
+                         list (#117 item 8). -->
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                         <Button Content="+ Add Server"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding AddNewCommand}"
