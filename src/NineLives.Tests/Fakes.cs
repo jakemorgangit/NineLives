@@ -261,9 +261,14 @@ public sealed class FakeSqlServerService : ISqlServerService
             ? BackupHistory
             : BackupHistory.Where(h => h.DatabaseName == databaseName).ToList());
 
+    /// <summary>Set to make the target unreachable rather than merely unhelpful.</summary>
+    public Exception? ThrowOnCheck { get; set; }
+
     public Task<BackupFileCheck> CheckBackupFileAsync(
         ServerConnection server, string path, CancellationToken ct = default)
     {
+        if (ThrowOnCheck != null) throw ThrowOnCheck;
+
         CheckedPaths.Add(path);
 
         return Task.FromResult(UnreadablePaths.TryGetValue(path, out var problem)

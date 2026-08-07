@@ -5,12 +5,16 @@ using Xunit;
 namespace Blackcat.NineLives.Tests;
 
 /// <summary>
-/// Restoring from a shared backup location produces a FROM DISK script (#149).
+/// Backups on a shared path produce a FROM DISK script (#149, #165).
 ///
-/// The interesting property is not that DISK appears - it is that everything else is identical.
-/// WITH REPLACE, NORECOVERY on every step but the last, STOPAT on every log rather than only the
-/// final one, the MOVE clauses, disconnecting sessions: all of it is the same logic that has been
-/// through #110, #45 and #44, reached through an adapter rather than reimplemented.
+/// The interesting property is not that DISK appears - it is that everything else is identical, and
+/// that these go through the SAME builder and generator the blob path uses rather than an adapter
+/// written alongside them. WITH REPLACE, NORECOVERY on every step but the last, STOPAT on every log
+/// rather than only the final one, the MOVE clauses: all of it is the logic that has been through
+/// #110, #45 and #44, reached by handing it ordinary backup sets whose files happen to carry a path.
+///
+/// So a shared location gets the whole of that behaviour for free, and a fix to any of it applies to
+/// both media at once. That is the entire argument for a source abstraction over a second screen.
 /// </summary>
 public class FromDiskRestoreScriptTests
 {
@@ -23,40 +27,50 @@ public class FromDiskRestoreScriptTests
         Type = type,
         StartedAt = at,
         FinishedAt = at.AddMinutes(2),
-        CheckpointLsn = 100,
+        CheckpointLsn = type == BackupType.Full ? 100 : null,
+        DatabaseBackupLsn = type == BackupType.Differential ? 100 : null,
         LastLsn = 200,
         BackupSizeBytes = 5_000_000,
         Files = files
     };
 
-    private static string Generate(BackupHistoryChain chain, RestoreOptions? options = null)
-        => new RestoreScriptGenerator().Generate(
-            BackupHistoryChainAdapter.ToRestorableChain(chain, options?.StopAt),
-            options ?? new RestoreOptions { TargetDatabaseName = "MyDb_Restored" });
+    /// <summary>
+    /// The real path: msdb history becomes sets, the ordinary chain builder computes restore
+    /// points, and the ordinary generator writes the script. Nothing here is specific to disk.
+    /// </summary>
+    private static string Generate(
+        IEnumerable<BackupHistoryEntry> history,
+        RestoreOptions? options = null,
+        BackupPathMapping? mapping = null)
+    {
+        var sets = BackupHistoryInventory.ToSets(history, mapping);
+        var builder = new BackupChainBuilder();
+
+        var point = builder.ComputeRestorePoints(sets).Last();
+        var chain = builder.BuildChainFromRestorePoint(point);
+        chain.StopAt = options?.StopAt;
+
+        return new RestoreScriptGenerator().Generate(
+            chain, options ?? new RestoreOptions { TargetDatabaseName = "MyDb_Restored" });
+    }
 
     [Fact]
     public void AFullFromAShareIsRestoredFromDisk()
     {
-        var chain = new BackupHistoryChain(
-            Entry(BackupType.Full, T0, @"\\nas01\sql\MyDb_full.bak"), null, []);
-
-        var script = Generate(chain);
+        var script = Generate([Entry(BackupType.Full, T0, @"\\nas01\sql\MyDb_full.bak")]);
 
         Assert.Contains(@"DISK = N'\\nas01\sql\MyDb_full.bak'", script);
         Assert.DoesNotContain("URL =", script);
     }
 
     /// <summary>
-    /// A UNC path is not a URI. Percent-encoding one - which is right for a blob URL - would
-    /// produce a path SQL Server cannot open.
+    /// A UNC path is not a URI. Percent-encoding one - which is right for a blob URL - would produce
+    /// a path SQL Server cannot open.
     /// </summary>
     [Fact]
     public void APathWithSpacesIsNotUrlEncoded()
     {
-        var chain = new BackupHistoryChain(
-            Entry(BackupType.Full, T0, @"\\nas01\SQL Backups\My Db\full backup.bak"), null, []);
-
-        var script = Generate(chain);
+        var script = Generate([Entry(BackupType.Full, T0, @"\\nas01\SQL Backups\My Db\full backup.bak")]);
 
         Assert.Contains(@"DISK = N'\\nas01\SQL Backups\My Db\full backup.bak'", script);
         Assert.DoesNotContain("%20", script);
@@ -65,33 +79,30 @@ public class FromDiskRestoreScriptTests
     [Fact]
     public void EveryStripeIsNamedInOrder()
     {
-        var chain = new BackupHistoryChain(
-            Entry(BackupType.Full, T0, @"\\nas01\sql\p1.bak", @"\\nas01\sql\p2.bak", @"\\nas01\sql\p3.bak"),
-            null, []);
+        var script = Generate(
+            [Entry(BackupType.Full, T0, @"\\nas01\sql\p1.bak", @"\\nas01\sql\p2.bak", @"\\nas01\sql\p3.bak")]);
 
-        var script = Generate(chain);
-
-        var one = script.IndexOf(@"p1.bak", StringComparison.Ordinal);
-        var two = script.IndexOf(@"p2.bak", StringComparison.Ordinal);
-        var three = script.IndexOf(@"p3.bak", StringComparison.Ordinal);
+        var one = script.IndexOf("p1.bak", StringComparison.Ordinal);
+        var two = script.IndexOf("p2.bak", StringComparison.Ordinal);
+        var three = script.IndexOf("p3.bak", StringComparison.Ordinal);
 
         Assert.True(one > 0 && two > one && three > two, "stripes must be named in order");
     }
 
     /// <summary>
-    /// The whole point of the adapter: a chain from a share gets the restore semantics the blob
-    /// path already has, rather than a second implementation of them.
+    /// The whole point of doing this through the existing workflow: a chain from a share gets the
+    /// restore semantics the blob path already has, rather than a second implementation of them.
     /// </summary>
     [Fact]
     public void EveryStepButTheLastLeavesTheDatabaseRestoring()
     {
-        var chain = new BackupHistoryChain(
+        var script = Generate(
+        [
             Entry(BackupType.Full, T0, @"\\nas01\sql\full.bak"),
             Entry(BackupType.Differential, T0.AddHours(1), @"\\nas01\sql\diff.bak"),
-            [Entry(BackupType.TransactionLog, T0.AddHours(2), @"\\nas01\sql\log1.trn"),
-             Entry(BackupType.TransactionLog, T0.AddHours(3), @"\\nas01\sql\log2.trn")]);
-
-        var script = Generate(chain);
+            Entry(BackupType.TransactionLog, T0.AddHours(2), @"\\nas01\sql\log1.trn"),
+            Entry(BackupType.TransactionLog, T0.AddHours(3), @"\\nas01\sql\log2.trn")
+        ]);
 
         // Three NORECOVERY steps - full, differential, first log - then RECOVERY on the last.
         Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(script, "NORECOVERY").Count);
@@ -102,13 +113,13 @@ public class FromDiskRestoreScriptTests
     [Fact]
     public void PointInTimePutsStopAtOnEveryLog()
     {
-        var chain = new BackupHistoryChain(
+        var script = Generate(
+        [
             Entry(BackupType.Full, T0, @"\\nas01\sql\full.bak"),
-            null,
-            [Entry(BackupType.TransactionLog, T0.AddHours(1), @"\\nas01\sql\log1.trn"),
-             Entry(BackupType.TransactionLog, T0.AddHours(2), @"\\nas01\sql\log2.trn")]);
-
-        var script = Generate(chain, new RestoreOptions
+            Entry(BackupType.TransactionLog, T0.AddHours(1), @"\\nas01\sql\log1.trn"),
+            Entry(BackupType.TransactionLog, T0.AddHours(2), @"\\nas01\sql\log2.trn")
+        ],
+        new RestoreOptions
         {
             TargetDatabaseName = "MyDb_Restored",
             StopAt = T0.AddHours(1).AddMinutes(30)
@@ -122,67 +133,44 @@ public class FromDiskRestoreScriptTests
     [Fact]
     public void ReplaceIsCarriedThroughFromTheOptions()
     {
-        var chain = new BackupHistoryChain(
-            Entry(BackupType.Full, T0, @"\\nas01\sql\full.bak"), null, []);
-
-        var script = Generate(chain, new RestoreOptions
-        {
-            TargetDatabaseName = "MyDb_Restored",
-            WithReplace = true
-        });
+        var script = Generate(
+            [Entry(BackupType.Full, T0, @"\\nas01\sql\full.bak")],
+            new RestoreOptions { TargetDatabaseName = "MyDb_Restored", WithReplace = true });
 
         Assert.Contains("REPLACE", script);
     }
 
-    // ── what the adapter carries across ─────────────────────────────────────────
-
+    /// <summary>
+    /// The substitution reaches the script, because it was applied where the sets were built rather
+    /// than somewhere the generator would have to know about.
+    /// </summary>
     [Fact]
-    public void TheFilesKnowTheyAreOnDiskRatherThanInAContainer()
+    public void TheScriptNamesTheFilesTheWayTheTargetReachesThem()
     {
-        var chain = new BackupHistoryChain(
-            Entry(BackupType.Full, T0, @"\\nas01\sql\full.bak"), null, []);
+        var script = Generate(
+            [Entry(BackupType.Full, T0, @"E:\SQLBackups\MyDb\full.bak")],
+            mapping: new BackupPathMapping(@"E:\SQLBackups", @"\\SRV01\SQLBackups"));
 
-        var restorable = BackupHistoryChainAdapter.ToRestorableChain(chain);
-        var file = Assert.Single(restorable.FullSet.Files);
-
-        Assert.True(file.IsOnDisk);
-        Assert.Equal(@"\\nas01\sql\full.bak", file.RestoreDevice);
-
-        // No URL is invented. A path in that field would be the kind of quiet lie that ends in a
-        // restore aimed at the wrong device.
-        Assert.Equal(string.Empty, file.BlobUrl);
+        Assert.Contains(@"DISK = N'\\SRV01\SQLBackups\MyDb\full.bak'", script);
+        Assert.DoesNotContain(@"E:\SQLBackups", script);
     }
 
     /// <summary>
-    /// msdb records size per SET, not per stripe. Repeating it on every file would report a striped
-    /// backup as several times its real size.
+    /// A differential from a share reaches the script through the LSN pairing, so what is restored
+    /// is the full the differential was actually taken against.
     /// </summary>
     [Fact]
-    public void AStripedBackupIsNotCountedOncePerStripe()
+    public void ADifferentialRestoresOnTopOfTheFullItsLsnNames()
     {
-        var chain = new BackupHistoryChain(
-            Entry(BackupType.Full, T0, @"\\nas01\sql\p1.bak", @"\\nas01\sql\p2.bak"), null, []);
+        var script = Generate(
+        [
+            Entry(BackupType.Full, T0, @"\\nas01\sql\full.bak"),
+            Entry(BackupType.Differential, T0.AddHours(1), @"\\nas01\sql\diff.bak")
+        ]);
 
-        var restorable = BackupHistoryChainAdapter.ToRestorableChain(chain);
+        var full = script.IndexOf("full.bak", StringComparison.Ordinal);
+        var diff = script.IndexOf("diff.bak", StringComparison.Ordinal);
 
-        Assert.Equal(5_000_000, restorable.TotalSizeBytes);
-    }
-
-    [Fact]
-    public void ACopyOnlyFullStaysCopyOnlyThroughTheAdapter()
-    {
-        var full = new BackupHistoryEntry
-        {
-            DatabaseName = "MyDb",
-            Type = BackupType.Full,
-            StartedAt = T0,
-            FinishedAt = T0.AddMinutes(2),
-            IsCopyOnly = true,
-            Files = [@"\\nas01\sql\copyonly.bak"]
-        };
-
-        var restorable = BackupHistoryChainAdapter.ToRestorableChain(new BackupHistoryChain(full, null, []));
-
-        Assert.True(restorable.FullSet.IsCopyOnly);
+        Assert.True(full > 0 && diff > full, "the full must be restored before the differential");
     }
 }

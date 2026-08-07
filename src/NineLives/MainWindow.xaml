@@ -26,10 +26,9 @@
         <KeyBinding Modifiers="Ctrl" Key="D2" Command="{Binding NavigateToCommand}" CommandParameter="SQL Servers" />
         <KeyBinding Modifiers="Ctrl" Key="D3" Command="{Binding NavigateToCommand}" CommandParameter="Browse Backups" />
         <KeyBinding Modifiers="Ctrl" Key="D4" Command="{Binding NavigateToCommand}" CommandParameter="Restore" />
-        <KeyBinding Modifiers="Ctrl" Key="D5" Command="{Binding NavigateToCommand}" CommandParameter="Restore from Share" />
-        <KeyBinding Modifiers="Ctrl" Key="D6" Command="{Binding NavigateToCommand}" CommandParameter="History" />
-        <KeyBinding Modifiers="Ctrl" Key="D7" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
-        <KeyBinding Modifiers="Ctrl" Key="D8" Command="{Binding NavigateToCommand}" CommandParameter="About" />
+        <KeyBinding Modifiers="Ctrl" Key="D5" Command="{Binding NavigateToCommand}" CommandParameter="History" />
+        <KeyBinding Modifiers="Ctrl" Key="D6" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
+        <KeyBinding Modifiers="Ctrl" Key="D7" Command="{Binding NavigateToCommand}" CommandParameter="About" />
         <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
         <KeyBinding Modifiers="Ctrl" Key="G" Command="{Binding GenerateScriptCommand}" />
         <KeyBinding Key="Escape" Command="{Binding CancelCurrentCommand}" />
@@ -54,9 +53,6 @@
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RestoreViewModel}">
             <views:RestoreView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:SharedLocationRestoreViewModel}">
-            <views:SharedLocationRestoreView />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
             <views:HistoryView />
@@ -273,16 +269,6 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x267B;" FontSize="15" VerticalAlignment="Center" Width="24" />
                                 <TextBlock Text="Restore" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </RadioButton>
-
-                        <RadioButton Style="{StaticResource SidebarButton}"
-                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Restore from Share'}"
-                                     Command="{Binding NavigateToCommand}"
-                                     CommandParameter="Restore from Share">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#x1F5C2;" FontSize="15" VerticalAlignment="Center" Width="24" />
-                                <TextBlock Text="Restore from Share" VerticalAlignment="Center" />
                             </StackPanel>
                         </RadioButton>
 

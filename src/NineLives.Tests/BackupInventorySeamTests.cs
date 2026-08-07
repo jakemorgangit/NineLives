@@ -46,7 +46,7 @@ public class BackupInventorySeamTests
                 File("OtherDb", "SRV01", BackupType.Full, T0)
             ]
         };
-        return (new BackupInventoryViewModel(blob), blob);
+        return (new BackupInventoryViewModel(blob, new FakeSqlServerService()), blob);
     }
 
     [Fact]
@@ -55,9 +55,9 @@ public class BackupInventorySeamTests
         var (vm, _) = New();
         var container = Container("prod-backups");
 
-        await vm.LoadAsync(container);
+        await vm.LoadAsync(BackupLocation.Blob(container));
 
-        Assert.Same(container, vm.LoadedFrom);
+        Assert.Same(container, vm.LoadedFrom!.Container);
         Assert.True(vm.BackupsLoaded);
     }
 
@@ -71,7 +71,7 @@ public class BackupInventorySeamTests
     {
         var (vm, _) = New();
 
-        await vm.LoadAsync(Container());
+        await vm.LoadAsync(BackupLocation.Blob(Container()));
 
         Assert.Null(vm.SelectedServerName);
         Assert.Null(vm.SelectedDatabaseName);
@@ -84,7 +84,7 @@ public class BackupInventorySeamTests
     public async Task ChoosingADatabaseNarrowsTheWorkingSetToIt()
     {
         var (vm, _) = New();
-        await vm.LoadAsync(Container());
+        await vm.LoadAsync(BackupLocation.Blob(Container()));
 
         vm.SelectedDatabaseName = "MyDb";
 
@@ -100,7 +100,7 @@ public class BackupInventorySeamTests
     public async Task ClearingForgetsTheContainerAndEverythingFromIt()
     {
         var (vm, _) = New();
-        await vm.LoadAsync(Container());
+        await vm.LoadAsync(BackupLocation.Blob(Container()));
         vm.SelectedDatabaseName = "MyDb";
 
         vm.Clear();
@@ -116,7 +116,7 @@ public class BackupInventorySeamTests
     public async Task TheWorkingSetChangeIsAnnouncedSoTheChainCanFollow()
     {
         var (vm, _) = New();
-        await vm.LoadAsync(Container());
+        await vm.LoadAsync(BackupLocation.Blob(Container()));
 
         var announced = 0;
         vm.WorkingSetChanged += () => announced++;
@@ -134,12 +134,12 @@ public class BackupInventorySeamTests
     public async Task AReloadWithADatabaseChosenScopesTheListing()
     {
         var (vm, blob) = New();
-        await vm.LoadAsync(Container());
+        await vm.LoadAsync(BackupLocation.Blob(Container()));
         Assert.Null(blob.LastScope);
 
         vm.SelectedServerName = "SRV01";
         vm.SelectedDatabaseName = "MyDb";
-        await vm.LoadAsync(Container());
+        await vm.LoadAsync(BackupLocation.Blob(Container()));
 
         Assert.NotNull(blob.LastScope);
         Assert.Equal("MyDb", blob.LastScope!.DatabaseName);

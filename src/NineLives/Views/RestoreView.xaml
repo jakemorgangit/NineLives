@@ -32,9 +32,16 @@
                     <Style TargetType="Border">
                         <Setter Property="Visibility" Value="Collapsed" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding Containers.Count}" Value="0">
+                            <!-- Both conditions: a shared-path restore needs no container at all,
+                                 so telling somebody to go and configure one would send them to
+                                 the wrong screen for a problem they do not have. -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding Containers.Count}" Value="0" />
+                                    <Condition Binding="{Binding MediumIsBlob}" Value="True" />
+                                </MultiDataTrigger.Conditions>
                                 <Setter Property="Visibility" Value="Visible" />
-                            </DataTrigger>
+                            </MultiDataTrigger>
                         </Style.Triggers>
                     </Style>
                 </Border.Style>
@@ -77,7 +84,32 @@
                     <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Source}" />
                     <StackPanel Visibility="{Binding Steps.Source.IsExpanded, Converter={StaticResource BoolToVis}}">
 
-                    <Grid>
+                    <!-- Which medium the backups live on (#149, #165).
+                         Backup media is a choice per operation, not a property of the app. Only
+                         two things below ever cared where a backup lives: where the list comes
+                         from, and how a RESTORE addresses a file. Everything else on this screen -
+                         the timeline, the chain, the options, the script, the execute path - works
+                         the same either way, which is why this is a selector here rather than a
+                         second screen. -->
+                    <StackPanel Margin="0,0,0,14">
+                        <TextBlock Text="WHERE THE BACKUPS LIVE" Style="{StaticResource LabelText}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <RadioButton Content="Azure Blob Storage"
+                                         GroupName="BackupMedium"
+                                         Style="{StaticResource DarkRadioButton}"
+                                         IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
+                                         Margin="0,0,20,0"
+                                         ToolTip="RESTORE FROM URL. Needs a server-side credential, and needs no network path between the two hosts." />
+                            <RadioButton Content="A path both servers can see"
+                                         GroupName="BackupMedium"
+                                         Style="{StaticResource DarkRadioButton}"
+                                         IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=SharedPath}"
+                                         ToolTip="RESTORE FROM DISK against a file share. No credential, no egress, and no waiting on an upload - but both instances have to reach it." />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Blob: which container -->
+                    <Grid Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -113,6 +145,83 @@
                                 Command="{Binding LoadBackupsCommand}"
                                 VerticalAlignment="Bottom" />
                     </Grid>
+
+                    <!-- Shared path: whose history, and how the target reaches the files.
+
+                         A share cannot be listed the way a container can - a directory of .bak
+                         files says nothing about which database each belongs to, or which full a
+                         differential was taken against - so the instance that TOOK them is asked
+                         what it recorded. -->
+                    <StackPanel Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="READ THE BACKUP HISTORY OF" Style="{StaticResource LabelText}" />
+                                <ComboBox ItemsSource="{Binding SourceServers}"
+                                          SelectedItem="{Binding SourceServer}"
+                                          Style="{StaticResource DarkComboBox}"
+                                          ToolTip="The instance that TOOK the backups. Not necessarily the one the restore runs on - that difference is the whole point of this mode.">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="Load Backups"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding LoadBackupsCommand}"
+                                    VerticalAlignment="Bottom" />
+                        </Grid>
+
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,10,0,0"
+                                   Text="msdb records the path the source wrote. Leave the two boxes below empty when both hosts reach the backups by the same path - the usual arrangement with a central backup share." />
+
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="AS THE SOURCE WROTE IT" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding SourcePathPrefix, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,4,0,0"
+                                         ToolTip="For example E:\SQLBackups" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="AS THE TARGET REACHES IT" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding TargetPathPrefix, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,4,0,0"
+                                         ToolTip="For example \\SRV01\SQLBackups" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- The one failure here that can end in a SUCCESSFUL restore of the wrong
+                             backup, so it is said as soon as the history is read rather than when
+                             the restore fails. -->
+                        <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="10,8"
+                                Margin="0,12,0,0"
+                                Visibility="{Binding HasPathAdvice, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding PathAdvice}"
+                                       Foreground="{DynamicResource WarningBrush}"
+                                       TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
 
                     <!-- Server + Database selectors -->
                     <Grid Margin="0,12,0,0"
@@ -1163,16 +1272,49 @@
                                      Width="80" HorizontalAlignment="Left"
                                      Margin="0,0,0,16" />
 
-                            <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}" />
+                            <!-- Not applicable rather than merely unsatisfied (#149).
+
+                                 RESTORE FROM DISK needs no credential at all - SQL Server reaches
+                                 the path as its own service account - so under a shared path the
+                                 whole panel below would sit there looking like something still to
+                                 do. Saying which account the permission actually belongs to is
+                                 also the single most useful thing to say here, because that is the
+                                 thing people get wrong. -->
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
+                                    Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="NO CREDENTIAL NEEDED" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap"
+                                               Text="RESTORE FROM DISK does not use a credential. The instance reaches the path as its own SQL Server service account, so that account is what needs read access to the share - not you, and not this app. It is checked on the target before the restore runs." />
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}"
+                                       Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}" />
                             <TextBox Text="{Binding Credential.Name, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,8"
+                                     Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}"
                                      ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
 
                             <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
                             <Border Background="{DynamicResource InputBackgroundBrush}"
-                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
-                                    Visibility="{Binding Credential.SectionVisible, Converter={StaticResource BoolToVis}}">
+                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Credential.SectionVisible}" Value="True" />
+                                                    <Condition Binding="{Binding CredentialApplies}" Value="True" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <StackPanel>
                                     <TextBlock Text="BLOB CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
                                     <!-- Not connected: verify credential by connecting -->

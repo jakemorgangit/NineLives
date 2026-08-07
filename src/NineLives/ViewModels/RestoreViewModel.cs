@@ -321,6 +321,116 @@ public partial class RestoreViewModel : ViewModelBase
         _ = Credential.PointAtAsync(value);
     }
 
+    // ── which medium the backups live on (#149, #165) ───────────────────────────
+    //
+    // Backup media is a choice per operation, not a property of the app. Everything below the
+    // listing already works on BackupSet and never asks where the sets came from, so this is the
+    // whole of what a second medium changes on this screen: which inputs step 1 offers, and whether
+    // the server-side credential is applicable at all.
+
+    [ObservableProperty]
+    private BackupMedium _selectedMedium = BackupMedium.AzureBlob;
+
+    public bool MediumIsBlob => SelectedMedium == BackupMedium.AzureBlob;
+    public bool MediumIsSharedPath => SelectedMedium == BackupMedium.SharedPath;
+
+    /// <summary>
+    /// Whether the server-side credential means anything here.
+    ///
+    /// FROM DISK needs no credential at all - SQL Server reaches the path as its own service
+    /// account - so under a shared path the whole credential panel is not merely unsatisfied, it is
+    /// inapplicable, and it says so rather than sitting there looking like something still to do.
+    /// </summary>
+    public bool CredentialApplies => MediumIsBlob;
+
+    partial void OnSelectedMediumChanged(BackupMedium value)
+    {
+        OnPropertyChanged(nameof(MediumIsBlob));
+        OnPropertyChanged(nameof(MediumIsSharedPath));
+        OnPropertyChanged(nameof(CredentialApplies));
+
+        // Same rule as changing the container, for the same reason: what is on screen came from the
+        // other medium entirely, and an armed Execute that survives the switch is aimed at
+        // something nobody is looking at any more.
+        ClearLoadedBackups();
+    }
+
+    /// <summary>The saved connections, for choosing whose backup history to read.</summary>
+    [ObservableProperty]
+    private ObservableCollection<ServerConnection> _sourceServers = [];
+
+    /// <summary>
+    /// The instance whose msdb is read under a shared path - the one that TOOK the backups.
+    ///
+    /// Not necessarily the instance the restore runs on. That distinction is the whole reason the
+    /// shared-path medium exists, and it is the thing people get wrong.
+    /// </summary>
+    [ObservableProperty]
+    private ServerConnection? _sourceServer;
+
+    partial void OnSourceServerChanged(ServerConnection? value) => ClearLoadedBackups();
+
+    /// <summary>The path as the source wrote it, when the target reaches it by another name.</summary>
+    [ObservableProperty]
+    private string _sourcePathPrefix = string.Empty;
+
+    /// <summary>How the target reaches the same place.</summary>
+    [ObservableProperty]
+    private string _targetPathPrefix = string.Empty;
+
+    partial void OnSourcePathPrefixChanged(string value) => ClearLoadedBackups();
+    partial void OnTargetPathPrefixChanged(string value) => ClearLoadedBackups();
+
+    /// <summary>
+    /// Where the backups are being read from, as one value.
+    ///
+    /// Null when the inputs for the chosen medium are not answered yet, which is what stops a load
+    /// running against half a selection.
+    /// </summary>
+    public BackupLocation? CurrentLocation => SelectedMedium switch
+    {
+        BackupMedium.AzureBlob =>
+            SelectedContainer == null ? null : BackupLocation.Blob(SelectedContainer),
+
+        BackupMedium.SharedPath =>
+            SourceServer == null
+                ? null
+                : BackupLocation.Shared(SourceServer, new BackupPathMapping(SourcePathPrefix, TargetPathPrefix)),
+
+        _ => null
+    };
+
+    /// <summary>
+    /// Said before anything is read, because it is the one failure here that can end in a
+    /// SUCCESSFUL restore of the wrong backup: a local path on the source may resolve on the target
+    /// to the target's OWN drive of that letter.
+    /// </summary>
+    public string PathAdvice
+    {
+        get
+        {
+            if (!MediumIsSharedPath || !Inventory.LoadedFromSharedPath) return string.Empty;
+
+            var mapping = new BackupPathMapping(SourcePathPrefix, TargetPathPrefix);
+            if (mapping.IsInUse) return string.Empty;
+
+            var local = Inventory.WorkingSet
+                .SelectMany(s => s.Files)
+                .Select(f => f.RestoreDevice)
+                .Where(BackupPathMapping.LooksLocalToTheSource)
+                .ToList();
+
+            if (local.Count == 0) return string.Empty;
+
+            return $"{local.Count} of these backups were written to a local path on the source " +
+                   $"(for example {local[0]}). That path means something different on the target - " +
+                   "at best it will not be found, at worst it resolves to the target's own drive. " +
+                   "Give the path as the target reaches it above.";
+        }
+    }
+
+    public bool HasPathAdvice => PathAdvice.Length > 0;
+
     /// <summary>
     /// Drops everything derived from a container's contents. Called when the container changes and
     /// when a load is abandoned, so what is on screen always belongs to the container named above it.
@@ -416,7 +526,7 @@ public partial class RestoreViewModel : ViewModelBase
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
 
-        Inventory = new BackupInventoryViewModel(blobService);
+        Inventory = new BackupInventoryViewModel(blobService, sqlService);
 
         // The chain and the timeline are built from whatever the inventory currently holds, so a
         // change there is the one signal that rebuilds them.
@@ -536,6 +646,14 @@ public partial class RestoreViewModel : ViewModelBase
     {
         var previous = SelectedContainer?.Name;
         var config = _credentialStore.LoadConfig();
+
+        // A server added on the SQL Servers screen since the last visit has to be selectable as a
+        // backup source here, so the two lists are refreshed together.
+        var previousSource = SourceServer?.Id;
+        SourceServers = new ObservableCollection<ServerConnection>(config.Servers);
+        if (previousSource != null)
+            SourceServer = SourceServers.FirstOrDefault(x => x.Id == previousSource);
+
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
         {
@@ -615,17 +733,25 @@ public partial class RestoreViewModel : ViewModelBase
         CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>Lists the selected container. Everything it finds lives on the inventory seam.</summary>
+    /// <summary>Reads the selected location. Everything it finds lives on the inventory seam.</summary>
     [RelayCommand]
     private async Task LoadBackupsAsync()
     {
-        if (SelectedContainer == null)
+        var location = CurrentLocation;
+        if (location == null)
         {
-            SetError("Please select a container first.");
+            SetError(MediumIsSharedPath
+                ? "Choose the server the backups were taken on first."
+                : "Please select a container first.");
             return;
         }
 
-        await Inventory.LoadAsync(SelectedContainer);
+        await Inventory.LoadAsync(location);
+
+        // Only worth saying once there is something to say it about - it is derived from what was
+        // actually loaded, not from the paths typed above.
+        OnPropertyChanged(nameof(PathAdvice));
+        OnPropertyChanged(nameof(HasPathAdvice));
     }
 
 
@@ -1582,7 +1708,70 @@ public partial class RestoreViewModel : ViewModelBase
                 Timeline.SelectedPoint?.Timestamp,
                 $"WITH REPLACE={Options.WithReplace}, recovery={Options.RecoveryMode}, " +
                 $"stopAt={PointInTime.Effective?.ToString("s") ?? "none"}"),
-            appendLog => Credential.PrepareForRestoreAsync(server, appendLog));
+            appendLog => PreflightAsync(server, appendLog));
+    }
+
+    /// <summary>
+    /// The last thing checked before a restore runs, and it differs by medium.
+    ///
+    /// Blob needs the server-side credential to be usable. A shared path needs no credential at all
+    /// - but it needs something the blob path never has to ask: whether the instance about to run
+    /// the RESTORE can actually READ the files. Those are the same question in different clothes,
+    /// which is why they share one hook rather than the execute path growing a branch.
+    /// </summary>
+    internal async Task<CredentialPreflight> PreflightAsync(ServerConnection server, Action<string> appendLog)
+    {
+        if (MediumIsSharedPath)
+            return await CheckTargetCanReadFilesAsync(server, appendLog);
+
+        return await Credential.PrepareForRestoreAsync(server, appendLog);
+    }
+
+    /// <summary>
+    /// Asks the instance the restore will run on whether it can read every file in the chain.
+    ///
+    /// On that instance and not from here, and this is the entire reason a shared path needs a
+    /// preflight of its own: this app's process can see a share the SQL Server service account
+    /// cannot, and the RESTORE runs as that account on that host. A File.Exists from here would say
+    /// yes and the restore would then fail with "Operating system error 5(Access is denied)" -
+    /// after WITH REPLACE had already dropped the database being restored over.
+    ///
+    /// The usual cause is an instance running as a local account or NT SERVICE\MSSQLSERVER, which
+    /// has no identity on the network and so cannot read ANY share. That is worth diagnosing rather
+    /// than reporting as a missing file, because it sends people to check the wrong thing.
+    /// </summary>
+    private async Task<CredentialPreflight> CheckTargetCanReadFilesAsync(
+        ServerConnection server, Action<string> appendLog)
+    {
+        var paths = RestoreChain?.AllFiles.Select(f => f.RestoreDevice).ToList() ?? [];
+        if (paths.Count == 0) return CredentialPreflight.Proceed;
+
+        appendLog($"Checking {server.ServerName} can read {paths.Count} backup file(s)...");
+
+        try
+        {
+            var checks = await _sqlService.CheckBackupFilesAsync(server, paths);
+            var failed = checks.FirstOrDefault(c => !c.CanBeRestored);
+
+            if (failed != null)
+            {
+                var refusal = failed.Explain(server.ServerName);
+                appendLog(refusal);
+                return CredentialPreflight.Stop(refusal);
+            }
+
+            appendLog($"{server.ServerName} can read all {checks.Count} file(s).");
+            return CredentialPreflight.Proceed;
+        }
+        catch (Exception ex)
+        {
+            // A check that cannot be completed is not a check that passed. Proceeding here would
+            // put the whole point of this preflight - finding out BEFORE the target is dropped -
+            // back where it was.
+            var refusal = $"Could not confirm {server.ServerName} can read the backup files: {ex.Message}";
+            appendLog(refusal);
+            return CredentialPreflight.Stop(refusal);
+        }
     }
 
 
