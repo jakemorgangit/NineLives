@@ -121,6 +121,22 @@ public class BackupFileInfo
 {
     public string BlobName { get; set; } = string.Empty;
     public string BlobUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Where this backup lives on disk, when it was never in blob storage at all (#149).
+    ///
+    /// Set for backups discovered through a source instance's msdb rather than by listing a
+    /// container. It is what decides how the restore addresses the file - a file with a local path
+    /// is restored FROM DISK, everything else FROM URL - so the data says where it lives rather
+    /// than a flag somewhere else having to agree with it.
+    /// </summary>
+    public string? LocalPath { get; set; }
+
+    /// <summary>The device clause a RESTORE should name this file by.</summary>
+    public string RestoreDevice => string.IsNullOrWhiteSpace(LocalPath) ? BlobUrl : LocalPath!;
+
+    /// <summary>True when this is a file on a path rather than a blob.</summary>
+    public bool IsOnDisk => !string.IsNullOrWhiteSpace(LocalPath);
     public BackupType Type { get; set; } = BackupType.Unknown;
     public long SizeBytes { get; set; }
     public DateTimeOffset LastModified { get; set; }
