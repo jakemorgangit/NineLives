@@ -26,7 +26,10 @@ public class BackupMediumTests
         FinishedAt = at.AddMinutes(2),
         CheckpointLsn = type == BackupType.Full ? 100 : null,
         DatabaseBackupLsn = type == BackupType.Differential ? 100 : null,
-        LastLsn = 200,
+
+        // Advances with the clock: an LSN is a position in the log, so two backups cannot end at
+        // the same one and hold different transactions.
+        LastLsn = 100 + (decimal)(at - T0).TotalMinutes,
         Files = files.Length == 0 ? [@"\\nas01\sql\full.bak"] : files
     };
 
