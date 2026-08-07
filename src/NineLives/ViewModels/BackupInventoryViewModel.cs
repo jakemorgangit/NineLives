@@ -181,7 +181,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
         {
             if (WorkingSet.Count == 0) return string.Empty;
 
-            var toRead = BackupAuditor.NotYetAudited(WorkingSet, _auditStore.Load()).Count;
+            var toRead = BackupAuditor.NotYetAudited(WorkingSet, _cachedAudit).Count;
             return BackupAuditor.DescribeEstimate(toRead);
         }
     }
@@ -223,6 +223,9 @@ public partial class BackupInventoryViewModel : ViewModelBase
 
             AuditFindings = new ObservableCollection<BackupAuditFinding>(findings);
 
+            // The audit just wrote to it, so the estimate for a re-run has to see the new answers.
+            _cachedAudit = _auditStore.Load();
+
             AuditSummary = findings.Count == 0
                 ? $"All {sets.Count:N0} backup set(s) match their headers."
                 : $"{findings.Count:N0} of {sets.Count:N0} backup set(s) do not match their headers.";
@@ -252,6 +255,38 @@ public partial class BackupInventoryViewModel : ViewModelBase
 
     private void RefreshUnclassifiedCount()
         => UnclassifiedCount = _allBackups.Count(BackupHeaderIdentifier.NeedsIdentifying);
+
+    /// <summary>
+    /// Marks everything a previous audit already answered for, before anybody presses anything.
+    ///
+    /// A backup header never changes, so an answer from last week is as good as one from this
+    /// second - and reading it costs one local file rather than a round trip per set. Without this,
+    /// closing the app threw away the visible result of a three-minute operation: the cache still
+    /// held it and pressing Audit again would have been instant, but somebody would first have to
+    /// guess that a button they had already pressed needed pressing again.
+    /// </summary>
+    private void ApplyCachedAudit()
+    {
+        try
+        {
+            // Read once per load and kept. AuditEstimate is a property a binding re-reads whenever
+            // it feels like it, and going to disk on each get would be a file read per repaint.
+            _cachedAudit = _auditStore.Load();
+            PreAuditedCount = BackupAuditor.ApplyCached(_allSets, _cachedAudit);
+        }
+        catch
+        {
+            // A cache that will not load is a slower audit, not a failed load.
+            _cachedAudit = new Dictionary<string, AuditRecord>();
+            PreAuditedCount = 0;
+        }
+    }
+
+    private IReadOnlyDictionary<string, AuditRecord> _cachedAudit = new Dictionary<string, AuditRecord>();
+
+    /// <summary>How many sets arrived already answered for by a previous run.</summary>
+    [ObservableProperty]
+    private int _preAuditedCount;
 
     /// <summary>
     /// Asks SQL Server what those files actually are, and regroups.
@@ -290,6 +325,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
             // keyed on the database and type that have just been corrected.
             _allSets = _blob.GroupIntoBackupSets(
                 _allBackups, LoadedFrom?.Container?.BackupServerTimeZoneId);
+
+            ApplyCachedAudit();
 
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(_allBackups));
             DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(_allBackups));
@@ -438,6 +475,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
             // Stated, not assumed: everything derived from here belongs to THIS location.
             LoadedFrom = location;
 
+            ApplyCachedAudit();
+
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(files));
             DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(files));
             BackupsLoaded = files.Count > 0;
@@ -496,6 +535,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
         _allBackups = sets.SelectMany(s => s.Files).ToList();
         _allSets = sets;
         LoadedFrom = location;
+
+        ApplyCachedAudit();
 
         DiscoveredServers = new ObservableCollection<string>(
             sets.Select(s => s.ServerDisplay)
