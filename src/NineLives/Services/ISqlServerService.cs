@@ -20,6 +20,15 @@ public interface ISqlServerService
 
     Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default);
 
+    /// <summary>
+    /// What each volume on this instance has free, keyed by mount point (#32).
+    ///
+    /// Asked of the SERVER rather than measured from here: this app's process may not see those
+    /// volumes at all, and where it can, what it sees is not what the service account writes to.
+    /// </summary>
+    Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
+        ServerConnection server, CancellationToken ct = default);
+
     Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(
         ServerConnection server, CancellationToken ct = default);
 

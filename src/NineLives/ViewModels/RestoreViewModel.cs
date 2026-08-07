@@ -1528,6 +1528,61 @@ public partial class RestoreViewModel : ViewModelBase
         return fileMoves;
     }
 
+    // ── will it fit (#32) ───────────────────────────────────────────────────────
+    //
+    // A restore that runs out of disk fails part-way, and by then WITH REPLACE has already dropped
+    // the database it was replacing - so the target is gone and the replacement is incomplete. That
+    // is the worst outcome this screen can produce and it is entirely predictable: FILELISTONLY
+    // already reports how big each file will be, and the instance already knows what it has free.
+
+    /// <summary>Per-volume space, once the file list and the server's volumes are both known.</summary>
+    [ObservableProperty]
+    private ObservableCollection<VolumeSpace> _volumeSpace = [];
+
+    /// <summary>What to say about it, or empty when everything fits.</summary>
+    [ObservableProperty]
+    private string _spaceWarning = string.Empty;
+
+    public bool HasSpaceWarning => SpaceWarning.Length > 0;
+
+    partial void OnSpaceWarningChanged(string value) => OnPropertyChanged(nameof(HasSpaceWarning));
+
+    /// <summary>
+    /// Asks the target what it has free and compares it with what the restore will write.
+    ///
+    /// Failing to answer is not a warning. This is a courtesy check over somebody else's storage,
+    /// and an instance that will not report its volumes - permissions, an edition that does not
+    /// expose the DMV - must not turn that into a scary message about a restore that is probably
+    /// fine.
+    /// </summary>
+    private async Task CheckSpaceAsync(CancellationToken ct)
+    {
+        VolumeSpace = [];
+        SpaceWarning = string.Empty;
+
+        if (ConnectedServer == null || FetchedFileMoves.Count == 0) return;
+
+        try
+        {
+            var free = await _sqlService.GetVolumeFreeSpaceAsync(ConnectedServer, ct);
+            var volumes = RestoreSpaceCheck.Check(FetchedFileMoves, free);
+
+            VolumeSpace = new ObservableCollection<VolumeSpace>(volumes);
+            SpaceWarning = RestoreSpaceCheck.Warn(volumes);
+
+            if (HasSpaceWarning) _log.Warn($"[space] {SpaceWarning}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Logged rather than shown. Not being able to check is not the same as not fitting.
+            _log.Info($"[space] could not check free space: {ex.Message}");
+        }
+    }
+
     /// <summary>
     /// Rebuilds the script from the current settings, silently.
     ///
@@ -1610,6 +1665,10 @@ public partial class RestoreViewModel : ViewModelBase
             FetchedFileMoves = new ObservableCollection<FileMoveOption>(list);
             HasFetchedFileMoves = FetchedFileMoves.Count > 0;
             SetStatus($"Read {FetchedFileMoves.Count} logical file name(s) from the backup. Edit the target paths above, and tick WITH MOVE to use them.");
+
+            // The sizes came back in the same result set, so the question of whether this can
+            // physically fit costs one more query rather than another read of the backup (#32).
+            await CheckSpaceAsync(ct);
         }
         catch (Exception ex)
         {

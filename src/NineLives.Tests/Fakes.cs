@@ -180,6 +180,20 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult(DatabaseList);
 
+    /// <summary>What the fake instance says it has free, by mount point.</summary>
+    public Dictionary<string, long> VolumeFreeSpace { get; set; } = [];
+
+    /// <summary>Set to make asking about volumes fail - which must not become a warning (#32).</summary>
+    public Exception? VolumeCheckThrows { get; set; }
+
+    public Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (VolumeCheckThrows != null) throw VolumeCheckThrows;
+
+        return Task.FromResult(VolumeFreeSpace);
+    }
+
     public Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult((@"D:\Data", @"D:\Logs"));
 
@@ -190,9 +204,12 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Task ExecuteRecoveryActionAsync(ServerConnection server, string sql, CancellationToken ct = default)
         => Task.CompletedTask;
 
+    /// <summary>The logical files the fake backup contains, with their sizes (#32).</summary>
+    public List<FileMoveOption> FileList { get; set; } = [];
+
     public Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
-        => Task.FromResult(new List<FileMoveOption>());
+        => Task.FromResult(FileList);
 
     /// <summary>What the fake instance reads out of a backup header, or null for nothing.</summary>
     public BackupFileInfo? Header { get; set; }

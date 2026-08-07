@@ -1389,6 +1389,48 @@
                                             />
                                 </WrapPanel>
 
+                                <!-- Whether it can physically fit (#32).
+
+                                     A restore that runs out of disk fails part-way, and by then
+                                     WITH REPLACE has already dropped the database it was replacing
+                                     - so the target is gone and the replacement is incomplete.
+                                     Entirely predictable: the file sizes came back with the logical
+                                     names, and the instance knows what it has free.
+
+                                     A warning rather than a block. SQL Server can grow onto space
+                                     that frees up and a volume can be extended mid-restore; this
+                                     app is not the authority on somebody else's storage. -->
+                                <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,10"
+                                        Background="{DynamicResource DangerPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource ErrorBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding HasSpaceWarning, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding SpaceWarning}"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource BodyText}" />
+                                </Border>
+
+                                <ItemsControl ItemsSource="{Binding VolumeSpace}" Margin="0,0,0,10">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Describe}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="11"
+                                                       Margin="0,0,0,2">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Fits}" Value="False">
+                                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
                                 <Border Visibility="{Binding HasFetchedFileMoves, Converter={StaticResource BoolToVis}}"
                                         Background="{DynamicResource InputBackgroundBrush}"
                                         CornerRadius="4" Padding="8" Margin="0,0,0,8">

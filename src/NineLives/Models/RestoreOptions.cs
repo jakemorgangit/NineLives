@@ -66,6 +66,16 @@ public partial class FileMoveOption : ObservableObject
     public string PhysicalName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
 
+    /// <summary>
+    /// How big this file will be once restored, from RESTORE FILELISTONLY's Size column.
+    ///
+    /// It was being read and discarded. Summed per volume against what the target says it has free,
+    /// it answers whether the restore can physically fit - which matters because a restore that
+    /// runs out of disk fails part-way, after WITH REPLACE has already dropped the database it was
+    /// replacing (#32).
+    /// </summary>
+    public long SizeBytes { get; set; }
+
     [ObservableProperty]
     private string _newPhysicalName = string.Empty;
 }
