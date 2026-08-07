@@ -283,6 +283,29 @@ public class BackupSet
     /// </summary>
     public bool IsCopyOnly { get; set; }
 
+    // ── LSNs, when the source knew them ─────────────────────────────────────────
+    //
+    // Null for a set discovered by listing a container: a blob name carries a type and a time and
+    // nothing else, which is the whole of #130's complaint. An instance's own msdb hands these
+    // over directly, so a set read from there can be paired definitively rather than by proximity
+    // in time. Anything reading them has to cope with their absence.
+
+    /// <summary>The checkpoint a full was taken at. A differential's <see cref="DatabaseBackupLsn"/> matches it.</summary>
+    public decimal? CheckpointLsn { get; set; }
+
+    /// <summary>
+    /// Which full this set belongs to. Matched against a full's <see cref="CheckpointLsn"/>, this
+    /// is the definitive test of whether a differential belongs to that full - timestamps only
+    /// suggest it, and a copy-only full taken in between makes the suggestion wrong.
+    /// </summary>
+    public decimal? DatabaseBackupLsn { get; set; }
+
+    public decimal? FirstLsn { get; set; }
+    public decimal? LastLsn { get; set; }
+
+    /// <summary>True when this set can be paired by LSN rather than by time.</summary>
+    public bool HasLsns => CheckpointLsn.HasValue || DatabaseBackupLsn.HasValue;
+
     /// <summary>Server as the filter dropdowns present it: <c>HOST\INSTANCE</c> or <c>HOST</c>.</summary>
     public string? ServerDisplay => ServerIdentity.Format(ServerName, InstanceName);
 

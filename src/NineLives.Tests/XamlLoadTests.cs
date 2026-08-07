@@ -832,155 +832,160 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("HistoryView (empty)", () =>
             new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
 
-    // ── restoring from a shared location (#149) ─────────────────────────────────
-
-    [Fact]
-    public void SharedLocationRestoreViewLoads()
-        => Check("SharedLocationRestoreView", () =>
-            new SharedLocationRestoreView { DataContext = NewSharedLocationViewModel() });
+    // ── the Restore screen under a shared path (#149, #165) ─────────────────
 
     /// <summary>
-    /// The failure this screen exists to catch, on screen in the target's words.
+    /// The whole screen loads and binds under the second medium.
     ///
-    /// A collapsed row is not a message: the per-file explanation is bound behind a visibility
-    /// trigger, so its binding is never evaluated in the default state the plain load test
-    /// exercises - and a broken one there would be silent.
+    /// The inputs a shared path needs are collapsed in the default state the plain load test
+    /// exercises, so none of their bindings are ever evaluated there - and a broken one would be
+    /// silent, because WPF traces a binding failure and carries on with an empty value.
     /// </summary>
     [Fact]
-    public void AFileTheTargetCannotReadIsExplainedOnScreen()
-    {
-        wpf.Invoke(() =>
+    public void TheRestoreViewLoadsWithBackupsOnASharedPath()
+        => Check("RestoreView (shared path)", () =>
         {
-            var vm = NewSharedLocationViewModel();
-            vm.FileChecks =
-            [
-                new FileCheckRow(@"\nas01\sqlull.bak", false,
-                    "SRV02 can see it but is not allowed to read it. The RESTORE runs as the SQL Server service account.")
-            ];
-
-            var listener = BindingErrorListener.Attach();
-            try
-            {
-                var view = new SharedLocationRestoreView { DataContext = vm };
-                Realise(view);
-
-                var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
-
-                Assert.Contains(shown, t => t.Contains(@"\nas01\sqlull.bak", StringComparison.Ordinal));
-                Assert.Contains(shown, t => t.Contains("service account", StringComparison.Ordinal));
-
-                listener.AssertNone("SharedLocationRestoreView file checks");
-            }
-            finally
-            {
-                listener.Detach();
-            }
+            var vm = NewRestoreViewModel();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+            return new RestoreView { DataContext = vm };
         });
-    }
 
     /// <summary>
-    /// The gate, as the screen actually renders it. CanGenerate is tested directly elsewhere; what
-    /// this asks is whether the button is really bound to it - an IsEnabled binding that silently
-    /// fails leaves a live button offering a script for files nobody has checked.
-    /// </summary>
-    [Fact]
-    public void TheGenerateButtonIsDeadUntilTheTargetHasAnswered()
-    {
-        wpf.Invoke(() =>
-        {
-            var vm = NewSharedLocationViewModel();
-            vm.TargetDatabaseName = "MyDb_Restored";
-
-            var view = new SharedLocationRestoreView { DataContext = vm };
-            Realise(view);
-
-            var generate = VisibleButtons(view)
-                .Single(b => b.Content as string == "Generate script");
-
-            Assert.False(generate.IsEnabled);
-        });
-    }
-
-    /// <summary>
-    /// The two dropdowns show the servers' names.
+    /// The source dropdown shows the servers' names.
     ///
-    /// Found by rendering the screen: under this app's ComboBox template a DisplayMemberPath left
-    /// the selection box showing "Blackcat.NineLives.Models.ServerConnection". Nothing throws and
-    /// no binding error is traced - it is only wrong to look at, which is why it needs an assertion
-    /// on what is drawn rather than on what is bound.
+    /// Found by rendering the screen it replaced: under this app's ComboBox template a
+    /// DisplayMemberPath left the selection box showing
+    /// "Blackcat.NineLives.Models.ServerConnection". Nothing throws and no binding error is traced -
+    /// it is only wrong to look at, which is why it needs an assertion on what is drawn.
     /// </summary>
     [Fact]
-    public void TheServerDropdownsShowServerNames()
+    public void TheBackupSourceDropdownShowsServerNames()
     {
         wpf.Invoke(() =>
         {
             var store = new FakeCredentialStore();
-            var source = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
-            var target = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV02", ServerName = "SRV02" };
-            store.Config.Servers.Add(source);
-            store.Config.Servers.Add(target);
+            store.Config.Servers.Add(new ServerConnection
+            { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" });
 
-            var vm = new SharedLocationRestoreViewModel(store, new SqlServerService(store))
-            {
-                SourceServer = source,
-                TargetServer = target
-            };
+            var vm = NewRestoreViewModel(store);
+            vm.RefreshContainers();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+            vm.SourceServer = vm.SourceServers.Single();
 
-            var view = new SharedLocationRestoreView { DataContext = vm };
+            var view = new RestoreView { DataContext = vm };
             Realise(view);
 
             var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
             Assert.Contains("SRV01", shown);
-            Assert.Contains("SRV02", shown);
             Assert.DoesNotContain(shown, t => t.Contains("ServerConnection", StringComparison.Ordinal));
         });
     }
 
     /// <summary>
-    /// A file the target could not read is marked with a cross, not a tick.
+    /// Under a shared path the credential panel is gone, and what replaces it names the account the
+    /// permission actually belongs to.
     ///
-    /// Also found by rendering it. The glyph was one Run with a trigger swapping its Text, and a
-    /// style setter cannot override a locally set value - so the failing row kept its tick and only
-    /// changed colour. On a screen whose entire job is saying which files the target cannot read,
-    /// a tick on the one that failed is the worst thing it could draw.
+    /// Not tidiness: FROM DISK uses no credential, so leaving that panel up presents something
+    /// unsatisfied that can never be satisfied, and sends people to fix the wrong thing. The
+    /// account it names is the one they will otherwise get wrong.
     /// </summary>
     [Fact]
-    public void TheRowForAnUnreadableFileIsMarkedWithACross()
+    public void UnderASharedPathTheCredentialPanelIsReplacedByWhatActuallyMatters()
     {
         wpf.Invoke(() =>
         {
-            var vm = NewSharedLocationViewModel();
-            vm.FileChecks =
-            [
-                new FileCheckRow(@"\nas01\sqlull.bak", true, "Readable"),
-                new FileCheckRow(@"\nas01\sql\log1.trn", false, "SRV02 is not allowed to read it.")
-            ];
+            var vm = NewRestoreViewModel();
+            vm.SelectedMedium = BackupMedium.SharedPath;
 
-            var view = new SharedLocationRestoreView { DataContext = vm };
+            // The options step is collapsed by default, and a collapsed pane is not on screen - so
+            // nothing inside it would be found, including the thing asserted absent below.
+            ShowOptionsStep(vm);
+
+            var view = new RestoreView { DataContext = vm };
             Realise(view);
 
-            var glyphs = FindAll<TextBlock>(view)
-                .Where(IsShown)
-                .Select(t => t.Text)
-                .Where(t => t is "✓" or "✗")
-                .ToList();
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
-            Assert.Equal(["✓", "✗"], glyphs);
+            Assert.DoesNotContain("SQL CREDENTIAL NAME", shown);
+            Assert.Contains("NO CREDENTIAL NEEDED", shown);
+            Assert.Contains(shown, t => t.Contains("service account", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// And it comes back under blob, because that is where it means something.
+    /// </summary>
+    [Fact]
+    public void UnderBlobTheCredentialNameIsStillThere()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            ShowOptionsStep(vm);
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("SQL CREDENTIAL NAME", shown);
+            Assert.DoesNotContain("NO CREDENTIAL NEEDED", shown);
+        });
+    }
+
+    /// <summary>Opens step 3, where the credential panel lives.</summary>
+    private static void ShowOptionsStep(RestoreViewModel vm)
+    {
+        vm.Steps.Options.IsVisible = true;
+        vm.Steps.Options.IsExpanded = true;
+    }
+
+    /// <summary>
+    /// The "no containers configured" panel does not fire at somebody restoring from a share.
+    ///
+    /// It would send them to the Blob Storage screen to fix a problem they do not have - a shared
+    /// path needs no container at all.
+    /// </summary>
+    [Fact]
+    public void WithNoContainersASharedPathRestoreIsNotToldToGoAndConfigureOne()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Empty(vm.Containers);
+            Assert.DoesNotContain("No blob containers configured", shown);
+        });
+    }
+
+    [Fact]
+    public void WithNoContainersABlobRestoreStillIs()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("No blob containers configured", shown);
         });
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────
 
-    private static SharedLocationRestoreViewModel NewSharedLocationViewModel()
+    private RestoreViewModel NewRestoreViewModel(ICredentialStore? credentialStore = null)
     {
-        var store = Store();
-        return new SharedLocationRestoreViewModel(store, new SqlServerService(store));
-    }
-
-    private RestoreViewModel NewRestoreViewModel()
-    {
-        var store = Store();
+        var store = credentialStore ?? Store();
         return new RestoreViewModel(
             new BlobStorageService(store),
             new SqlServerService(store),

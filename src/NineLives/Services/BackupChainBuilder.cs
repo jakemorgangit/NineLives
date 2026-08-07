@@ -39,8 +39,31 @@ public class BackupChainBuilder
         //
         // Copy-only sets remain first-class everywhere else: they are offered as Full restore
         // points above, and they anchor log chains below, both of which are perfectly valid.
-        BackupSet? BaseFullFor(BackupSet diff) =>
-            fulls.LastOrDefault(f => !f.IsCopyOnly && f.Timestamp <= diff.Timestamp);
+        // When the sets carry LSNs - which they do when they were read from an instance's own msdb
+        // rather than inferred from blob names - the pairing is not a rule of thumb at all. A
+        // differential's DatabaseBackupLsn IS the CheckpointLsn of the full it was taken against;
+        // that is what SQL Server itself checks before it raises 3136. So where the data is there,
+        // ask it rather than reasoning about the timestamps (#130).
+        //
+        // This also removes the copy-only special case rather than merely handling it: a diff taken
+        // against a regular full simply does not carry a copy-only full's checkpoint, however the
+        // two are arranged in time.
+        BackupSet? BaseFullFor(BackupSet diff)
+        {
+            if (diff.DatabaseBackupLsn is { } baseLsn)
+            {
+                var byLsn = fulls.LastOrDefault(f => f.CheckpointLsn == baseLsn);
+                if (byLsn != null) return byLsn;
+
+                // A diff whose base is not among the fulls in hand is genuinely unrestorable, and
+                // saying so is the point. Falling back to the nearest by time here would hand back
+                // a full that SQL Server will reject, which is worse than offering nothing - the
+                // restore fails after WITH REPLACE has already dropped the target.
+                if (fulls.Any(f => f.HasLsns)) return null;
+            }
+
+            return fulls.LastOrDefault(f => !f.IsCopyOnly && f.Timestamp <= diff.Timestamp);
+        }
 
         // Each diff restore point: Full + that single diff only (differentials are cumulative
         // since the last full, so earlier diffs are never needed in the chain).

@@ -7,10 +7,10 @@ using CommunityToolkit.Mvvm.Input;
 namespace Blackcat.NineLives.ViewModels;
 
 /// <summary>
-/// What a container holds, and which server and database within it is being looked at.
+/// What a backup location holds, and which server and database within it is being looked at.
 ///
 /// Fourth seam out of RestoreViewModel (#115). Its point is not the line count: it is that the
-/// loaded backups now carry the container they came FROM, as a field, instead of everything on the
+/// loaded backups now carry the location they came FROM, as a field, instead of everything on the
 /// screen assuming that whatever is loaded belongs to whatever is currently selected above it.
 ///
 /// That assumption has produced real bugs twice. #112: changing the container left the previous
@@ -18,15 +18,23 @@ namespace Blackcat.NineLives.ViewModels;
 /// nobody was looking at. And when the preselection was removed, the working set silently fell
 /// back to EVERY set in the container, drawing a timeline of every backup of every database on
 /// every server. Both are the same mistake - data whose provenance is implied rather than stated.
+///
+/// It is also the ONE place that knows a backup can live somewhere other than a container (#165).
+/// Everything downstream - the working set, the chain, the timeline, the restore points, the
+/// options, the script, the execute path - operates on <see cref="BackupSet"/> and never asks where
+/// they came from, which is why widening the app to a second medium is a change to this type and
+/// not to any of those.
 /// </summary>
 public partial class BackupInventoryViewModel : ViewModelBase
 {
     private readonly IBlobStorageService _blob;
+    private readonly ISqlServerService _sql;
     private readonly OperationCancellation _loadCancellation = new();
 
-    public BackupInventoryViewModel(IBlobStorageService blob)
+    public BackupInventoryViewModel(IBlobStorageService blob, ISqlServerService sql)
     {
         _blob = blob;
+        _sql = sql;
     }
 
     /// <summary>Raised when the working set changes, so the chain and timeline can be rebuilt.</summary>
@@ -41,14 +49,20 @@ public partial class BackupInventoryViewModel : ViewModelBase
     private List<BackupSet> _allSets = [];
 
     /// <summary>
-    /// The container these backups were listed from.
+    /// The location these backups were read from.
     ///
     /// The whole reason this type exists. Anything derived from the inventory - a chain, a script,
-    /// a restore point - belongs to THIS container, and can be checked against the one currently
+    /// a restore point - belongs to THIS location, and can be checked against the one currently
     /// selected rather than assumed to match it.
     /// </summary>
     [ObservableProperty]
-    private BlobContainerConfig? _loadedFrom;
+    private BackupLocation? _loadedFrom;
+
+    /// <summary>True when what is loaded came from a shared path rather than a container.</summary>
+    public bool LoadedFromSharedPath => LoadedFrom?.IsSharedPath == true;
+
+    partial void OnLoadedFromChanged(BackupLocation? value)
+        => OnPropertyChanged(nameof(LoadedFromSharedPath));
 
     /// <summary>The sets for the chosen server and database: what a chain can actually be built from.</summary>
     public List<BackupSet> WorkingSet { get; private set; } = [];
@@ -157,18 +171,33 @@ public partial class BackupInventoryViewModel : ViewModelBase
     // ── loading ─────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Lists a container and works out what is in it.
+    /// Reads a backup location and works out what is in it.
+    ///
+    /// The two media differ only here. A container is listed and its filenames interpreted; a
+    /// shared path cannot be read that way at all - a directory of .bak files says nothing about
+    /// which database each belongs to or which full a differential was taken against - so the
+    /// instance that TOOK them is asked what it recorded. Both end in a list of
+    /// <see cref="BackupSet"/>, and nothing downstream can tell which it was looking at.
     /// </summary>
-    public async Task LoadAsync(BlobContainerConfig container)
+    public async Task LoadAsync(BackupLocation location)
     {
         var ct = _loadCancellation.Begin();
         IsBusy = true;
-        LoadProgressText = "Scanning container...";
+        LoadProgressText = location.IsSharedPath
+            ? "Reading backup history..."
+            : "Scanning container...";
         RaiseCancelStateChanged();
         ClearStatus();
 
         try
         {
+            if (location.IsSharedPath)
+            {
+                await LoadFromHistoryAsync(location, ct);
+                return;
+            }
+
+            var container = location.Container!;
             // If a database is already chosen - a reload after taking a fresh backup, say - push
             // that down to Azure as a prefix instead of walking the whole container and discarding
             // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
@@ -185,8 +214,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
             _allBackups = files;
             _allSets = sets;
 
-            // Stated, not assumed: everything derived from here belongs to THIS container.
-            LoadedFrom = container;
+            // Stated, not assumed: everything derived from here belongs to THIS location.
+            LoadedFrom = location;
 
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(files));
             DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(files));
@@ -222,6 +251,51 @@ public partial class BackupInventoryViewModel : ViewModelBase
             LoadProgressText = string.Empty;
             RaiseCancelStateChanged();
         }
+    }
+
+    /// <summary>
+    /// What a source instance recorded backing up, as the same inventory a container produces.
+    ///
+    /// The server and database lists come from the history itself rather than from the app's saved
+    /// connections, for the same reason the container path derives them from what it found: what
+    /// matters is what can actually be restored, not what somebody once configured.
+    /// </summary>
+    private async Task LoadFromHistoryAsync(BackupLocation location, CancellationToken ct)
+    {
+        var source = location.SourceServer!;
+        var history = await _sql.ReadBackupHistoryAsync(source, SelectedDatabaseName, ct);
+
+        // The substitution is applied once, here, so the chain, the file list on screen, the script
+        // and the readability check all name the same file. Applying it in some of those places and
+        // not others is how a screen ends up checking one path and restoring another.
+        var sets = BackupHistoryInventory.ToSets(history, location.Mapping);
+
+        _allBackups = sets.SelectMany(s => s.Files).ToList();
+        _allSets = sets;
+        LoadedFrom = location;
+
+        DiscoveredServers = new ObservableCollection<string>(
+            sets.Select(s => s.ServerDisplay)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+
+        DiscoveredDatabases = new ObservableCollection<string>(
+            sets.Select(s => s.DatabaseName)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+
+        BackupsLoaded = sets.Count > 0;
+
+        // Offered, not answered - the same rule the container path follows.
+        RebuildWorkingSet();
+
+        if (!HasError)
+            SetStatus(sets.Count == 0
+                ? $"{source.ServerName} has no backup history to restore from."
+                : $"Read {sets.Count} backup set(s) from {source.ServerName} across " +
+                  $"{DiscoveredDatabases.Count} database(s).");
     }
 
     /// <summary>

@@ -26,6 +26,28 @@ public static class ServerIdentity
     }
 
     /// <summary>
+    /// The inverse of <see cref="Format"/>: splits <c>HOST\INSTANCE</c> back into its two parts.
+    ///
+    /// Needed because msdb records one string. <c>@@SERVERNAME</c> on a named instance is
+    /// <c>SRV01\PROD</c>, and keeping that whole string as the server would make it a different
+    /// server from the <c>SRV01</c> a container path produces for the same machine - so the two
+    /// sources would never agree on which server a backup came from, and
+    /// <see cref="Matches"/> would reject every filter built from the other one.
+    ///
+    /// A default instance has no backslash and comes back with a null instance, which is what path
+    /// parsing produces for the same machine.
+    /// </summary>
+    public static (string? Server, string? Instance) Split(string? serverName)
+    {
+        if (string.IsNullOrWhiteSpace(serverName)) return (null, null);
+
+        var parts = serverName.Split('\\', 2);
+        return parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1])
+            ? (parts[0], parts[1])
+            : (parts[0], null);
+    }
+
+    /// <summary>
     /// True when a server/instance pair matches a filter value taken from the dropdown.
     ///
     /// An empty filter matches everything. A <c>HOST\INSTANCE</c> filter requires both to match.
