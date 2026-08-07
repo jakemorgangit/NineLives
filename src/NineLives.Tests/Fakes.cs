@@ -380,12 +380,38 @@ public sealed class FakeSqlServerService : ISqlServerService
         ServerConnection server, string credentialName, CancellationToken ct = default)
         => OnCredentialCheck?.Invoke(credentialName, ct) ?? Task.FromResult(Credential);
 
+    /// <summary>Every identity a credential write was asked for, in order (#147).</summary>
+    public List<BlobCredentialIdentity> CredentialIdentitiesWritten { get; } = [];
+
+    /// <summary>What the fake credential write reports back.</summary>
+    public CredentialChange CredentialWriteResult { get; set; } = CredentialChange.None;
+
+    /// <summary>The SAS token each write was handed, so a test can prove none was sent.</summary>
+    public List<string> CredentialSecretsWritten { get; } = [];
+
     public Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
+        BlobCredentialIdentity identity = BlobCredentialIdentity.SharedAccessSignature,
         CancellationToken ct = default)
     {
         CredentialWrites.Add(credentialName);
-        return Task.FromResult(CredentialChange.None);
+        CredentialIdentitiesWritten.Add(identity);
+        CredentialSecretsWritten.Add(sasToken);
+        return Task.FromResult(CredentialWriteResult);
+    }
+
+    /// <summary>What the fake instance says about managed identity. Supported by default.</summary>
+    public ManagedIdentitySupport ManagedIdentity { get; set; } = new(true, 16, 3);
+
+    /// <summary>Set to make ASKING fail, which is not the same as the answer being no.</summary>
+    public Exception? ManagedIdentityCheckThrows { get; set; }
+
+    public Task<ManagedIdentitySupport> SupportsManagedIdentityCredentialAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (ManagedIdentityCheckThrows != null) throw ManagedIdentityCheckThrows;
+
+        return Task.FromResult(ManagedIdentity);
     }
 }
 

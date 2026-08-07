@@ -984,10 +984,10 @@ public class SqlServerService : ISqlServerService
     // leaves create_date intact, which is how the tests tell the two apart.
     public async Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
+        BlobCredentialIdentity identity = BlobCredentialIdentity.SharedAccessSignature,
         CancellationToken ct = default)
     {
         TSql.ValidateIdentifier(credentialName, nameof(credentialName));
-        var quotedName = TSql.QuoteName(credentialName);
 
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
@@ -1005,15 +1005,40 @@ public class SqlServerService : ISqlServerService
         // no longer calls this to "fix" an identity it does not recognise - it stops and says what
         // it found, because the identity it would have replaced could be a managed identity the
         // instance genuinely restores with (#145).
-        var cleanSas = sasToken.TrimStart('?');
         await using var writeCmd = conn.CreateCommand();
-        writeCmd.CommandText = $@"
-            {(exists ? "ALTER" : "CREATE")} CREDENTIAL {quotedName}
-            WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
-            SECRET = '{TSql.EscapeLiteral(cleanSas)}'";
+        writeCmd.CommandText = BlobCredentialStatement.Build(credentialName, identity, sasToken, exists);
         await writeCmd.ExecuteNonQueryAsync(ct);
 
         return exists ? CredentialChange.Updated : CredentialChange.Created;
+    }
+
+    /// <summary>
+    /// Whether this instance can authenticate to blob storage with a managed identity (#147).
+    ///
+    /// Asked before the option is offered, because CREATE CREDENTIAL takes its identity as free
+    /// TEXT on every version: an ungated app writes a credential that looks perfectly fine, sits in
+    /// sys.credentials, reads back correctly, and fails at restore time. Everything says yes until
+    /// the moment it matters.
+    /// </summary>
+    public async Task<ManagedIdentitySupport> SupportsManagedIdentityCredentialAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"SELECT
+            CONVERT(int, SERVERPROPERTY('ProductMajorVersion')) AS ProductMajorVersion,
+            CONVERT(int, SERVERPROPERTY('EngineEdition')) AS EngineEdition";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return new ManagedIdentitySupport(false, null, null);
+
+        var version = reader["ProductMajorVersion"] as int?;
+        var edition = reader["EngineEdition"] as int?;
+
+        return new ManagedIdentitySupport(
+            BlobCredentialStatement.SupportsManagedIdentity(version, edition), version, edition);
     }
 
     public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(

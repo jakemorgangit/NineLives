@@ -101,6 +101,9 @@ public partial class ServerCredentialViewModel : ObservableObject
         OnPropertyChanged(nameof(IsUsable));
         OnPropertyChanged(nameof(IsSharedAccessSignature));
         OnPropertyChanged(nameof(IsManagedIdentity));
+
+        // The button says what a press would DO, which depends on what is already there (#147).
+        OnPropertyChanged(nameof(CreateButtonText));
     }
 
     [ObservableProperty]
@@ -195,14 +198,128 @@ public partial class ServerCredentialViewModel : ObservableObject
         _ => "Credential is not present on this server. Restore will fail unless you create it."
     };
 
-    /// <summary>Create or update the credential with the container's stored SAS token.</summary>
+    // ── which identity to write (#147) ──────────────────────────────────────────
+    //
+    // #29 added Entra ID for browsing precisely because many organisations forbid long-lived SAS
+    // tokens. Those organisations could then browse a container without one and still not restore
+    // without one, because the credential this wrote was always a SAS - so the SAS-free path
+    // stopped half way, and on an Entra container the button failed outright with "no SAS token
+    // stored", which is true and useless.
+
+    /// <summary>The identity the button will write.</summary>
+    [ObservableProperty]
+    private BlobCredentialIdentity _identityToCreate = BlobCredentialIdentity.SharedAccessSignature;
+
+    public bool CreatingManagedIdentity => IdentityToCreate == BlobCredentialIdentity.ManagedIdentity;
+
+    partial void OnIdentityToCreateChanged(BlobCredentialIdentity value)
+    {
+        OnPropertyChanged(nameof(CreatingManagedIdentity));
+        OnPropertyChanged(nameof(CreateButtonText));
+        CreateOnServerCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// What pressing the button would actually DO.
+    ///
+    /// It has to read both what is on the server and what is about to be written, because the
+    /// interesting presses are the ones that change one into the other - and a label describing
+    /// only the current state is exactly the bug #145 was: the same button read as a harmless
+    /// refresh while it converted the instance's managed identity to a SAS token.
+    ///
+    /// Now that the identity is a choice rather than a constant, the reverse conversion needs the
+    /// same treatment. It is no less a change to how the whole instance reaches that container.
+    /// </summary>
+    public string CreateButtonText => (IdentityKind, CreatingManagedIdentity) switch
+    {
+        (BlobCredentialIdentity.ManagedIdentity, false) =>
+            "Replace Managed Identity with stored SAS token",
+
+        (BlobCredentialIdentity.SharedAccessSignature, true) =>
+            "Replace SAS token with the instance's managed identity",
+
+        (BlobCredentialIdentity.ManagedIdentity, true) =>
+            "Refresh credential as the instance's managed identity",
+
+        (BlobCredentialIdentity.SharedAccessSignature, false) =>
+            "Refresh credential with stored SAS token",
+
+        (_, true) => "Create credential as the instance's managed identity",
+        _ => "Create credential on server"
+    };
+
+    /// <summary>Whether the instance can use one at all, once it has been asked.</summary>
+    [ObservableProperty]
+    private bool _managedIdentitySupported;
+
+    /// <summary>Why not, when it cannot - named rather than a bare refusal.</summary>
+    [ObservableProperty]
+    private string _managedIdentityBlockedReason = string.Empty;
+
+    /// <summary>
+    /// What creating the credential does NOT buy, shown alongside the option rather than after it
+    /// fails. The statement succeeds whether or not the instance has an identity at all.
+    /// </summary>
+    public static string ManagedIdentityCaveat => BlobCredentialStatement.WhatItStillNeeds;
+
+    /// <summary>
+    /// Asks the instance whether a managed-identity credential is worth offering, and picks the
+    /// identity that can actually work here.
+    ///
+    /// An Entra container defaults to managed identity because it is the only thing that CAN work
+    /// there - there is no stored token by design. A SAS container keeps the SAS default, since
+    /// that is what it has.
+    /// </summary>
+    private async Task RefreshManagedIdentitySupportAsync(CancellationToken ct = default)
+    {
+        if (Server == null)
+        {
+            ManagedIdentitySupported = false;
+            ManagedIdentityBlockedReason = string.Empty;
+            return;
+        }
+
+        try
+        {
+            var support = await _sql.SupportsManagedIdentityCredentialAsync(Server, ct);
+
+            ManagedIdentitySupported = support.IsSupported;
+            ManagedIdentityBlockedReason = support.Explain();
+
+            // An Entra container, and only an Entra container. "Not SAS" is not the same test:
+            // with no container chosen yet, null is not SasToken either - which defaulted the
+            // identity to managed before there was anything to authenticate against, and an
+            // existing test caught it by finding a write where it expected a refusal.
+            if (support.IsSupported && Container is { AuthMode: not BlobAuthMode.SasToken })
+                IdentityToCreate = BlobCredentialIdentity.ManagedIdentity;
+            else if (!support.IsSupported)
+                IdentityToCreate = BlobCredentialIdentity.SharedAccessSignature;
+        }
+        catch
+        {
+            // Not being able to ask is not the same as the answer being no, but it is the same
+            // outcome: without knowing, offering it would risk writing a credential that looks
+            // right and fails at restore time.
+            ManagedIdentitySupported = false;
+            ManagedIdentityBlockedReason =
+                "Could not ask this instance whether it supports managed identity, so the option " +
+                "is not offered - a credential written blind would look correct and fail at " +
+                "restore time.";
+        }
+    }
+
+    /// <summary>Create or update the credential, with the identity currently chosen.</summary>
     [RelayCommand(CanExecute = nameof(CanCreate))]
     private async Task CreateOnServerAsync()
     {
         if (Server == null || Container == null) return;
 
         var sasToken = _store.GetSasToken(Container);
-        if (string.IsNullOrEmpty(sasToken))
+
+        // Only a SAS credential needs one. A managed-identity credential carries no secret at all,
+        // which is the entire point for an estate that forbids them.
+        if (IdentityToCreate == BlobCredentialIdentity.SharedAccessSignature &&
+            string.IsNullOrEmpty(sasToken))
         {
             Reported?.Invoke(
                 "No SAS token stored for this container. Add or refresh the token in Blob Storage config.",
@@ -218,20 +335,44 @@ public partial class ServerCredentialViewModel : ObservableObject
         try
         {
             var change = await _sql.EnsureCredentialExistsAsync(
-                Server, Name, Container.ContainerUrl, sasToken, _writeCancellation.Begin());
+                Server, Name, Container.ContainerUrl, sasToken ?? string.Empty,
+                IdentityToCreate, _writeCancellation.Begin());
+
             await RefreshAsync();
+
             Reported?.Invoke(change switch
             {
+                CredentialChange.Created when CreatingManagedIdentity =>
+                    "Credential created on server, authenticating as the instance's managed identity. " +
+                    BlobCredentialStatement.WhatItStillNeeds,
+
                 CredentialChange.Created => "Credential created on server.",
+
+                // Both directions of a conversion are worth naming. Replacing a managed identity
+                // with a SAS was already called out (#145); replacing a SAS with a managed identity
+                // discards the stored token on the server, which is equally a change to how the
+                // instance authenticates rather than a routine update.
+                _ when CreatingManagedIdentity && replaced == BlobCredentialIdentity.SharedAccessSignature =>
+                    "Credential replaced on server: it held a SAS token and now authenticates as " +
+                    "the instance's managed identity. " + BlobCredentialStatement.WhatItStillNeeds,
+
+                _ when CreatingManagedIdentity =>
+                    "Credential updated on server, authenticating as the instance's managed identity.",
+
                 _ when replaced == BlobCredentialIdentity.ManagedIdentity =>
                     "Credential replaced on server: it authenticated as the instance's managed " +
                     "identity and now holds the stored SAS token.",
+
                 _ => "Credential updated on server with the stored SAS token."
             }, false);
 
-            if (replaced == BlobCredentialIdentity.ManagedIdentity)
+            if (replaced == BlobCredentialIdentity.ManagedIdentity && !CreatingManagedIdentity)
                 _log.ServerChange(Server.ServerName,
                     $"credential [{Name}] identity changed from Managed Identity to SAS");
+
+            if (CreatingManagedIdentity && replaced == BlobCredentialIdentity.SharedAccessSignature)
+                _log.ServerChange(Server.ServerName,
+                    $"credential [{Name}] identity changed from SAS to Managed Identity");
         }
         catch (Exception ex)
         {
@@ -244,10 +385,30 @@ public partial class ServerCredentialViewModel : ObservableObject
     // inside it still works - a SAS that was rotated or has expired looks identical from here.
     // Since Execute no longer rewrites the credential on every run, this button is the only way
     // to push a fresh token, and hiding it left users with no route at all.
-    private bool CanCreate() => Server != null && Container != null;
+    private bool CanCreate() =>
+        Server != null &&
+        Container != null &&
+        (IdentityToCreate != BlobCredentialIdentity.ManagedIdentity || ManagedIdentitySupported);
 
-    partial void OnServerChanged(ServerConnection? value) => CreateOnServerCommand.NotifyCanExecuteChanged();
-    partial void OnContainerChanged(BlobContainerConfig? value) => CreateOnServerCommand.NotifyCanExecuteChanged();
+    partial void OnServerChanged(ServerConnection? value)
+    {
+        CreateOnServerCommand.NotifyCanExecuteChanged();
+
+        // A different instance answers differently, and the answer decides what is offered.
+        _ = RefreshManagedIdentitySupportAsync();
+    }
+
+    partial void OnContainerChanged(BlobContainerConfig? value)
+    {
+        CreateOnServerCommand.NotifyCanExecuteChanged();
+
+        // Which container it is decides which identity can work: an Entra container has no stored
+        // token by design, so a SAS credential is not an option there at all.
+        _ = RefreshManagedIdentitySupportAsync();
+    }
+
+    partial void OnManagedIdentitySupportedChanged(bool value)
+        => CreateOnServerCommand.NotifyCanExecuteChanged();
 
     /// <summary>
     /// What the execute path should do about the credential before it starts, and everything it
