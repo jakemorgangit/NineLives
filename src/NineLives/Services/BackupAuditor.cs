@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -21,16 +21,21 @@ public class BackupAuditor(ISqlServerService sql, IBackupAuditStore store)
     /// <summary>
     /// What one header read costs, measured rather than guessed.
     ///
-    /// Two runs against a real container: 5.8s per statement with a fresh connection each time, and
-    /// 1.7s per statement once they shared one and connecting fell to nothing. The second is the
-    /// figure to plan with; it is a blob round trip plus SQL Server reading a header, and it is not
-    /// going to get much better.
+    /// Three runs against a real container, each a better sample than the last:
+    ///   3 sets, fresh connection per read - 5,800 ms per statement
+    ///   11 sets, one connection - 1,744 ms per statement
+    ///   98 sets, one connection - 2,101 ms per statement, over 152 files
+    ///
+    /// The last is the one to plan with: it is the only sample large enough to average out a single
+    /// slow blob, and it is a full audit of a real database rather than one chain. The 11-set run
+    /// quoted three minutes for that 98-set audit and it took three and a half - close, but under,
+    /// and an estimate that runs over reads as a fault where one that comes in early does not.
     ///
     /// Deliberately a stated constant rather than a running average. An estimate that changes
     /// between one glance and the next is one nobody trusts, and being roughly right in front of a
     /// three-minute operation is the whole job.
     /// </summary>
-    public static readonly TimeSpan MeasuredCostPerSet = TimeSpan.FromMilliseconds(1_700);
+    public static readonly TimeSpan MeasuredCostPerSet = TimeSpan.FromMilliseconds(2_100);
 
     /// <summary>How long auditing this many sets should take, given what is already cached.</summary>
     public static TimeSpan Estimate(int setsToRead) =>

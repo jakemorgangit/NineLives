@@ -56,7 +56,7 @@ public class LogGoesWhereItIsToldTests
             ]
         };
 
-        var vm = new BackupInventoryViewModel(blob, new FakeSqlServerService(), log);
+        var vm = new BackupInventoryViewModel(blob, new FakeSqlServerService(), log, TestAuditStores.Temp());
 
         await vm.LoadAsync(Container());
         await vm.IdentifyUnclassifiedAsync(Server());

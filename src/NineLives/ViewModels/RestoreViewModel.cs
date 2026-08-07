@@ -511,7 +511,8 @@ public partial class RestoreViewModel : ViewModelBase
         RestoreScriptGenerator scriptGenerator,
         ICredentialStore credentialStore,
         OperationLog? log = null,
-        IRestoreHistoryStore? history = null)
+        IRestoreHistoryStore? history = null,
+        IBackupAuditStore? auditStore = null)
     {
         _history = history ?? new RestoreHistoryStore();
 
@@ -526,7 +527,10 @@ public partial class RestoreViewModel : ViewModelBase
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
 
-        Inventory = new BackupInventoryViewModel(blobService, sqlService, _log);
+        // The audit cache is passed down for the same reason the log is: left to find its own, it
+        // finds the one in the user's profile - so a TEST run reads and writes the real cache, and
+        // a stale entry from one test then decides the answer in another (#130).
+        Inventory = new BackupInventoryViewModel(blobService, sqlService, _log, auditStore);
 
         // The chain and the timeline are built from whatever the inventory currently holds, so a
         // change there is the one signal that rebuilds them.
@@ -871,9 +875,15 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void RefreshChainFiles()
     {
+        // The restore points grid is what somebody is actually looking at when an audit finishes -
+        // the chain panel below it is collapsed until they ask for it - so that grid is the one
+        // that has to show the result. Reported: an audit passed 98 sets and nothing said so.
+        Timeline.RefreshRows();
+
         if (RestoreChain == null) return;
 
         ChainFiles = new ObservableCollection<BackupFileInfo>(RestoreChain.AllFiles);
+        ChainSets = new ObservableCollection<BackupSet>(RestoreChain.AllSets);
     }
 
     [RelayCommand]

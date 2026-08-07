@@ -98,6 +98,27 @@ public partial class RestoreTimelineViewModel : ObservableObject
     private DateTime? _to;
 
     /// <summary>
+    /// Re-publishes the rows so a grid re-reads what they say, without changing which rows they are.
+    ///
+    /// RestorePoint is a plain model with no change notification - deliberately, it is derived data
+    /// rather than a viewmodel - so a property that becomes true underneath it, like a set having
+    /// been audited, reaches no binding on its own. Replacing the collection is what makes a grid
+    /// look again.
+    ///
+    /// The selection is put back deliberately. Losing it would move the restore point somebody had
+    /// chosen, as a side effect of an audit finishing - a change to what would be restored, made by
+    /// something that was only supposed to be checking.
+    /// </summary>
+    public void RefreshRows()
+    {
+        var selected = SelectedPoint;
+
+        Points = new ObservableCollection<RestorePoint>(Points);
+
+        if (selected != null && Points.Contains(selected)) SelectedPoint = selected;
+    }
+
+    /// <summary>
     /// Takes a fresh set of restore points and shows them, with the filters wide open.
     ///
     /// Wide open because carrying a previous database's date range over would silently hide points

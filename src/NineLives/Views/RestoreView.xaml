@@ -735,6 +735,33 @@
 
                             <DataGridTextColumn Header="Restores" Width="*"
                                                 Binding="{Binding TypeDisplay}" />
+                            <!-- Whether this has been checked against its own header (#130).
+
+                                 Blank until something has been, because not having asked is not a
+                                 finding about the backup - a column of crosses would say the
+                                 opposite. Green and red only once there is an answer. -->
+                            <DataGridTextColumn Header="Audit" Width="90"
+                                                SortMemberPath="AuditDisplay"
+                                                Binding="{Binding AuditDisplay}">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontSize" Value="11" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AuditPassed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                <Setter Property="ToolTip" Value="SQL Server read the header of every backup needed here, and they match what the paths say." />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AuditFailed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                <Setter Property="ToolTip" Value="At least one backup needed here does not match its header - see the audit findings above." />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
                             <DataGridTextColumn Header="Files" Width="60"
                                                 SortMemberPath="TotalFiles"
                                                 Binding="{Binding TotalFiles}" />
@@ -780,6 +807,33 @@
                                     </Style>
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
+                            <!-- Whether this has been checked against its own header (#130).
+
+                                 Blank until something has been, because not having asked is not a
+                                 finding about the backup - a column of crosses would say the
+                                 opposite. Green and red only once there is an answer. -->
+                            <DataGridTextColumn Header="Audit" Width="90"
+                                                SortMemberPath="AuditDisplay"
+                                                Binding="{Binding AuditDisplay}">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontSize" Value="11" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AuditPassed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                <Setter Property="ToolTip" Value="SQL Server read the header of every backup needed here, and they match what the paths say." />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AuditFailed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                <Setter Property="ToolTip" Value="At least one backup needed here does not match its header - see the audit findings above." />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
                             <DataGridTextColumn Header="Files" Width="55"
                                                 Binding="{Binding FileCount}" />
                             <DataGridTextColumn Header="Striped" Width="60"

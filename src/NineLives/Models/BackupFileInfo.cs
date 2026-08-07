@@ -340,6 +340,30 @@ public class BackupSet
     /// <summary>True when this set can be paired by LSN rather than by time.</summary>
     public bool HasLsns => CheckpointLsn.HasValue || DatabaseBackupLsn.HasValue;
 
+    // ── whether this set has been checked against its own header (#130) ─────────
+    //
+    // Derived from the files rather than stored, so there is one answer and it cannot drift from
+    // what the audit actually marked. A striped set is audited as a whole - one HEADERONLY covering
+    // every stripe - so its files always agree.
+
+    /// <summary>Every file checked, and every one of them matched.</summary>
+    public bool AuditPassed =>
+        Files.Count > 0 && Files.All(f => f.AuditState == BackupAuditState.Passed);
+
+    /// <summary>The header disagreed with what the path claimed, or could not be read.</summary>
+    public bool AuditFailed => Files.Any(f => f.AuditState == BackupAuditState.Failed);
+
+    /// <summary>
+    /// What to show in a grid column.
+    ///
+    /// Blank rather than "no" when nothing has been checked: not having asked is not a finding
+    /// about the backup, and a column full of crosses would say the opposite.
+    /// </summary>
+    public string AuditDisplay =>
+        AuditFailed ? "\u2717 mismatch"
+        : AuditPassed ? "\u2713 audited"
+        : string.Empty;
+
     /// <summary>Server as the filter dropdowns present it: <c>HOST\INSTANCE</c> or <c>HOST</c>.</summary>
     public string? ServerDisplay => ServerIdentity.Format(ServerName, InstanceName);
 
@@ -452,6 +476,38 @@ public class RestorePoint
             : $"Full + {RequiredLogSets.Count} Log(s)",
         _ => "Unknown"
     };
+
+    /// <summary>Every set this restore point needs, in the order a restore applies them.</summary>
+    public IEnumerable<BackupSet> AllRequiredSets
+    {
+        get
+        {
+            yield return RequiredFullSet;
+            foreach (var diff in RequiredDiffSets) yield return diff;
+            foreach (var log in RequiredLogSets) yield return log;
+        }
+    }
+
+    // ── whether this whole point has been checked against its headers (#130) ────
+    //
+    // Per POINT rather than per set, because that is the decision being made in this grid: this is
+    // the moment somebody is about to restore to, and what they want to know is whether every
+    // backup needed to get there has been confirmed - not whether some of them have.
+
+    /// <summary>Every set needed to reach this moment has been read and matched.</summary>
+    public bool AuditPassed => AllRequiredSets.All(s => s.AuditPassed);
+
+    /// <summary>At least one set needed to reach this moment did not match its header.</summary>
+    public bool AuditFailed => AllRequiredSets.Any(s => s.AuditFailed);
+
+    /// <summary>
+    /// Blank until something has been checked. Not having asked is not a finding about the backup,
+    /// and a column full of crosses would say the opposite.
+    /// </summary>
+    public string AuditDisplay =>
+        AuditFailed ? "✗ mismatch"
+        : AuditPassed ? "✓ audited"
+        : string.Empty;
 
     public int TotalFiles
     {

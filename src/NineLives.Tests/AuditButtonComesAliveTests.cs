@@ -50,7 +50,7 @@ public class AuditButtonComesAliveTests
 
         return new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
     }
 
     private static void Connect(RestoreViewModel vm)
