@@ -419,6 +419,76 @@ public class SqlServerService : ISqlServerService
     }
 
     /// <summary>RESTORE HEADERONLY across the files of one backup set, striped or not.</summary>
+    /// <summary>
+    /// Asks the TARGET instance whether it can read a backup file, and says why not (#149).
+    ///
+    /// The reason this is a server round trip rather than File.Exists: the app's own process can
+    /// see a share the SQL Server service account cannot, and the RESTORE runs as that account on
+    /// that host. Checking locally would say yes and the restore would then fail with
+    /// "Operating system error 5(Access is denied)" - so the question is asked where it will be
+    /// answered.
+    ///
+    /// RESTORE HEADERONLY is the cheapest statement that proves all three things at once: the path
+    /// resolves, the account may read it, and what is there is a backup. It reads the header only,
+    /// not the backup.
+    /// </summary>
+    public async Task<BackupFileCheck> CheckBackupFileAsync(
+        ServerConnection server, string path, CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = CreateConnection(server);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+
+            // Short. A file that is not reachable should fail quickly - this runs once per file and
+            // the whole point is to find that out BEFORE a restore starts, not to wait as long as
+            // one would.
+            cmd.CommandTimeout = 30;
+            cmd.CommandText = $"RESTORE HEADERONLY FROM DISK = N'{TSql.EscapeLiteral(path)}'";
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            return await reader.ReadAsync(ct)
+                ? BackupFileCheck.Ok(path)
+                : BackupFileCheck.From(path, "The file was read but contained no backup header.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Its own words, classified but never replaced: the numbered error is what somebody
+            // searches for when the explanation does not match their situation.
+            return BackupFileCheck.From(path, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Checks every file a chain needs, stopping at the first that cannot be read.
+    ///
+    /// Stops early on purpose. One unreadable file means the restore cannot run, and the usual
+    /// cause - the service account having no access to the share - fails every file identically,
+    /// so carrying on would produce a page of the same message.
+    /// </summary>
+    public async Task<List<BackupFileCheck>> CheckBackupFilesAsync(
+        ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default)
+    {
+        var results = new List<BackupFileCheck>();
+
+        foreach (var path in paths)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var check = await CheckBackupFileAsync(server, path, ct);
+            results.Add(check);
+
+            if (!check.CanBeRestored) break;
+        }
+
+        return results;
+    }
+
     public async Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
