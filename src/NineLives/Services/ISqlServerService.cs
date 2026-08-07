@@ -49,6 +49,18 @@ public interface ISqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default);
 
+    /// <summary>What this instance recorded backing up, from msdb (#149).</summary>
+    Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
+        ServerConnection server, string? databaseName = null, CancellationToken ct = default);
+
+    /// <summary>Whether THIS instance can read a backup file, and why not (#149).</summary>
+    Task<BackupFileCheck> CheckBackupFileAsync(
+        ServerConnection server, string path, CancellationToken ct = default);
+
+    /// <summary>Checks every file a chain needs, stopping at the first that cannot be read.</summary>
+    Task<List<BackupFileCheck>> CheckBackupFilesAsync(
+        ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default);
+
     Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default);
 
