@@ -88,7 +88,17 @@ public interface ISqlServerService
     Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default);
 
+    /// <param name="identity">
+    /// Which identity the credential holds. A managed-identity credential carries no SECRET at all
+    /// (#147), and writing one over a SAS credential converts it - which is destructive, so nothing
+    /// should reach here except because somebody asked for it.
+    /// </param>
     Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
+        BlobCredentialIdentity identity = BlobCredentialIdentity.SharedAccessSignature,
         CancellationToken ct = default);
+
+    /// <summary>Whether this instance can authenticate to blob storage with a managed identity (#147).</summary>
+    Task<ManagedIdentitySupport> SupportsManagedIdentityCredentialAsync(
+        ServerConnection server, CancellationToken ct = default);
 }

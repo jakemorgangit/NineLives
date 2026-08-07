@@ -1517,6 +1517,60 @@
                                      Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}"
                                      ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
 
+                            <!-- Which identity the credential holds (#147).
+
+                                 #29 added Entra ID for browsing because many organisations forbid
+                                 long-lived SAS tokens - and those organisations could then browse
+                                 a container without one and still not restore without one, because
+                                 the credential this app wrote was always a SAS. On an Entra
+                                 container the button failed outright with "no SAS token stored",
+                                 which is true, by design, and useless. -->
+                            <StackPanel Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}"
+                                        Margin="0,0,0,10">
+                                <TextBlock Text="AUTHENTICATE AS" Style="{StaticResource LabelText}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <RadioButton Content="SAS token"
+                                                 GroupName="CredentialIdentity"
+                                                 Style="{StaticResource DarkRadioButton}"
+                                                 IsChecked="{Binding Credential.IdentityToCreate, Converter={StaticResource EnumToBool}, ConverterParameter=SharedAccessSignature}"
+                                                 Margin="0,0,20,0"
+                                                 ToolTip="The stored token is pushed to the server. Needs a token to have been saved for this container." />
+                                    <RadioButton Content="The instance's managed identity"
+                                                 GroupName="CredentialIdentity"
+                                                 Style="{StaticResource DarkRadioButton}"
+                                                 IsEnabled="{Binding Credential.ManagedIdentitySupported}"
+                                                 IsChecked="{Binding Credential.IdentityToCreate, Converter={StaticResource EnumToBool}, ConverterParameter=ManagedIdentity}"
+                                                 ToolTip="No secret is stored anywhere. Needs SQL Server 2022 or later, or Azure SQL Managed Instance." />
+                                </StackPanel>
+
+                                <!-- Named rather than a bare disabled radio button. Somebody who has
+                                     just been told their organisation forbids SAS tokens, and is now
+                                     told the alternative is unavailable, deserves to know which of
+                                     the two things to go and change. -->
+                                <TextBlock Text="{Binding Credential.ManagedIdentityBlockedReason}"
+                                           Style="{StaticResource SecondaryText}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,8,0,0"
+                                           Visibility="{Binding Credential.ManagedIdentityBlockedReason, Converter={StaticResource NullToVis}}" />
+
+                                <!-- What the credential alone does NOT buy. The statement succeeds
+                                     whether or not the instance has an identity at all, and both
+                                     failures then surface as a 403 at restore time that says
+                                     nothing about which identity was refused - the trap #144
+                                     addressed on the browsing side. -->
+                                <Border CornerRadius="4" Padding="10,8" Margin="0,8,0,0"
+                                        Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding Credential.CreatingManagedIdentity, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding Credential.ManagedIdentityCaveat}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap"
+                                               FontSize="11" />
+                                </Border>
+                            </StackPanel>
+
                             <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
                             <Border Background="{DynamicResource InputBackgroundBrush}"
                                     CornerRadius="4" Padding="12,10" Margin="0,0,0,16">
@@ -1602,27 +1656,21 @@
                                                    Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
                                             <Run Text="Execute will leave this credential alone and no SAS token is sent to the server. The instance authenticates to the container as itself, so the restore depends on its identity holding a role on the storage account rather than on anything stored here. The button below would replace that with a SAS credential - which would also change how anything else on this instance reaches the same container." />
                                         </TextBlock>
+                                        <!-- The label says what the press would actually DO, which
+                                             needs both what is on the server and what is about to be
+                                             written - the interesting presses are the ones that turn
+                                             one into the other. A label describing only the current
+                                             state is precisely the bug #145 was, and now that the
+                                             identity is a choice the reverse conversion needs the
+                                             same treatment (#147). Computed rather than triggered,
+                                             because four combinations of two states is a truth table
+                                             and belongs somewhere it can be tested. -->
                                         <Button Command="{Binding Credential.CreateOnServerCommand}"
+                                                Content="{Binding Credential.CreateButtonText}"
                                                 Margin="0,0,0,0" Padding="10,6"
-                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one with the SAS token currently stored for the container, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. The SAS token is not included in the generated script."
-                                                HorizontalAlignment="Left">
-                                            <Button.Style>
-                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
-                                                    <Setter Property="Content" Value="Create credential on server" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Credential.IsSharedAccessSignature}" Value="True">
-                                                            <Setter Property="Content" Value="Refresh credential with stored SAS token" />
-                                                        </DataTrigger>
-                                                        <!-- Says what the press would actually do. The same button under the
-                                                             old label read as a harmless refresh while it converted the
-                                                             instance's managed identity to a SAS token (#145). -->
-                                                        <DataTrigger Binding="{Binding Credential.IsManagedIdentity}" Value="True">
-                                                            <Setter Property="Content" Value="Replace Managed Identity with stored SAS token" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Button.Style>
-                                        </Button>
+                                                Style="{StaticResource SecondaryButton}"
+                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. No secret is ever included in the generated script."
+                                                HorizontalAlignment="Left" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
