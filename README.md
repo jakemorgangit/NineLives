@@ -57,6 +57,13 @@ Backups are written to the layout the container is configured with, so what Nine
 
 ## Features
 
+### Copying and Auditing
+- Copy a database from one server onto another in one action, through blob or a shared path
+- Audit a database's backups against their own headers, with the result cached so a second run is
+  instant — and a pill on every restore point that has been confirmed
+- Hand a restore over as a SQL Server Agent job, created disabled and unscheduled, for a
+  maintenance window or a change process
+
 ### Backing Up
 - Back up a database to Azure Blob Storage or to a path the SQL Server service account can write to
 - `COPY_ONLY` by default, so a production differential schedule is left alone — and a clear warning when it is turned off
@@ -328,7 +335,39 @@ credential on the *instance* for the blob container, which is separate and confi
    - **Copy to Clipboard** or **Save to File** to run manually in SSMS
    - **Execute on Server** to run directly (requires connected SQL Server)
 
-### 6. Execute Restore
+### 6. Copy a Database to Another Server
+
+Back up the source and restore it onto the target in one action.
+
+1. Navigate to **Copy Database** in the sidebar
+2. Choose the source server and database, then click **List databases**
+3. Choose how it travels — a blob container, or a folder both servers can reach
+4. Choose the target server and what to call the copy
+5. Click **Generate scripts** — both statements are shown together, because what happens to each
+   server is one decision
+6. Press **Copy database** twice; the confirmation names both servers
+
+If the backup succeeds and the restore fails, the app says so explicitly: the backup is real and
+usable, and restoring from it is the right next step rather than running the whole thing again.
+
+### 7. Audit Backups Against Their Headers
+
+Optional, and worth doing on a container nobody has confirmed the path pattern for.
+
+Path-and-filename inference is right most of the time and wrong in ways that stay invisible until a
+restore is needed — a log filed as a full, a backup filed under the wrong database. The header is
+what a `RESTORE` reads, so it settles the question.
+
+1. Load a container and choose a database on the **Restore** screen
+2. The **Audit these backups** panel estimates how long it will take, from a measured cost per
+   backup set
+3. Click **Audit this database**; it can be stopped at any point and what it checked is kept
+4. Restore points and chain members that match their headers carry a **✓ audited** pill
+
+Results are cached against each blob's ETag, so a second audit is instant and closing the app does
+not lose them. A backup replaced under the same name is read again.
+
+### 8. Execute Restore
 
 When clicking **Execute on Server**:
 1. The button changes to "Confirm Execute (5)" with a countdown
@@ -458,11 +497,15 @@ NineLives/
 ## Known Limitations
 
 - Windows only (WPF application)
-- x64 architecture only
-- Single container per restore operation
-- Browsing a container works with a SAS token or Entra ID. The **server-side** credential that
-  `RESTORE FROM URL` needs can only be created from here as a SAS credential — a Managed Identity
-  credential is recognised and left alone, but has to be created on the instance itself
+- Single container per restore operation — a chain whose full and log backups live in different
+  containers is not yet supported
+- A managed-identity credential can be created from here, but only on **SQL Server 2022 or later,
+  or Azure SQL Managed Instance**. Earlier versions accept the statement and then fail at restore
+  time, so the app does not offer it there
+- Creating that credential does not grant anything. The instance needs a managed identity, and that
+  identity needs **Storage Blob Data Reader** on the container
+- Restoring to a UNC path is supported, but the disk-space check does not cover it — a share has no
+  drive letter for SQL Server to report free space on
 
 ## Troubleshooting
 
