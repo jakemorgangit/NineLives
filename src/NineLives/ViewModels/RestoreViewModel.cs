@@ -531,6 +531,14 @@ public partial class RestoreViewModel : ViewModelBase
         // The chain and the timeline are built from whatever the inventory currently holds, so a
         // change there is the one signal that rebuilds them.
         Inventory.WorkingSetChanged += ComputeAndDisplayRestorePoints;
+
+        // And so are the two offers that act on it. Both are gated on the working set having
+        // something in it, and a CanExecute answered once at load time is answered when the working
+        // set is still EMPTY - so the Audit button stayed dead after picking a database, next to an
+        // estimate that had cheerfully updated to 98 headers. The estimate is a property and
+        // re-read itself; the command is not and has to be told.
+        Inventory.WorkingSetChanged += RefreshIdentifyState;
+
         Inventory.CancelStateChanged += RefreshCancelState;
         Inventory.PropertyChanged += (_, e) =>
         {
@@ -544,6 +552,15 @@ public partial class RestoreViewModel : ViewModelBase
                     break;
                 case nameof(BackupInventoryViewModel.IsBusy):
                     IsBusy = Inventory.IsBusy;
+
+                    // Both offers are also gated on the inventory being idle, so a load or an audit
+                    // finishing is what makes them live again.
+                    RefreshIdentifyState();
+                    break;
+
+                case nameof(BackupInventoryViewModel.IsAuditing):
+                case nameof(BackupInventoryViewModel.UnclassifiedCount):
+                    RefreshIdentifyState();
                     break;
                 case nameof(BackupInventoryViewModel.SelectedDatabaseName):
                     // The target defaults to the source name, and the MOVE paths follow from it.
