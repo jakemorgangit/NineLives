@@ -203,6 +203,40 @@ public class ManagedIdentityPanelTests
         Assert.Contains("managed identity", message);
     }
 
+    /// <summary>
+    /// SQL Server refuses to move a credential off SHARED ACCESS SIGNATURE, which the live test
+    /// found on its first CI run - the issue had assumed ALTER converts it.
+    ///
+    /// The workaround is DROP and CREATE, and this app will not do that: a credential is
+    /// server-scoped, so dropping it breaks anything else reaching that container at that moment
+    /// (#10). So it reports the refusal with the remedy, rather than a raw SQL error about a
+    /// credential being "used by an active database file" - which is what the server says, and is
+    /// misleading about a credential nothing has ever used.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedIdentityChangeIsExplainedWithWhatToDoAboutIt()
+    {
+        var (vm, sql, _) = New();
+        sql.CredentialWriteThrows = new InvalidOperationException(
+            "Failed to modify the identity field of  the credential 'x' because the credential is " +
+            "used by an active database file.");
+
+        vm.Server = Server();
+        await vm.PointAtAsync(Container(BlobAuthMode.EntraInteractive));
+
+        var reported = new List<(string Message, bool IsError)>();
+        vm.Reported += (m, e) => reported.Add((m, e));
+
+        await vm.CreateOnServerCommand.ExecuteAsync(null);
+
+        var (message, isError) = Assert.Single(reported);
+
+        Assert.True(isError);
+        Assert.Contains("DROP CREDENTIAL", message);
+        Assert.Contains("server-scoped", message);
+        Assert.DoesNotContain("active database file", message);
+    }
+
     // ── the button says what the press would do ─────────────────────────────────
 
     /// <summary>

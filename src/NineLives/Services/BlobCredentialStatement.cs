@@ -40,11 +40,10 @@ public static class BlobCredentialStatement
         {
             // No SECRET clause at all.
             //
-            // On an existing SAS credential this ALTER is what CONVERTS it: SQL Server takes the
-            // new identity and nulls the stored secret. That is the intended behaviour and it is
-            // destructive, which is why nothing reaches this except somebody asking for it - the
-            // execute path stops and reports an identity it does not recognise rather than
-            // "fixing" one that may be working perfectly well (#145).
+            // On an existing MANAGED IDENTITY credential this refreshes it. On an existing SAS
+            // credential SQL Server refuses it outright - see IsIdentityChangeRefusal, which was
+            // discovered by the live test rather than assumed. The app reports that refusal with a
+            // remedy rather than working around it by dropping the credential (#10).
             BlobCredentialIdentity.ManagedIdentity =>
                 $"{verb} CREDENTIAL {quotedName} WITH IDENTITY = 'Managed Identity'",
 
@@ -61,6 +60,38 @@ public static class BlobCredentialStatement
                 "would replace an identity that may be authenticating perfectly well.")
         };
     }
+
+    /// <summary>
+    /// Whether SQL Server refused to CHANGE a credential's identity, rather than failing for some
+    /// other reason.
+    ///
+    /// Found by the live test on its first CI run, and it contradicts what this feature was
+    /// designed around. ALTER does NOT convert a SAS credential to a managed identity. SQL Server
+    /// rejects it with:
+    ///
+    ///     Failed to modify the identity field of the credential '...' because the credential is
+    ///     used by an active database file.
+    ///
+    /// which is a misleading message - it is refused on a credential nothing has ever used. The
+    /// engine simply will not move one off SHARED ACCESS SIGNATURE in place. The reverse direction,
+    /// managed identity back to SAS, is allowed and does work.
+    ///
+    /// The obvious workaround is DROP and CREATE, and this app deliberately will not do it: a
+    /// credential is server-scoped shared state, and dropping it even for the moment between two
+    /// statements breaks anything else relying on it - which is the whole of #10. So it says what
+    /// happened and leaves the decision where it belongs.
+    /// </summary>
+    public static bool IsIdentityChangeRefusal(string message) =>
+        message.Contains("modify the identity field", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What to do about that refusal, given nothing here will drop the credential for you.</summary>
+    public static string ExplainIdentityChangeRefusal(string credentialName) =>
+        $"SQL Server will not change the identity of the existing credential [{credentialName}] in " +
+        "place - it refuses to move a credential off SHARED ACCESS SIGNATURE, whatever is or is " +
+        "not using it. The credential has to be dropped and created again, and this app will not " +
+        "do that for you: a credential is server-scoped, so dropping it breaks anything else " +
+        "reaching that container at that moment, a backup job most obviously. When nothing is " +
+        $"using it, run DROP CREDENTIAL [{credentialName}] and then press this button again.";
 
     /// <summary>
     /// Whether an instance can authenticate to blob storage with a managed identity at all.

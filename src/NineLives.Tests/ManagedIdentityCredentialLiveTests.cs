@@ -8,9 +8,14 @@ namespace Blackcat.NineLives.Tests;
 /// <summary>
 /// Live proof of what a managed-identity credential does to server state (#147).
 ///
-/// What these CAN prove against any instance: that the statement is accepted, that ALTER with no
-/// SECRET converts a SAS credential across and back, that the conversion nulls the stored secret,
-/// and what this particular instance says about its own version.
+/// What these CAN prove against any instance: that the statement is accepted, which conversions SQL
+/// Server actually permits, that an allowed one alters in place rather than dropping, and what this
+/// particular instance says about its own version.
+///
+/// One of them was written asserting the opposite of what SQL Server does - the issue assumed ALTER
+/// converts a SAS credential to a managed identity, and it does not - and it failed on its first CI
+/// run. That is the whole argument for writing live tests even when they cannot prove the last
+/// mile.
 ///
 /// What they cannot prove, anywhere on-prem: that a restore then AUTHENTICATES with it. That needs
 /// an Azure VM with an identity, an Arc-enabled instance, or SQL MI. So this ships with the
@@ -93,11 +98,18 @@ public class ManagedIdentityCredentialLiveTests
     // ── the conversion, in both directions ──────────────────────────────────────
 
     /// <summary>
-    /// ALTER with no SECRET is what converts a SAS credential across. Worth pinning live rather
-    /// than reasoning about: it is the mechanism the whole feature rests on, and it is destructive.
+    /// SQL Server REFUSES to move a credential off SHARED ACCESS SIGNATURE in place.
+    ///
+    /// This test was written the other way round - the issue was designed around ALTER converting a
+    /// SAS credential across - and it failed on its first CI run. The assumption was simply wrong,
+    /// and the error says something misleading about the credential being "used by an active
+    /// database file" for a credential nothing has ever touched.
+    ///
+    /// Pinned as the refusal it is, because the app now has to explain it, and because an engine
+    /// that starts allowing it should be noticed rather than quietly changing behaviour.
     /// </summary>
     [RequiresSqlFact]
-    public async Task AlteringConvertsASasCredentialToAManagedIdentity()
+    public async Task SqlServerWillNotConvertASasCredentialToAManagedIdentity()
     {
         const string name = "ninelives-test-mi-convert";
         try
@@ -109,11 +121,16 @@ public class ManagedIdentityCredentialLiveTests
 
             Assert.Equal("SHARED ACCESS SIGNATURE", await IdentityOf(name));
 
-            var change = await Service().EnsureCredentialExistsAsync(
-                TestServer(), name, Url, string.Empty, BlobCredentialIdentity.ManagedIdentity);
+            var refused = await Assert.ThrowsAnyAsync<Exception>(() =>
+                Service().EnsureCredentialExistsAsync(
+                    TestServer(), name, Url, string.Empty, BlobCredentialIdentity.ManagedIdentity));
 
-            Assert.Equal(CredentialChange.Updated, change);
-            Assert.Equal("Managed Identity", await IdentityOf(name));
+            Assert.True(BlobCredentialStatement.IsIdentityChangeRefusal(refused.Message),
+                $"the app has to recognise this refusal to explain it; it said: {refused.Message}");
+
+            // Left exactly as it was, which is the point of not working around it by dropping and
+            // recreating (#10).
+            Assert.Equal("SHARED ACCESS SIGNATURE", await IdentityOf(name));
         }
         finally
         {
@@ -148,12 +165,14 @@ public class ManagedIdentityCredentialLiveTests
     }
 
     /// <summary>
-    /// A credential is server-scoped shared state, so converting it must not drop and recreate it -
-    /// that removes it for the moment in between, from everything else using it. create_date is
-    /// what tells the two apart.
+    /// A credential is server-scoped shared state, so a conversion that IS allowed must not drop
+    /// and recreate it - that removes it for the moment in between, from everything else using it.
+    /// create_date is what tells the two apart.
+    ///
+    /// Managed identity to SAS, because that is the direction SQL Server permits.
     /// </summary>
     [RequiresSqlFact]
-    public async Task ConvertingDoesNotDropAndRecreate()
+    public async Task AnAllowedConversionDoesNotDropAndRecreate()
     {
         const string name = "ninelives-test-mi-no-drop";
         try
@@ -161,13 +180,14 @@ public class ManagedIdentityCredentialLiveTests
             await DropCredentialIfExists(name);
 
             await Service().EnsureCredentialExistsAsync(
-                TestServer(), name, Url, Sas, BlobCredentialIdentity.SharedAccessSignature);
+                TestServer(), name, Url, string.Empty, BlobCredentialIdentity.ManagedIdentity);
 
             var created = await CreateDate(name);
 
             await Service().EnsureCredentialExistsAsync(
-                TestServer(), name, Url, string.Empty, BlobCredentialIdentity.ManagedIdentity);
+                TestServer(), name, Url, Sas, BlobCredentialIdentity.SharedAccessSignature);
 
+            Assert.Equal("SHARED ACCESS SIGNATURE", await IdentityOf(name));
             Assert.Equal(created, await CreateDate(name));
         }
         finally

@@ -389,11 +389,16 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>The SAS token each write was handed, so a test can prove none was sent.</summary>
     public List<string> CredentialSecretsWritten { get; } = [];
 
+    /// <summary>Set to make the write fail the way a real server can (#147).</summary>
+    public Exception? CredentialWriteThrows { get; set; }
+
     public Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
         BlobCredentialIdentity identity = BlobCredentialIdentity.SharedAccessSignature,
         CancellationToken ct = default)
     {
+        if (CredentialWriteThrows != null) throw CredentialWriteThrows;
+
         CredentialWrites.Add(credentialName);
         CredentialIdentitiesWritten.Add(identity);
         CredentialSecretsWritten.Add(sasToken);

@@ -374,6 +374,12 @@ public partial class ServerCredentialViewModel : ObservableObject
                 _log.ServerChange(Server.ServerName,
                     $"credential [{Name}] identity changed from SAS to Managed Identity");
         }
+        catch (Exception ex) when (BlobCredentialStatement.IsIdentityChangeRefusal(ex.Message))
+        {
+            // Not a failure of this app, and not something it will work around by dropping the
+            // credential - see #10. Reported as the specific thing it is, with the remedy.
+            Reported?.Invoke(BlobCredentialStatement.ExplainIdentityChangeRefusal(Name), true);
+        }
         catch (Exception ex)
         {
             Reported?.Invoke($"Failed to create credential: {ex.Message}", true);
