@@ -88,8 +88,17 @@ public class BackupChainBuilder
             var nextFull = fulls.FirstOrDefault(f => f.Timestamp > full.Timestamp);
             var upperBound = nextFull?.Timestamp ?? DateTime.MaxValue;
 
+            // Which logs carry this chain forward.
+            //
+            // By time, that means a log taken after the full - which is a good approximation and
+            // is wrong in one real case: on a busy instance a log backup that STARTED before the
+            // full can finish after it. By time it is excluded; by LSN it may hold transactions the
+            // restore still needs, and dropping it breaks the chain at that point.
+            //
+            // So where the sets carry LSNs, ask them. LastLSN past the full's LastLSN is the same
+            // test SQL Server applies when it decides whether a log is applicable at all (#130).
             var applicableLogs = logs
-                .Where(l => l.Timestamp > full.Timestamp && l.Timestamp < upperBound)
+                .Where(l => CarriesTheChainPast(l, full, sameInstantCounts: false) && l.Timestamp < upperBound)
                 .OrderBy(l => l.Timestamp)
                 .ToList();
 
@@ -119,10 +128,13 @@ public class BackupChainBuilder
             foreach (var log in applicableLogs)
             {
                 var diff = applicableDiffs.LastOrDefault(d => d.Timestamp <= log.Timestamp);
-                var baseTimestamp = diff?.Timestamp ?? full.Timestamp;
+
+                // Where the restore has already reached once the full, and any differential, are
+                // applied - and therefore which logs are still needed to get from there to here.
+                var reached = diff ?? full;
 
                 var chainLogs = applicableLogs
-                    .Where(l => l.Timestamp >= baseTimestamp && l.Timestamp <= log.Timestamp)
+                    .Where(l => CarriesTheChainPast(l, reached, sameInstantCounts: true) && l.Timestamp <= log.Timestamp)
                     .ToList();
 
                 points.Add(new RestorePoint
@@ -138,6 +150,42 @@ public class BackupChainBuilder
         }
 
         return points.OrderBy(p => p.Timestamp).ToList();
+    }
+
+    /// <summary>
+    /// Whether a log carries the chain PAST the point a backup restores to - so whether it still
+    /// has anything the restore needs (#130).
+    ///
+    /// LSNs when both sets have them, timestamps otherwise. The two answer the same question with
+    /// different accuracy: a timestamp says when a backup was taken, an LSN says what is IN it.
+    /// They differ exactly when a log backup overlaps the backup it follows, which on a busy
+    /// instance is routine - and getting it wrong there either drops a log the chain needs, or
+    /// includes one SQL Server will reject as already applied.
+    ///
+    /// A set from a container listing has no LSNs, so this is the same timestamp rule it has always
+    /// used.
+    /// </summary>
+    /// <param name="sameInstantCounts">
+    /// What to do when the two readings are identical, which only arises without LSNs.
+    ///
+    /// The two callers genuinely differ here and it is not an oversight. A log sharing a FULL's
+    /// exact timestamp is a collision - nothing says which came first, so it cannot be trusted to
+    /// follow the full, and #46 exists because treating it as though it did produced restore points
+    /// that could not be restored. A log sharing the DIFFERENTIAL's timestamp is a different case:
+    /// the differential was picked as the latest one at or before this log, so equality there means
+    /// the log is the one being restored to.
+    ///
+    /// With LSNs the question does not arise: two backups cannot both end at the same LSN and
+    /// differ in what they contain.
+    /// </param>
+    private static bool CarriesTheChainPast(BackupSet log, BackupSet reached, bool sameInstantCounts)
+    {
+        if (log.LastLsn is { } logEnd && reached.LastLsn is { } reachedEnd)
+            return logEnd > reachedEnd;
+
+        return sameInstantCounts
+            ? log.Timestamp >= reached.Timestamp
+            : log.Timestamp > reached.Timestamp;
     }
 
     /// <summary>

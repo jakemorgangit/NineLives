@@ -29,7 +29,11 @@ public class FromDiskRestoreScriptTests
         FinishedAt = at.AddMinutes(2),
         CheckpointLsn = type == BackupType.Full ? 100 : null,
         DatabaseBackupLsn = type == BackupType.Differential ? 100 : null,
-        LastLsn = 200,
+
+        // An LSN is a position in the log, so it has to advance with time - two backups cannot end
+        // at the same one and hold different transactions. Derived from the clock so the fixture
+        // stays honest as cases are added.
+        LastLsn = 100 + (decimal)(at - T0).TotalMinutes,
         BackupSizeBytes = 5_000_000,
         Files = files
     };
