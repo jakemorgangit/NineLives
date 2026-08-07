@@ -10,6 +10,60 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+Nine Lives stops being a blob restore tool. It backs up and restores, to and from Azure Blob
+Storage or a path both servers can see - and it can do both in one action.
+
+### Added
+
+- **Back up a database**, to a blob container or to a path the SQL Server service account can
+  write to. `COPY_ONLY` by default, so a production differential schedule is left alone, with what
+  turning that off costs stated on the screen, in the generated script, and in the console as it
+  runs (#165)
+- **Restore from a path both servers can see**, through the same workflow blob restores use - the
+  same timeline, chain, options, point-in-time and execute path. Backups are found through the
+  source instance's own `msdb` rather than by guessing from filenames (#149)
+- **Copy a database to another server in one action** - back up the source, restore onto the
+  target, through either medium. The confirmation names both servers, and a run that backed up but
+  failed to restore says the backup is still good rather than reporting a bare failure (#105)
+- **Audit backups against their own headers.** An explicit action with an estimate in front of it,
+  a progress bar and a Stop, that reads what each backup actually is and reports where it disagrees
+  with what its path claimed. Results are cached against the blob's ETag, so a second run is
+  instant and a restart does not lose them. Audited backups carry a pill on the restore point and
+  the chain (#130)
+- **Identify backups a filename could not place.** Files landing with no type or no database are
+  invisible to the restore screen entirely; the app now says how many there are and can settle them
+  from their headers (#130)
+- **Managed-identity credentials**, so an estate that forbids long-lived SAS tokens can restore as
+  well as browse without one. Gated on SQL Server 2022 or Azure SQL MI, with a refusal that names
+  the version it found (#147)
+- **A disk-space check before a restore.** The file sizes were already coming back with the logical
+  names and being discarded; summed per volume against what the target says it has free, they
+  answer whether the restore can physically fit (#32)
+- **A win-arm64 build** alongside x64 (#39)
+- **Integration tests against a real blob API**, using Azurite, covering the listing and the
+  path-pattern inference that decides what every backup is (#37)
+
+### Changed
+
+- Chains are built from **LSNs** wherever the source knows them - which means anything read from an
+  instance's `msdb`. A differential is paired with the full it was genuinely taken against rather
+  than the nearest one by time, and a log joins a chain when it carries it forward rather than when
+  its timestamp happens to fall in range. Backups discovered by listing a container carry no LSNs
+  and behave exactly as before (#130)
+- The restore summary stays on screen while the rest of the page scrolls
+- The README describes what the app is rather than what it was
+
+### Fixed
+
+- A differential whose base full is missing is no longer offered at all. It used to be paired with
+  the nearest full by time, which SQL Server rejects - after `WITH REPLACE` has already dropped the
+  target (#130)
+- An `msdb` row whose backup files have since been pruned is no longer offered as a restore point
+  with nothing to read from (#149)
+- The Audit button stayed disabled after choosing a database, next to an estimate that had
+  correctly updated - the button was never told to re-ask (#130)
+- Test runs wrote to the real log file and audit cache in the profile of whoever ran them (#130)
+
 ## [1.3.0] - 2026-08-06
 
 Authentication that does not need a SAS token, and the restore screen taken apart from the inside.
