@@ -62,10 +62,46 @@ public class BackupAuditor(ISqlServerService sql, IBackupAuditStore store)
                "It can be stopped at any point, and what it has already checked is kept.";
     }
 
+    /// <summary>
+    /// Marks every set the cache already has an answer for, without reading anything.
+    ///
+    /// Applied when a container is LOADED, not only when an audit is run. A backup header never
+    /// changes, so an answer from last week is as good as one from this second - and without this,
+    /// closing the app threw away the visible result of a three-minute operation. The cache still
+    /// held it, and pressing Audit again would have been instant, but somebody would first have to
+    /// guess that a button they had already pressed needed pressing again.
+    /// </summary>
+    /// <returns>How many sets the cache could answer for.</returns>
+    public static int ApplyCached(
+        IEnumerable<BackupSet> sets, IReadOnlyDictionary<string, AuditRecord> cached)
+    {
+        if (cached.Count == 0) return 0;
+
+        var marked = 0;
+
+        foreach (var set in sets)
+        {
+            // Every file of a set, because a set is audited as a whole - one HEADERONLY covering
+            // all its stripes. A set the cache only partly answers for is one where a stripe has
+            // been replaced, and that has to go back to the server.
+            var records = set.Files
+                .Select(f => cached.GetValueOrDefault(BackupAuditStore.KeyFor(f)))
+                .ToList();
+
+            if (records.Count == 0 || records.Any(r => r == null)) continue;
+
+            MarkFiles(set, records.All(r => r!.Passed));
+            marked++;
+        }
+
+        return marked;
+    }
+
     /// <summary>Sets whose files are not already in the cache, and therefore have to be read.</summary>
     public static List<BackupSet> NotYetAudited(
         IEnumerable<BackupSet> sets, IReadOnlyDictionary<string, AuditRecord> cached) =>
-        sets.Where(s => s.Files.Any(f => !cached.ContainsKey(BackupAuditStore.KeyFor(f)))).ToList();
+        sets.Where(s => s.Files.Count == 0
+                     || s.Files.Any(f => !cached.ContainsKey(BackupAuditStore.KeyFor(f)))).ToList();
 
     /// <summary>
     /// Reads the header of every set not already known, and reports where they disagree.
