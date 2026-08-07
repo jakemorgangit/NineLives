@@ -46,7 +46,7 @@ public class BackupInventorySeamTests
                 File("OtherDb", "SRV01", BackupType.Full, T0)
             ]
         };
-        return (new BackupInventoryViewModel(blob, new FakeSqlServerService(), TestLogs.Temp()), blob);
+        return (new BackupInventoryViewModel(blob, new FakeSqlServerService(), TestLogs.Temp(), TestAuditStores.Temp()), blob);
     }
 
     [Fact]

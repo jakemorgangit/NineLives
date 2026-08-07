@@ -197,6 +197,14 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>What the fake instance reads out of a backup header, or null for nothing.</summary>
     public BackupFileInfo? Header { get; set; }
 
+    /// <summary>
+    /// A header per request, when one answer for everything will not do.
+    ///
+    /// An audit reads a whole chain, and a fake that hands the same Full header back for a log
+    /// reports a mismatch that is an artefact of the fake rather than of the code under test.
+    /// </summary>
+    public Func<IReadOnlyList<string>, BackupFileInfo?>? HeaderForUrls { get; set; }
+
     /// <summary>Every set of URLs a header read was asked about, in order.</summary>
     public List<IReadOnlyList<string>> HeaderReads { get; } = [];
 
@@ -240,7 +248,8 @@ public sealed class FakeSqlServerService : ISqlServerService
             var unreadable = HeaderThrowsForUrlContaining != null &&
                 urls.Any(u => u.Contains(HeaderThrowsForUrlContaining, StringComparison.Ordinal));
 
-            results.Add(unreadable || Header == null ? null : Clone(Header));
+            var answer = HeaderForUrls?.Invoke(urls) ?? Header;
+            results.Add(unreadable || answer == null ? null : Clone(answer));
             progress?.Report(results.Count);
         }
 

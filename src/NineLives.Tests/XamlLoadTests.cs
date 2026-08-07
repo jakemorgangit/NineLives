@@ -931,7 +931,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
 
         vm.RefreshContainers();
         vm.LoadBackupsCommand.Execute(null);
