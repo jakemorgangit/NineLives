@@ -227,6 +227,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.HasRecoveryActions = true;
             vm.ExecutionComplete = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -272,6 +275,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsConnectedToServer = true;
             vm.Credential.SectionVisible = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             vm.Credential.ExistsOnServer = false;
@@ -307,6 +313,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsConnectedToServer = true;
             vm.Credential.SectionVisible = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             vm.Credential.ExistsOnServer = true;
@@ -337,6 +346,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.BackupsLoaded = true;
             vm.HasScript = true;
             vm.IsConnectedToServer = true;
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             // Not running: nothing to stop, so the button must not be offered.
@@ -362,6 +374,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsBusy = true;
             vm.CanCancelLoad = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             Realise(view);
 
@@ -416,6 +431,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsExecuting = false;
             vm.ExecutionComplete = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -459,6 +477,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
             vm.Console.HasOutput = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             vm.IsConsoleDetached = false;
@@ -489,6 +510,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsConsoleDetached = false;   // as if the wiring failed
             vm.IsExecuting = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             Realise(view);
 
@@ -512,6 +536,9 @@ public class XamlLoadTests(WpfFixture wpf)
             var vm = NewRestoreViewModel();
             vm.PointInTime.SetWindow((new DateTime(2026, 1, 10, 22, 0, 0), new DateTime(2026, 1, 10, 22, 15, 0)));
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -553,6 +580,9 @@ public class XamlLoadTests(WpfFixture wpf)
             ];
             vm.HasInventoryIssues = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -601,6 +631,9 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.HasVerifyResults = true;
             vm.HasVerifyFailures = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -703,6 +736,9 @@ public class XamlLoadTests(WpfFixture wpf)
                 }
             ];
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try

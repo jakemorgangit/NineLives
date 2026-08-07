@@ -1,4 +1,4 @@
-using Blackcat.NineLives.ViewModels;
+﻿using Blackcat.NineLives.ViewModels;
 using Xunit;
 
 namespace Blackcat.NineLives.Tests;
@@ -107,5 +107,79 @@ public class RestoreStepTests
         Assert.StartsWith("1.", steps.Source.Title);
         Assert.StartsWith("2.", steps.Point.Title);
         Assert.StartsWith("3.", steps.Options.Title);
+        Assert.StartsWith("4.", steps.Execute.Title);
+    }
+
+    // ── the accordion ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// One open at a time. Collapsing the finished steps was only half of it: with four panes free
+    /// to be open at once the screen could still be as long as it ever was, and step 4 - script,
+    /// console and recovery actions - is tall enough to bury everything above it.
+    /// </summary>
+    [Fact]
+    public void OpeningAStepClosesTheOthers()
+    {
+        var steps = new RestoreStepsViewModel();
+
+        steps.Options.ToggleCommand.Execute(null);
+
+        Assert.True(steps.Options.IsExpanded);
+        Assert.False(steps.Source.IsExpanded);
+        Assert.False(steps.Point.IsExpanded);
+        Assert.False(steps.Execute.IsExpanded);
+    }
+
+    [Fact]
+    public void OnlyTheFirstStepIsOpenToBeginWith()
+    {
+        var steps = new RestoreStepsViewModel();
+
+        Assert.True(steps.Source.IsExpanded);
+        Assert.Equal(1, steps.All.Count(s => s.IsExpanded));
+    }
+
+    /// <summary>
+    /// Finishing a step puts you in the next one still to do, rather than in front of nothing.
+    /// That is what makes it read as a sequence instead of four independent drawers.
+    /// </summary>
+    [Fact]
+    public void FinishingAStepOpensTheNextOneStillToDo()
+    {
+        var steps = new RestoreStepsViewModel();
+
+        steps.Report(steps.Source, isComplete: true, summary: "backups, MyDb on SRV01");
+
+        Assert.False(steps.Source.IsExpanded);
+        Assert.True(steps.Point.IsExpanded);
+    }
+
+    /// <summary>Already-done steps are skipped over - going back and changing step 1 should not
+    /// drop somebody into a step 2 they finished ten minutes ago.</summary>
+    [Fact]
+    public void TheHandOverSkipsStepsThatAreAlreadyDone()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Point, isComplete: true, summary: "a point");
+        steps.Report(steps.Source, isComplete: true, summary: "a source");
+
+        Assert.False(steps.Point.IsExpanded);
+        Assert.True(steps.Options.IsExpanded);
+    }
+
+    /// <summary>
+    /// Step 4 is never reported on - it is the action, with no completed state - so it is where
+    /// the hand-over lands once 1 to 3 are done, which is exactly where somebody wants to be.
+    /// </summary>
+    [Fact]
+    public void TheLastStepIsWhereTheHandOverEnds()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Source, true, "source");
+        steps.Report(steps.Point, true, "point");
+        steps.Report(steps.Options, true, "options");
+
+        Assert.True(steps.Execute.IsExpanded);
+        Assert.Equal(1, steps.All.Count(s => s.IsExpanded));
     }
 }

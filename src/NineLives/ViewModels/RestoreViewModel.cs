@@ -955,17 +955,20 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void RefreshSteps()
     {
-        Steps.Source.Report(
+        Steps.Report(
+            Steps.Source,
             BackupsLoaded && !string.IsNullOrWhiteSpace(SelectedDatabaseName),
             DescribeSource());
 
-        Steps.Point.Report(
+        Steps.Report(
+            Steps.Point,
             Timeline.SelectedPoint != null,
             Timeline.SelectedPoint is { } point
                 ? $"{point.TimestampDisplay}, {RestoreChain?.Summary ?? "no chain"}"
                 : string.Empty);
 
-        Steps.Options.Report(
+        Steps.Report(
+            Steps.Options,
             !string.IsNullOrWhiteSpace(TargetDatabaseName),
             DescribeOptions());
     }

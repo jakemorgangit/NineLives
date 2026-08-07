@@ -48,6 +48,28 @@
                 </StackPanel>
             </Border>
 
+            <!-- The live summary of what a restore would do, at the top rather than buried
+                 between steps 3 and 4 (#117 item 3).
+
+                 It is not a step - it is the answer the steps are building towards, and it changes
+                 with every option above it. Sitting inside the accordion it was invisible whenever
+                 another pane was open, which is most of the time. -->
+            <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                    Background="{DynamicResource SuccessPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource SuccessBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
+                <StackPanel>
+                    <TextBlock Text="THIS RESTORE WILL"
+                               Style="{StaticResource LabelText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding RestoreSummaryText}"
+                               Style="{StaticResource BodyText}"
+                               TextWrapping="Wrap"
+                               LineHeight="22" />
+                </StackPanel>
+            </Border>
+
             <!-- Step 1: Container + Database -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
@@ -1224,30 +1246,15 @@
                 </StackPanel>
             </Border>
 
-            <!-- Restore Summary -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
-                <StackPanel>
-                    <TextBlock Text="RESTORE SUMMARY"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,8" />
-                    <Border Background="{DynamicResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="12,10">
-                        <TextBlock Text="{Binding RestoreSummaryText}"
-                                   Style="{StaticResource BodyText}"
-                                   TextWrapping="Wrap"
-                                   LineHeight="22" />
-                    </Border>
-                </StackPanel>
-            </Border>
-
             <!-- Step 4: Generate + Execute -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="4. GENERATE &amp; EXECUTE"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,16" />
+                    <!-- Collapsible like the rest (#117 item 3). It is the tallest pane on the screen -
+                         script, console, recovery actions - so leaving it permanently open undid most of
+                         what collapsing the others bought. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Execute}" />
+                    <StackPanel Visibility="{Binding Steps.Execute.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Button Content="Generate Script"
@@ -1527,6 +1534,7 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
