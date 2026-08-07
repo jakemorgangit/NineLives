@@ -52,10 +52,19 @@ public class BlobStorageService : IBlobStorageService
     private static readonly Lock CredentialLock = new();
     private static readonly Dictionary<BlobAuthMode, TokenCredential> Credentials = [];
 
+    /// <summary>
+    /// Test seam. A real credential cannot be exercised offline, and the thing worth pinning about
+    /// #152 - that a sign-in never runs on the UI thread - is otherwise unobservable.
+    /// </summary>
+    internal static Func<BlobAuthMode, TokenCredential>? CredentialFactoryForTests { get; set; }
+
     private static TokenCredential CredentialFor(BlobAuthMode mode)
     {
         lock (CredentialLock)
         {
+            // Checked before the cache, so a test is never handed a credential a previous test made.
+            if (CredentialFactoryForTests != null) return CredentialFactoryForTests(mode);
+
             if (Credentials.TryGetValue(mode, out var existing)) return existing;
 
             TokenCredential created = mode == BlobAuthMode.EntraInteractive
@@ -90,8 +99,13 @@ public class BlobStorageService : IBlobStorageService
 
         try
         {
-            var token = await CredentialFor(config.AuthMode).GetTokenAsync(
-                new TokenRequestContext([StorageScope]), ct);
+            // Off the UI thread for the same reason as the operations themselves (#152). Usually a
+            // cache read by the time this runs - it only happens after a failure - but "usually" is
+            // not a reason to block the window on a credential that might decide to prompt.
+            var token = await Task.Run(
+                () => CredentialFor(config.AuthMode)
+                    .GetTokenAsync(new TokenRequestContext([StorageScope]), ct).AsTask(),
+                ct);
 
             return EntraIdentity.Describe(token.Token);
         }
@@ -106,8 +120,37 @@ public class BlobStorageService : IBlobStorageService
     /// itself; it is only spelled out here because the diagnostic asks directly.</summary>
     private const string StorageScope = "https://storage.azure.com/.default";
 
+    /// <summary>
+    /// Gets the Entra sign-in out of the way, on the thread pool, before anything touches the
+    /// container (#152).
+    ///
+    /// InteractiveBrowserCredential launches a browser and waits for the redirect to come back, and
+    /// it does that on whatever thread asked for the token. Every blob operation starts from a
+    /// command on the UI thread, so the window stopped painting for as long as the sign-in was open
+    /// - an application asking somebody to go and authenticate while looking, to them, like it had
+    /// crashed.
+    ///
+    /// Task.Run rather than ConfigureAwait: the blocking happens before the credential's first
+    /// await yields, so there is no continuation to redirect - the work has to start somewhere
+    /// other than the UI thread.
+    ///
+    /// Only the first operation pays for this. The credential caches the token, and it is shared
+    /// process-wide, so everything after is a cache read.
+    /// </summary>
+    private static async Task EnsureSignedInAsync(BlobContainerConfig config, CancellationToken ct)
+    {
+        if (!config.AuthMode.IsEntra()) return;
+
+        var credential = CredentialFor(config.AuthMode);
+
+        await Task.Run(
+            () => credential.GetTokenAsync(new TokenRequestContext([StorageScope]), ct).AsTask(),
+            ct);
+    }
+
     public async Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
+        await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         await foreach (var _ in client.GetBlobsAsync(
             BlobTraits.None, BlobStates.None, prefix: null, cancellationToken: ct)
@@ -122,6 +165,7 @@ public class BlobStorageService : IBlobStorageService
     public async Task<List<string>> ListTopLevelFoldersAsync(
         BlobContainerConfig config, CancellationToken ct = default)
     {
+        await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         var folders = new List<string>();
 
@@ -154,6 +198,7 @@ public class BlobStorageService : IBlobStorageService
         IProgress<int>? progress,
         CancellationToken ct = default)
     {
+        await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         var files = new List<BackupFileInfo>();
 
