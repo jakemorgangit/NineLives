@@ -752,6 +752,9 @@ public partial class RestoreViewModel : ViewModelBase
         // actually loaded, not from the paths typed above.
         OnPropertyChanged(nameof(PathAdvice));
         OnPropertyChanged(nameof(HasPathAdvice));
+
+        // How many files the filenames could not place is only known once they have been read.
+        RefreshIdentifyState();
     }
 
 
@@ -772,6 +775,43 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>Stops an in-progress backup listing.</summary>
     [RelayCommand]
     private void CancelLoad() => Inventory.CancelLoadCommand.Execute(null);
+
+    /// <summary>
+    /// Asks the connected instance what the unplaceable files actually are (#130).
+    ///
+    /// Needs a server because the header can only be read by one - which is also why this is an
+    /// action rather than something the load does on its own. Browsing a container works with no
+    /// connection at all today, and working out WHICH server is needed is sometimes the reason for
+    /// browsing in the first place.
+    /// </summary>
+    public bool CanIdentifyUnclassified =>
+        Inventory.HasUnclassified && IsConnectedToServer && !Inventory.IsBusy;
+
+    /// <summary>Why the button cannot be pressed, or empty when it can.</summary>
+    public string IdentifyBlockedReason =>
+        !Inventory.HasUnclassified ? string.Empty
+        : IsConnectedToServer ? string.Empty
+        : "Connect to a SQL Server instance to read the backup headers - it is the server that reads them, not this app.";
+
+    [RelayCommand(CanExecute = nameof(CanIdentifyUnclassified))]
+    private async Task IdentifyUnclassifiedAsync()
+    {
+        var server = ConnectedServer;
+        if (server == null) return;
+
+        await Inventory.IdentifyUnclassifiedAsync(server);
+
+        // What the headers settled changes the working set, so whatever was on the timeline was
+        // computed from the state before them.
+        RefreshIdentifyState();
+    }
+
+    private void RefreshIdentifyState()
+    {
+        OnPropertyChanged(nameof(CanIdentifyUnclassified));
+        OnPropertyChanged(nameof(IdentifyBlockedReason));
+        IdentifyUnclassifiedCommand.NotifyCanExecuteChanged();
+    }
 
     [RelayCommand]
     private void ToggleChainDetails()
@@ -1325,6 +1365,11 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnIsConnectedToServerChanged(bool value)
     {
         RefreshExecuteBlockedReason();
+
+        // Reading a backup header needs a server, so connecting is what makes that offer live -
+        // and disconnecting is what has to withdraw it (#130).
+        RefreshIdentifyState();
+
         var chips = value && ConnectedServer != null
             ? ConnectedServer.TagChips
             : [];
