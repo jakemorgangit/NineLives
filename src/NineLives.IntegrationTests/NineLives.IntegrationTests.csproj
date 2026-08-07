@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Kept apart from NineLives.Tests deliberately (#37).
+
+    That suite is pure logic and runs in about seven seconds; these talk to a real Azure Blob API
+    over the network, even if the thing at the other end is an emulator on localhost. Mixing them
+    would make the fast suite slow and would make "the tests pass" depend on a service being up.
+
+    Everything here skips when Azurite is not reachable, so a clone with no emulator still gets a
+    green run - see AzuriteFact.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Blackcat.NineLives.IntegrationTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NineLives\NineLives.csproj" />
+  </ItemGroup>
+
+</Project>

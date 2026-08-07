@@ -40,6 +40,36 @@ jobs:
       # any drift. Two builds of the same commit therefore produce the same binaries, and a
       # dependency cannot change under us without a commit that says so. Updating a package
       # means running "dotnet restore --force-evaluate" and committing the new lock file.
+      # The blob listing and the path-pattern parsing that decides what each blob IS had no
+      # coverage against a real blob API - and everything downstream depends on it. Azurite is
+      # Microsoft's own emulator and runs on the hosted runner from npm (#37).
+      #
+      # --skipApiVersionCheck is required rather than optional: the pinned Azure SDK sends a newer
+      # x-ms-version than Azurite recognises, and without it every call is a 400.
+      - name: Start Azurite
+        shell: pwsh
+        run: |
+          npm install -g azurite
+          $log = Join-Path $env:RUNNER_TEMP 'azurite'
+          New-Item -ItemType Directory -Force -Path $log | Out-Null
+          Start-Process -FilePath "azurite-blob.cmd" `
+            -ArgumentList "--silent","--skipApiVersionCheck","--location",$log,"--blobHost","127.0.0.1","--blobPort","10000" `
+            -WindowStyle Hidden
+
+          # Waited for rather than assumed. The integration tests SKIP when nothing is listening,
+          # so an emulator that quietly failed to start would turn this whole job green while
+          # testing nothing at all - which is the exact failure mode the tests exist to prevent.
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Get-Date) -lt $deadline) {
+            if ((Test-NetConnection -ComputerName 127.0.0.1 -Port 10000 -InformationLevel Quiet -WarningAction SilentlyContinue)) {
+              Write-Host "Azurite is listening."
+              exit 0
+            }
+            Start-Sleep -Seconds 2
+          }
+          Write-Error "Azurite did not start within 60s - the integration tests would silently skip."
+          exit 1
+
       - name: Restore dependencies
         run: dotnet restore NineLives.sln --locked-mode
 
@@ -70,11 +100,20 @@ jobs:
       - name: Run tests
         run: dotnet test src/NineLives.Tests/NineLives.Tests.csproj -c Release --no-build --verbosity normal
 
+      # Separate step so a blob-emulator failure is distinguishable at a glance from a logic
+      # failure - they have completely different causes and completely different fixes.
+      - name: Run integration tests (Azurite)
+        run: dotnet test src/NineLives.IntegrationTests/NineLives.IntegrationTests.csproj -c Release --no-build --verbosity normal
+
       # The shipping shape is a self-contained single-file exe — prove on every PR that it
-      # still publishes, not just that the solution compiles. (~2 min, and it is exactly
-      # what release.yml will do for real.)
+      # still publishes, not just that the solution compiles. (~2 min.)
+      #
+      # Through the PROFILE, so it is exactly what release.yml does rather than a fourth
+      # hand-repeated flag list. #39 unified release.yml and build_standalone.cmd onto the profile
+      # and this line was missed, so the smoke test was still proving that a DIFFERENT publish
+      # works - which is the whole failure mode that issue was about.
       - name: Publish smoke test (single-file exe)
-        run: dotnet publish src/NineLives/NineLives.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+        run: dotnet publish src/NineLives/NineLives.csproj -p:PublishProfile=SingleFileExe -o publish
 
       - name: Verify publish output
         shell: pwsh
