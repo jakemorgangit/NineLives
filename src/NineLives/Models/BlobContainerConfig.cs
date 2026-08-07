@@ -109,7 +109,18 @@ public class BlobContainerConfig : INotifyPropertyChanged
     /// Supported tokens: {BackupType}, {ServerName}, {InstanceName}, {DatabaseName}, {FileName}
     /// Default: {BackupType}/{ServerName}/{DatabaseName}/{FileName}
     /// </summary>
-    public string PathPattern { get; set; } = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+    public string PathPattern { get; set; } = DefaultPathPattern;
+
+    /// <summary>
+    /// The layout the app assumes when nobody has said otherwise - Ola Hallengren's, which is what
+    /// most containers this points at were written by.
+    ///
+    /// One constant rather than five copies of the literal (#42). It was written out separately in
+    /// the config default, the edit form's initial value, the reset-to-default, the AG fallback and
+    /// the "new container" default - so changing the app's idea of a default meant finding all five,
+    /// and a container created from one path could disagree with the pattern used to read it back.
+    /// </summary>
+    public const string DefaultPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
 
     /// <summary>
     /// When BackupSourceType is Mixed or AvailabilityGroup, optional path pattern for AG backups.
