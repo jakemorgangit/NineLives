@@ -411,7 +411,11 @@ public class SqlServerService : ISqlServerService
                     LogicalName = reader.GetString(reader.GetOrdinal("LogicalName")),
                     PhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
                     Type = reader.GetString(reader.GetOrdinal("Type")),
-                    NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName"))
+                    NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
+
+                    // Already in the result set and previously discarded. It is what makes a
+                    // disk-space preflight possible without a second round trip (#32).
+                    SizeBytes = GetLongFromReader(reader, "Size") ?? 0
                 });
             }
             return files;
@@ -799,6 +803,30 @@ public class SqlServerService : ISqlServerService
     }
 
     /// <summary>RESTORE HEADERONLY returns BackupType as tinyint/smallint; avoid invalid cast.</summary>
+    /// <summary>
+    /// A whole number that may arrive as any width SQL Server felt like.
+    ///
+    /// FILELISTONLY's Size is numeric(20,0) and dm_os_volume_stats' available_bytes is bigint, so
+    /// neither fits an int and both can arrive as decimal - which is what caught the
+    /// family_sequence_number tinyint before this pattern existed.
+    /// </summary>
+    private static long? GetLongFromReader(SqlDataReader reader, string columnName)
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        if (reader.IsDBNull(ordinal)) return null;
+
+        return reader.GetValue(ordinal) switch
+        {
+            long l => l,
+            int i => i,
+            short sh => sh,
+            byte b => b,
+            decimal d => (long)d,
+            double db => (long)db,
+            _ => null
+        };
+    }
+
     private static int? GetIntFromReader(SqlDataReader reader, string columnName)
     {
         var ordinal = reader.GetOrdinal(columnName);
@@ -1039,6 +1067,50 @@ public class SqlServerService : ISqlServerService
 
         return new ManagedIdentitySupport(
             BlobCredentialStatement.SupportsManagedIdentity(version, edition), version, edition);
+    }
+
+    /// <summary>
+    /// What each volume on the target has left, keyed by mount point (#32).
+    ///
+    /// Asked of the TARGET rather than measured from here, for the same reason the shared-path
+    /// readability check is: this app's process may not be able to see those volumes at all, and
+    /// where it can, what it sees is not necessarily what the SQL Server service account can write
+    /// to. sys.dm_os_volume_stats reports what the engine itself can see.
+    ///
+    /// Only volumes the instance already has a database file on are visible to it, which is the
+    /// limitation of this approach - a brand-new drive with nothing on it does not appear, and a
+    /// restore aimed there is simply not covered rather than being reported as full.
+    /// </summary>
+    public async Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        var free = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"
+            SELECT DISTINCT
+                vs.volume_mount_point AS MountPoint,
+                vs.available_bytes    AS AvailableBytes
+            FROM sys.master_files AS mf
+            CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) AS vs";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var mount = reader["MountPoint"]?.ToString();
+            if (string.IsNullOrWhiteSpace(mount)) continue;
+
+            // Largest wins on a duplicate: the same mount point can be reported more than once, and
+            // understating free space would produce a warning that is not true.
+            var available = GetLongFromReader(reader, "AvailableBytes") ?? 0;
+            if (!free.TryGetValue(mount, out var existing) || available > existing)
+                free[mount] = available;
+        }
+
+        return free;
     }
 
     public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(
