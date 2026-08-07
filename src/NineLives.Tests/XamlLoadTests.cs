@@ -832,6 +832,75 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("HistoryView (empty)", () =>
             new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
 
+    // ── files the filename could not place (#130) ───────────────────────────────
+
+    /// <summary>
+    /// The offer, and why it cannot be taken up yet, both on screen.
+    ///
+    /// A disabled button with no stated reason is one somebody works around, and the reason here is
+    /// not obvious: the header is read by the SERVER, so browsing a container is not enough.
+    /// </summary>
+    [Fact]
+    public void UnplaceableFilesAreExplainedAndTheReasonTheOfferIsDeadIsGiven()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            store.Config.BlobContainers.Add(new BlobContainerConfig
+            { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
+
+            var blob = new FakeBlobStorageService
+            {
+                Files =
+                [
+                    new BackupFileInfo
+                    {
+                        BlobName = "mystery.bak",
+                        BlobUrl = "https://acct.blob.core.windows.net/backups/mystery.bak",
+                        Type = BackupType.Unknown
+                    }
+                ]
+            };
+
+            var vm = new RestoreViewModel(
+                blob, new FakeSqlServerService(), new BackupChainBuilder(),
+                new RestoreScriptGenerator(), store,
+                new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))),
+                new FakeRestoreHistoryStore());
+
+            vm.RefreshContainers();
+            vm.LoadBackupsCommand.Execute(null);
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("not on the timeline", StringComparison.Ordinal));
+            Assert.Contains(shown, t => t.Contains("it is the server that reads them", StringComparison.Ordinal));
+
+            var identify = VisibleButtons(view)
+                .Single(b => b.Content as string == "Identify them from their headers");
+
+            Assert.False(identify.IsEnabled);
+        });
+    }
+
+    /// <summary>Nothing unplaceable, nothing said - the panel is not a permanent fixture.</summary>
+    [Fact]
+    public void WithNothingUnplaceableTheOfferIsNotOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new RestoreView { DataContext = NewRestoreViewModel() };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain(shown, t => t.Contains("not on the timeline", StringComparison.Ordinal));
+        });
+    }
+
     // ── the Copy Database screen (#105) ─────────────────────────────────────────
 
     [Fact]

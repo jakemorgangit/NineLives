@@ -105,6 +105,91 @@ public partial class BackupInventoryViewModel : ViewModelBase
     [ObservableProperty]
     private int _setCount;
 
+    // ── files the filename could not place (#130) ───────────────────────────────
+
+    /// <summary>
+    /// How many loaded files the path and filename could not classify.
+    ///
+    /// Not a tidiness count. A file with an unknown type never enters the fulls, diffs or logs
+    /// collections, and one with no database is filtered out of every working set - so these are
+    /// not merely unlabelled, they are invisible to the restore screen entirely. That is worth
+    /// saying out loud rather than leaving somebody to wonder why a backup they can see in the
+    /// container is not on the timeline.
+    /// </summary>
+    [ObservableProperty]
+    private int _unclassifiedCount;
+
+    public bool HasUnclassified => UnclassifiedCount > 0;
+
+    partial void OnUnclassifiedCountChanged(int value) => OnPropertyChanged(nameof(HasUnclassified));
+
+    [ObservableProperty]
+    private string _identifyProgressText = string.Empty;
+
+    private void RefreshUnclassifiedCount()
+        => UnclassifiedCount = _allBackups.Count(BackupHeaderIdentifier.NeedsIdentifying);
+
+    /// <summary>
+    /// Asks SQL Server what those files actually are, and regroups.
+    ///
+    /// Scoped to the unclassified ones rather than run over everything, which is the whole design:
+    /// one HEADERONLY per file is a network read, and across a container that is thousands of round
+    /// trips - but across the handful the pattern could not place it is seconds, and those are
+    /// exactly the files where the answer is worth paying for.
+    ///
+    /// The header also carries LSNs, so a file identified this way reaches the chain builder able to
+    /// be paired definitively rather than by proximity in time.
+    /// </summary>
+    public async Task IdentifyUnclassifiedAsync(ServerConnection server)
+    {
+        var unidentified = _allBackups.Where(BackupHeaderIdentifier.NeedsIdentifying).ToList();
+        if (unidentified.Count == 0) return;
+
+        var ct = _loadCancellation.Begin();
+        IsBusy = true;
+        ClearStatus();
+        RaiseCancelStateChanged();
+
+        try
+        {
+            var identifier = new BackupHeaderIdentifier(_sql);
+            var progress = new Progress<int>(
+                n => IdentifyProgressText = $"Read {n:N0} of {unidentified.Count:N0} header(s)...");
+
+            var settled = await identifier.IdentifyAsync(server, unidentified, progress, ct);
+
+            // Regroup: what the headers said changes which set a file belongs to, and a set is
+            // keyed on the database and type that have just been corrected.
+            _allSets = _blob.GroupIntoBackupSets(
+                _allBackups, LoadedFrom?.Container?.BackupServerTimeZoneId);
+
+            DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(_allBackups));
+            DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(_allBackups));
+
+            RefreshUnclassifiedCount();
+            RebuildWorkingSet();
+
+            SetStatus(settled == 0
+                ? $"Read {unidentified.Count} header(s); none of them said anything the filename did not."
+                : $"Identified {settled} of {unidentified.Count} file(s) from their backup headers.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Stopped.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not read the backup headers: {ex.Message}");
+        }
+        finally
+        {
+            _loadCancellation.End();
+            IsBusy = false;
+            IdentifyProgressText = string.Empty;
+            RaiseCancelStateChanged();
+        }
+    }
+
     partial void OnSelectedServerNameChanged(string? value)
     {
         if (_allSets.Count == 0) return;
@@ -221,6 +306,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
             DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(files));
             BackupsLoaded = files.Count > 0;
 
+            RefreshUnclassifiedCount();
+
             // The lists are offered, not answered - and until one IS answered there is nothing to
             // show.
             RebuildWorkingSet();
@@ -288,6 +375,10 @@ public partial class BackupInventoryViewModel : ViewModelBase
 
         BackupsLoaded = sets.Count > 0;
 
+        // Never any: msdb recorded each backup's database, type and LSNs, so nothing read from it
+        // arrives unplaced.
+        UnclassifiedCount = 0;
+
         // Offered, not answered - the same rule the container path follows.
         RebuildWorkingSet();
 
@@ -349,6 +440,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
         SelectedServerName = null;
         SelectedDatabaseName = null;
         FullCount = DiffCount = LogCount = SetCount = 0;
+        UnclassifiedCount = 0;
 
         WorkingSetChanged?.Invoke();
     }

@@ -194,9 +194,44 @@ public sealed class FakeSqlServerService : ISqlServerService
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
         => Task.FromResult(new List<FileMoveOption>());
 
+    /// <summary>What the fake instance reads out of a backup header, or null for nothing.</summary>
+    public BackupFileInfo? Header { get; set; }
+
+    /// <summary>Every set of URLs a header read was asked about, in order.</summary>
+    public List<IReadOnlyList<string>> HeaderReads { get; } = [];
+
+    /// <summary>
+    /// Makes one file unreadable - a container legitimately holds things that are not backups, and
+    /// one of those must not stop the rest (#130).
+    /// </summary>
+    public string? HeaderThrowsForUrlContaining { get; set; }
+
     public Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
-        => Task.FromResult<BackupFileInfo?>(null);
+    {
+        HeaderReads.Add(blobUrls);
+
+        if (HeaderThrowsForUrlContaining != null &&
+            blobUrls.Any(u => u.Contains(HeaderThrowsForUrlContaining, StringComparison.Ordinal)))
+            throw new InvalidOperationException("fake: not a valid backup");
+
+        // A fresh copy each time: the identifier writes onto the FILE from what it reads, and a
+        // shared instance would let one file's result be mutated by the next.
+        return Task.FromResult(Header == null ? null : Clone(Header));
+    }
+
+    private static BackupFileInfo Clone(BackupFileInfo source) => new()
+    {
+        DatabaseName = source.DatabaseName,
+        Type = source.Type,
+        BackupTypeCode = source.BackupTypeCode,
+        BackupStartDate = source.BackupStartDate,
+        BackupFinishDate = source.BackupFinishDate,
+        FirstLsn = source.FirstLsn,
+        LastLsn = source.LastLsn,
+        CheckpointLsn = source.CheckpointLsn,
+        DatabaseBackupLsn = source.DatabaseBackupLsn
+    };
 
     /// <summary>Called with the token the viewmodel supplied, so a test can see it was cancellable.</summary>
     public Action<CancellationToken>? OnVerify { get; set; }

@@ -465,20 +465,37 @@ public class BlobStorageService : IBlobStorageService
                 ? BackupTime.ToBackupServerTime(first.LastModified, backupServerTimeZoneId)
                 : null;
 
+            // A header read beats all of the above, where one has happened (#130).
+            //
+            // It is the instance's own record of when the backup ran, on its own clock - not parsed
+            // out of a name, and not the moment an upload finished. The files that reach here with
+            // a header are the ones the filename could not place, which are exactly the ones whose
+            // fallback reading was the weakest available.
+            var fromHeader = first.BackupStartDate;
+
             sets.Add(new BackupSet
             {
                 SetId = setId,
                 Type = first.Type,
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
-                Timestamp = parsed ?? converted ?? BackupTime.WallClock(first.LastModified),
+                Timestamp = fromHeader ?? parsed ?? converted ?? BackupTime.WallClock(first.LastModified),
                 TimestampSource =
-                    parsed != null ? BackupTimestampSource.FileName
+                    fromHeader != null ? BackupTimestampSource.BackupHeader
+                    : parsed != null ? BackupTimestampSource.FileName
                     : converted != null ? BackupTimestampSource.BlobLastModifiedConverted
                     : BackupTimestampSource.BlobLastModified,
                 DatabaseName = first.InferredDatabaseName,
                 ServerName = first.InferredServerName,
                 InstanceName = first.InferredInstanceName,
-                IsCopyOnly = first.IsCopyOnly
+                IsCopyOnly = first.IsCopyOnly,
+
+                // Carried up from the file so the chain builder can pair definitively rather than by
+                // proximity in time. Null for everything a listing alone produced, which is the
+                // state it has always been in.
+                CheckpointLsn = first.CheckpointLsn,
+                DatabaseBackupLsn = first.DatabaseBackupLsn,
+                FirstLsn = first.FirstLsn,
+                LastLsn = first.LastLsn
             });
         }
 
