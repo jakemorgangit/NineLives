@@ -231,12 +231,24 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Which execute call fails, 1-based, or null for none.
+    ///
+    /// A copy between servers runs two of them, and the interesting cases are the ones where the
+    /// FIRST succeeds and the second does not - so a test has to be able to say which (#105).
+    /// </summary>
+    public int? FailOnExecuteNumber { get; set; }
+
     public Task ExecuteWithProgressAsync(
         ServerConnection server, string sql, Action<string>? messageCallback = null, CancellationToken ct = default)
     {
         ExecutedAgainst.Add(server);
         ExecutedScripts.Add(sql);
         messageCallback?.Invoke("100 percent processed.");
+
+        if (FailOnExecuteNumber == ExecutedScripts.Count)
+            throw new InvalidOperationException($"fake failure on execute {ExecutedScripts.Count}");
+
         if (ExecuteThrows != null) throw ExecuteThrows;
         return Task.CompletedTask;
     }
