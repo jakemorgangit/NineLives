@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to Nine Lives are recorded here.
 
@@ -9,6 +9,16 @@ Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/
 more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
+
+## [1.3.0] - 2026-08-06
+
+Authentication that does not need a SAS token, and the restore screen taken apart from the inside.
+Runs on **.NET 10**. **953 tests**, up from 587.
+
+Entra ID is the headline. Browsing a container and connecting to SQL Server no longer require a
+long-lived SAS token or a stored password, which is what kept the tool out of estates that prohibit
+them. The server-side credential a restore authenticates with is a separate thing, and this release
+also stops the app quietly rewriting one it did not create.
 
 ### Added
 
@@ -30,6 +40,13 @@ more detail on the user-facing changes; this file is the short history.
   refused and the role it is missing, which Azure's own error does not (#29)
 - **Entra MFA for SQL Server connections** (`ActiveDirectoryInteractive`), with the sign-in prompt
   parented to the app window (#30)
+- **A per-container backup server time zone**, so backups whose filenames carry no timestamp sort
+  correctly against the rest instead of being marked approximate. The conversion is from the
+  instant, so daylight saving is handled (#102)
+- **The app says when it is working** — spinners on the long actions, a completion tick, and a
+  global busy status (#128)
+- The saved servers list gained card edges and a marker for the connected one, and dropped the
+  auth line it repeated on every row (#127)
 
 ### Fixed
 
@@ -48,6 +65,13 @@ more detail on the user-facing changes; this file is the short history.
 - Saving now writes the config *before* the secret, so a refused save cannot leave Credential
   Manager holding a password the config file does not match (#113)
 - The credential check no longer races itself and reports the container you just left (#111)
+- **Verify Backups now passes the MOVE clauses**, so it verifies the restore that is actually going
+  to run rather than a different one (#129)
+- White text on the yellow accent was unreadable under high contrast (#126)
+- **The app no longer freezes while the Entra sign-in browser is open.** `InteractiveBrowserCredential`
+  waits for the sign-in on whatever thread asked for the token, and every blob operation starts on
+  the UI thread — so the window stopped painting for as long as the browser was open, which is to
+  say it asked you to go and authenticate while appearing to have crashed (#152)
 - **A Managed Identity blob credential is no longer converted to SAS by running a restore.** The
   check reduced every identity to "is it a SAS credential", so a credential authenticating as the
   instance's own identity was reported as broken and then altered into a SAS one — changing how
@@ -63,6 +87,13 @@ more detail on the user-facing changes; this file is the short history.
 - `RestoreOptions` no longer carries a SAS token it never used (#42)
 - One publish definition instead of three. The release workflow was missing `PublishReadyToRun`
   because it repeated the profile's flags rather than using it (#39)
+- The four verification actions are named for what they each do, rather than four variations on
+  "verify" (#117)
+- The update banner is styled to be noticed — it was dark on a dark app, so it read as chrome (#100)
+- **The restore screen is five smaller pieces rather than one 2,600-line class**: the console, the
+  timeline, the point-in-time target, the options, and the server-side credential. Behaviour is
+  unchanged; what changed is that each part can now be tested on its own, and most of the new tests
+  in this release cover behaviour that previously needed a whole restore to reach (#115)
 
 ## [1.2.0] - 2026-08-05
 
