@@ -526,7 +526,7 @@ public partial class RestoreViewModel : ViewModelBase
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
 
-        Inventory = new BackupInventoryViewModel(blobService, sqlService);
+        Inventory = new BackupInventoryViewModel(blobService, sqlService, _log);
 
         // The chain and the timeline are built from whatever the inventory currently holds, so a
         // change there is the one signal that rebuilds them.

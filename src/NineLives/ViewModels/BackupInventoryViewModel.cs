@@ -29,12 +29,19 @@ public partial class BackupInventoryViewModel : ViewModelBase
 {
     private readonly IBlobStorageService _blob;
     private readonly ISqlServerService _sql;
+    private readonly OperationLog _log;
     private readonly OperationCancellation _loadCancellation = new();
 
-    public BackupInventoryViewModel(IBlobStorageService blob, ISqlServerService sql)
+    /// <param name="log">
+    /// Optional so a test can point it at a temp directory. Reaching for App.Log directly is what
+    /// put "[headeronly] fake: 1 statement(s)" into a real user's log file - a test run writing
+    /// into the profile of whoever ran it, which is the same class of side effect #41 was about.
+    /// </param>
+    public BackupInventoryViewModel(IBlobStorageService blob, ISqlServerService sql, OperationLog? log = null)
     {
         _blob = blob;
         _sql = sql;
+        _log = log ?? App.Log;
     }
 
     /// <summary>Raised when the working set changes, so the chain and timeline can be rebuilt.</summary>
@@ -160,7 +167,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
             // settle what a container-wide audit would cost, and it is worth having from every run
             // rather than only from a deliberate measurement.
             var settled = await identifier.IdentifyAsync(
-                server, unidentified, progress, t => App.Log.Info($"[headeronly] {t}"), ct);
+                server, unidentified, progress, t => _log.Info($"[headeronly] {t}"), ct);
 
             // Regroup: what the headers said changes which set a file belongs to, and a set is
             // keyed on the database and type that have just been corrected.
