@@ -244,6 +244,46 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// </summary>
     public Func<string, CancellationToken, Task<BlobCredentialStatus>>? OnCredentialCheck { get; set; }
 
+    // ── shared backup location (#149) ───────────────────────────────────────────
+
+    /// <summary>What the fake source instance says it backed up.</summary>
+    public List<BackupHistoryEntry> BackupHistory { get; set; } = [];
+
+    /// <summary>Every path the target was asked about, so a test can prove WHICH names were checked.</summary>
+    public List<string> CheckedPaths { get; } = [];
+
+    /// <summary>Paths the fake target refuses, and why. Anything not listed is readable.</summary>
+    public Dictionary<string, BackupFileProblem> UnreadablePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
+        ServerConnection server, string? databaseName = null, CancellationToken ct = default)
+        => Task.FromResult(databaseName == null
+            ? BackupHistory
+            : BackupHistory.Where(h => h.DatabaseName == databaseName).ToList());
+
+    public Task<BackupFileCheck> CheckBackupFileAsync(
+        ServerConnection server, string path, CancellationToken ct = default)
+    {
+        CheckedPaths.Add(path);
+
+        return Task.FromResult(UnreadablePaths.TryGetValue(path, out var problem)
+            ? new BackupFileCheck(path, problem, $"fake failure: {problem}")
+            : BackupFileCheck.Ok(path));
+    }
+
+    public async Task<List<BackupFileCheck>> CheckBackupFilesAsync(
+        ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default)
+    {
+        var results = new List<BackupFileCheck>();
+        foreach (var path in paths)
+        {
+            var check = await CheckBackupFileAsync(server, path, ct);
+            results.Add(check);
+            if (!check.CanBeRestored) break;
+        }
+        return results;
+    }
+
     public Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default)
         => OnCredentialCheck?.Invoke(credentialName, ct) ?? Task.FromResult(Credential);

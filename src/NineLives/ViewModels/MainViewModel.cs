@@ -51,6 +51,7 @@ public partial class MainViewModel : ViewModelBase
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
     public RestoreViewModel Restore { get; }
+    public SharedLocationRestoreViewModel SharedLocationRestore { get; }
     public HistoryViewModel History { get; }
     public SettingsViewModel Settings { get; }
     public AboutViewModel About { get; }
@@ -96,6 +97,7 @@ public partial class MainViewModel : ViewModelBase
         Restore = new RestoreViewModel(
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
+        SharedLocationRestore = new SharedLocationRestoreViewModel(_credentialStore, _sqlService);
         History = new HistoryViewModel(_historyStore);
         Settings = new SettingsViewModel(_credentialStore);
         About = new AboutViewModel();
@@ -111,7 +113,7 @@ public partial class MainViewModel : ViewModelBase
         // One place that answers "is it doing something?". Every screen already tracks its own
         // work; without this the answer depended on which part of a long page was scrolled into
         // view, and the Restore screen's own status line is below the fold most of the time (#128).
-        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Restore);
+        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Restore, SharedLocationRestore);
 
         CurrentView = BlobConfig;
 
@@ -294,6 +296,10 @@ public partial class MainViewModel : ViewModelBase
             case Nav.BrowseBackups:
                 BlobBrowser.RefreshContainers();
                 break;
+            case Nav.SharedLocation:
+                if (SharedLocationRestore.ReadHistoryCommand.CanExecute(null))
+                    SharedLocationRestore.ReadHistoryCommand.Execute(null);
+                break;
             case Nav.History:
                 History.Refresh();
                 break;
@@ -338,12 +344,13 @@ public partial class MainViewModel : ViewModelBase
         public const string SqlServers = "SQL Servers";
         public const string BrowseBackups = "Browse Backups";
         public const string Restore = "Restore";
+        public const string SharedLocation = "Restore from Share";
         public const string History = "History";
         public const string Settings = "Settings";
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Restore, History, Settings, About];
+            [BlobStorage, SqlServers, BrowseBackups, Restore, SharedLocation, History, Settings, About];
     }
 
     [RelayCommand]
@@ -356,6 +363,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,
             Nav.Restore => Restore,
+            Nav.SharedLocation => SharedLocationRestore,
             Nav.History => History,
             Nav.Settings => Settings,
             Nav.About => About,
@@ -367,6 +375,10 @@ public partial class MainViewModel : ViewModelBase
             BlobBrowser.RefreshContainers();
         else if (viewName is Nav.Restore)
             Restore.RefreshContainers();
+        else if (viewName is Nav.SharedLocation)
+            // A server added on the SQL Servers screen since the last visit has to be selectable
+            // here, and this screen's two lists are the only place both ends are chosen.
+            SharedLocationRestore.RefreshServers();
         else if (viewName is Nav.History)
             // Re-read on every visit: a restore run since the last look must be here, and the
             // history is written by the Restore screen rather than by this one.
