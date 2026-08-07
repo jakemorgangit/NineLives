@@ -168,6 +168,39 @@ public class RestoreStepTests
     }
 
     /// <summary>
+    /// The options step describes itself without ever claiming to be finished.
+    ///
+    /// The target database name is derived from the chosen source database, so treating a
+    /// non-empty one as completion folded this step away the moment a database was picked - and
+    /// the hand-over from step 2 then skipped over it to step 4, so the options were never seen.
+    /// </summary>
+    [Fact]
+    public void DescribingAStepUpdatesItsSummaryWithoutFoldingIt()
+    {
+        var step = Step();
+
+        step.Describe("as MyDb_Restored, RECOVERY");
+
+        Assert.Equal("as MyDb_Restored, RECOVERY", step.Summary);
+        Assert.True(step.IsExpanded);
+        Assert.False(step.IsComplete);
+    }
+
+    /// <summary>Choosing a restore point hands over to the options, not past them.</summary>
+    [Fact]
+    public void TheHandOverFromThePointLandsOnTheOptions()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Options.Describe("as MyDb_Restored, RECOVERY");
+
+        steps.Report(steps.Source, true, "backups, MyDb on SRV01");
+        steps.Report(steps.Point, true, "2026-01-10 22:00, Full + 2 logs");
+
+        Assert.True(steps.Options.IsExpanded);
+        Assert.False(steps.Execute.IsExpanded);
+    }
+
+    /// <summary>
     /// Step 4 is never reported on - it is the action, with no completed state - so it is where
     /// the hand-over lands once 1 to 3 are done, which is exactly where somebody wants to be.
     /// </summary>

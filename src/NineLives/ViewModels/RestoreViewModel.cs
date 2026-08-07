@@ -570,8 +570,11 @@ public partial class RestoreViewModel : ViewModelBase
             .ToList();
 
         DiscoveredDatabases = new ObservableCollection<string>(dbs);
-        if (DiscoveredDatabases.Count > 0)
-            SelectedDatabaseName = DiscoveredDatabases[0];
+
+        // Nothing is chosen for the user. Picking the first database alphabetically is a decision
+        // about WHICH DATABASE TO RESTORE, made silently, and the rest of the screen then fills in
+        // around it as though somebody had asked for it - a chain, a restore point, a target name.
+        // On a screen whose last button overwrites a database, the app does not get to guess.
     }
 
     partial void OnSelectedDatabaseNameChanged(string? value) => RefreshSelectedDatabase(value);
@@ -713,15 +716,8 @@ public partial class RestoreViewModel : ViewModelBase
             DiscoveredDatabases = new ObservableCollection<string>(dbs);
             BackupsLoaded = _allBackups.Count > 0;
 
-            if (DiscoveredServers.Count > 0)
-            {
-                SelectedServerName = DiscoveredServers[0];
-            }
-            else if (DiscoveredDatabases.Count > 0)
-            {
-                SelectedDatabaseName = DiscoveredDatabases[0];
-            }
-            else
+            // Same again: the lists are offered, not answered. What follows is the no-selection
+            // case, which is now what every load starts in.
             {
                 _dbSets = _allSets;
                 FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
@@ -967,10 +963,11 @@ public partial class RestoreViewModel : ViewModelBase
                 ? $"{point.TimestampDisplay}, {RestoreChain?.Summary ?? "no chain"}"
                 : string.Empty);
 
-        Steps.Report(
-            Steps.Options,
-            !string.IsNullOrWhiteSpace(TargetDatabaseName),
-            DescribeOptions());
+        // Described, not completed. The options have defaults, so there is no point at which they
+        // are finished - and the target name is derived from the chosen database, so treating a
+        // non-empty one as completion folded this step away the moment a database was picked, and
+        // the hand-over from step 2 then skipped straight over it to step 4.
+        Steps.Options.Describe(DescribeOptions());
     }
 
     private string DescribeSource()

@@ -54,6 +54,9 @@ public class ChainCheckStateTests
         };
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // The app no longer chooses a database or a restore point for anybody.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
         vm.IsConnectedToServer = true;
         vm.ConnectedServer = new ServerConnection

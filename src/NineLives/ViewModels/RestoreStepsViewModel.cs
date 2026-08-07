@@ -49,6 +49,16 @@ public partial class RestoreStep(string title) : ObservableObject
     /// Only on the transition into complete: re-running it on every keystroke would fold the step
     /// away while somebody was still working in it.
     /// </summary>
+    /// <summary>
+    /// Updates what the step says when collapsed, without claiming it is finished.
+    ///
+    /// For a step that has no completed state: the options all have defaults, so there is no
+    /// moment at which they become "done". Reporting them as complete - which the target database
+    /// name, derived from the chosen source database, quietly did - folded the step away and made
+    /// the hand-over skip it, so choosing a database meant never seeing the options at all.
+    /// </summary>
+    public void Describe(string summary) => Summary = summary;
+
     /// <returns>True when this call folded the step away, so the caller can move on to the next.</returns>
     public bool Report(bool isComplete, string summary)
     {

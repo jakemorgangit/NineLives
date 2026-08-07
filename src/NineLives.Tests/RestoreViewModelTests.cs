@@ -70,8 +70,16 @@ public class RestoreViewModelTests
 
     // ── loading and chain selection ─────────────────────────────────────────────
 
+    /// <summary>
+    /// A load offers the lists and answers none of them.
+    ///
+    /// Preselecting the first server, the first database and the latest restore point meant the
+    /// app had silently decided what to restore and when to restore it to - and the chain, the
+    /// script and the summary then all described a restore nobody had asked for. On a screen whose
+    /// last button overwrites a database, the app does not get to guess.
+    /// </summary>
     [Fact]
-    public async Task LoadingBuildsRestorePointsAndSelectsTheMostRecent()
+    public async Task ALoadChoosesNothingOnTheUsersBehalf()
     {
         var vm = NewViewModel();
         _blob.Files = FullPlusLogs(3);
@@ -80,13 +88,38 @@ public class RestoreViewModelTests
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
         Assert.True(vm.BackupsLoaded);
+        Assert.NotEmpty(vm.DiscoveredDatabases);
+
+        Assert.Null(vm.SelectedServerName);
+        Assert.Null(vm.SelectedDatabaseName);
+        Assert.Null(vm.Timeline.SelectedPoint);
+
+        // And nothing downstream has been built from a choice nobody made.
+        Assert.Null(vm.RestoreChain);
+        Assert.False(vm.HasScript);
+        Assert.Equal(string.Empty, vm.RestoreSummaryText);
+    }
+
+    [Fact]
+    public async Task ChoosingTheLatestPointBuildsAValidChainToIt()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(3);
+        vm.SelectedContainer = Container();
+
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
+
+        Assert.True(vm.BackupsLoaded);
         Assert.True(vm.Timeline.HasPoints);
 
         // A full plus three logs: the full itself, then one point per log.
         Assert.Equal(4, vm.Timeline.Points.Count);
 
-        // The default selection is the latest point, which is what someone restoring after an
-        // incident almost always wants.
+        // The latest point is what someone restoring after an incident usually wants - but they
+        // have to say so. The helper above is standing in for that click, not for the app.
         Assert.Equal(T0.AddHours(3), vm.Timeline.SelectedPoint!.Timestamp);
         Assert.True(vm.HasValidChain);
     }
@@ -98,6 +131,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(3);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         // The second log: full + the logs up to and including it, and nothing after.
         vm.Timeline.SelectedPoint = vm.Timeline.Points.Single(
@@ -116,6 +152,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(3);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
 
         vm.Timeline.SelectedPoint = vm.Timeline.Points.First(p => p.Type == BackupType.Full);
@@ -139,6 +178,9 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         Assert.False(vm.Timeline.HasPoints);
 
@@ -168,6 +210,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(3);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
 
         Assert.True(vm.BackupsLoaded);
@@ -193,6 +238,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(1);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
         vm.IsConnectedToServer = true;
         vm.ConnectedServer = new ServerConnection
@@ -223,6 +271,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(3);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
 
         // The latest point is a log, so stopping partway through it is meaningful.
@@ -248,6 +299,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(3);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
         Assert.NotEmpty(vm.GeneratedScript);
 
@@ -269,6 +323,9 @@ public class RestoreViewModelTests
         _blob.Files = FullPlusLogs(3);
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
 
         vm.PointInTime.Use = true;
@@ -311,6 +368,9 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
+
         Assert.NotNull(vm.Timeline.SelectedPoint);
         Assert.NotEmpty(vm.GeneratedScript);
 
@@ -335,11 +395,17 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
+
         vm.Timeline.FromText = T0.AddHours(4).ToString("yyyy-MM-dd HH:mm:ss");
         Assert.Equal(2, vm.Timeline.Points.Count);
 
         // A range typed for one database would silently hide points belonging to the next.
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         Assert.Equal(6, vm.Timeline.Points.Count);
         Assert.Equal(string.Empty, vm.Timeline.FromText);
@@ -361,12 +427,18 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
+
         Assert.Equal(3, vm.Timeline.Points.Count);
 
         // A new log arrives in the container, and the user presses Load again.
         var fresh = T0.AddHours(3);
         _blob.Files = FullPlusLogs(3);
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         Assert.Equal(4, vm.Timeline.Points.Count);
         Assert.Contains(vm.Timeline.Points, p => p.Timestamp == fresh);
@@ -384,10 +456,19 @@ public class RestoreViewModelTests
         // First load has no selection yet and must scan the whole container - the server and
         // database lists are built from what it finds.
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         Assert.Null(_blob.LastScope);
 
+        // The server as well as the database: the scope is built from both, and the load no longer
+        // picks either.
+        vm.SelectedServerName = "SRV01";
         vm.SelectedDatabaseName = "MyDb";
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         Assert.NotNull(_blob.LastScope);
         Assert.Equal("MyDb", _blob.LastScope!.DatabaseName);
@@ -403,8 +484,15 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
+        vm.SelectedServerName = @"SRV01\PROD";
         vm.SelectedDatabaseName = "MyDb";
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         // "SRV01\PROD" lives under "SRV01" in the container layout.
         Assert.Equal("SRV01", _blob.LastScope!.ServerName);
@@ -418,6 +506,9 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // Nothing is preselected any more, so the test makes the choices a user would.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         Assert.False(vm.BackupsLoaded);
         Assert.Contains("No SAS token found.", vm.StatusMessage);
