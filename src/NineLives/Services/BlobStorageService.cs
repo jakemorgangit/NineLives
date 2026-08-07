@@ -317,7 +317,7 @@ public class BlobStorageService : IBlobStorageService
 
             if (!file.IsAgDefaultNaming)
             {
-                var agPattern = config.AgPathPattern ?? "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+                var agPattern = config.AgPathPattern ?? BlobContainerConfig.DefaultPathPattern;
                 if (pathParts.Length > 1 && config.BackupSourceType == BackupSourceType.AvailabilityGroup)
                 {
                     // AG container with path: e.g. BackupType/ClusterName$AGName/DatabaseName/FileName

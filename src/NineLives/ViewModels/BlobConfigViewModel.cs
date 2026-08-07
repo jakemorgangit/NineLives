@@ -51,7 +51,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     private string _editSasToken = string.Empty;
 
     [ObservableProperty]
-    private string _editPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+    private string _editPathPattern = BlobContainerConfig.DefaultPathPattern;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsMixedSourceType))]
@@ -382,7 +382,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void SyncAgPathElementsFromPattern()
     {
         var pattern = string.IsNullOrWhiteSpace(EditAgPathPattern)
-            ? "{BackupType}/{ServerName}/{DatabaseName}/{FileName}"
+            ? BlobContainerConfig.DefaultPathPattern
             : EditAgPathPattern;
         var active = PathElement.ParsePattern(pattern);
         AgActivePathElements = new ObservableCollection<PathElement>(active);
@@ -453,7 +453,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditContainerUrl = string.Empty;
         EditAuthMode = BlobAuthMode.SasToken;
         EditSasToken = string.Empty;
-        EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+        EditPathPattern = BlobContainerConfig.DefaultPathPattern;
         EditBackupSourceType = BackupSourceType.Standalone;
         EditAgPathPattern = null;
         EditBackupServerTimeZone = TimeZoneOption.Unknown;

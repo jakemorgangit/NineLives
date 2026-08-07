@@ -1568,21 +1568,10 @@ public partial class RestoreViewModel : ViewModelBase
         => TryCopyToClipboard(GeneratedScript, "Script copied to clipboard.");
 
     [RelayCommand]
-    private void CopyPathHttps(BackupFileInfo? file)
-    {
-        if (file == null || SelectedContainer == null) return;
-        TryCopyToClipboard(
-            BlobStorageService.BuildBlobUrl(SelectedContainer, file.BlobName),
-            "HTTPS path copied to clipboard (no SAS token).");
-    }
+    private void CopyPathHttps(BackupFileInfo? file) => CopyBlobHttpsPath(file, SelectedContainer);
 
     [RelayCommand]
-    private void CopyPathContainer(BackupFileInfo? file)
-    {
-        if (file == null || SelectedContainer == null) return;
-        var containerName = SelectedContainer.ContainerName ?? "container";
-        TryCopyToClipboard($"{containerName}/{file.BlobName}", "Container path copied to clipboard.");
-    }
+    private void CopyPathContainer(BackupFileInfo? file) => CopyBlobContainerPath(file, SelectedContainer);
 
     [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
     private async Task FetchLogicalNamesAsync()

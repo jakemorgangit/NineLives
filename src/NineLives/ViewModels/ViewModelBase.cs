@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -87,6 +89,32 @@ public abstract partial class ViewModelBase : ObservableObject
     /// clipboard managers, and it was reproduced while the issue was being written. A failed copy
     /// deserves a line in the status bar, not a crash.
     /// </summary>
+    /// <summary>
+    /// Copies a backup's full HTTPS path, without a SAS token.
+    ///
+    /// Shared because it was written twice, identically apart from a null check, on the two screens
+    /// that list blobs (#42). Both feed a context menu on a file row, and a path that differs
+    /// between them - one with a token, one without - would be a genuinely dangerous divergence:
+    /// these get pasted into tickets.
+    /// </summary>
+    protected void CopyBlobHttpsPath(BackupFileInfo? file, BlobContainerConfig? container)
+    {
+        if (file == null || container == null) return;
+
+        TryCopyToClipboard(
+            BlobStorageService.BuildBlobUrl(container, file.BlobName),
+            "HTTPS path copied to clipboard (no SAS token).");
+    }
+
+    /// <summary>The container-relative path, for pasting into SSMS or a script.</summary>
+    protected void CopyBlobContainerPath(BackupFileInfo? file, BlobContainerConfig? container)
+    {
+        if (file == null || container == null) return;
+
+        var containerName = container.ContainerName ?? "container";
+        TryCopyToClipboard($"{containerName}/{file.BlobName}", "Container path copied to clipboard.");
+    }
+
     protected bool TryCopyToClipboard(string? text, string successMessage)
     {
         if (string.IsNullOrEmpty(text)) return false;

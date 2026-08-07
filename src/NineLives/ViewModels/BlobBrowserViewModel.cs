@@ -287,22 +287,14 @@ public partial class BlobBrowserViewModel : ViewModelBase
     private static bool MatchesServerSet(BackupSet set, string serverFilter)
         => set.MatchesServer(serverFilter);
 
+    // The ?? SelectedFile is the one real difference between the two screens and is kept: here the
+    // command is also reachable from a toolbar button with no row passed, where falling back to the
+    // selection is what makes it work at all.
     [RelayCommand]
     private void CopyPathHttps(BackupFileInfo? file)
-    {
-        var target = file ?? SelectedFile;
-        if (target == null || SelectedContainer == null) return;
-        TryCopyToClipboard(
-            BlobStorageService.BuildBlobUrl(SelectedContainer, target.BlobName),
-            "HTTPS path copied to clipboard (no SAS token).");
-    }
+        => CopyBlobHttpsPath(file ?? SelectedFile, SelectedContainer);
 
     [RelayCommand]
     private void CopyPathContainer(BackupFileInfo? file)
-    {
-        var target = file ?? SelectedFile;
-        if (target == null || SelectedContainer == null) return;
-        var containerName = SelectedContainer.ContainerName ?? "container";
-        TryCopyToClipboard($"{containerName}/{target.BlobName}", "Container path copied to clipboard.");
-    }
+        => CopyBlobContainerPath(file ?? SelectedFile, SelectedContainer);
 }
