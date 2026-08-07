@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
@@ -144,15 +144,29 @@ public class RestoreScriptGenerator
         sb.AppendLine();
     }
 
+    /// <summary>
+    /// Names the devices to restore from - URL for a blob, DISK for a file on a path (#149).
+    ///
+    /// Which one comes from the FILE rather than from an option, so a chain cannot be told to
+    /// restore from the wrong kind of device: a backup discovered through a source instance's msdb
+    /// has a local path and nothing else, and one listed from a container has a URL.
+    ///
+    /// Only URLs are encoded. A UNC path is not a URI and percent-encoding one would produce a
+    /// path SQL Server cannot open.
+    /// </summary>
     private static void AppendFromUrls(StringBuilder sb, BackupSet set, RestoreOptions options)
     {
         for (int i = 0; i < set.Files.Count; i++)
         {
             var file = set.Files[i];
-            var url = BlobUrlEncoder.Encode(file.BlobUrl);
+
+            var device = file.IsOnDisk
+                ? $"DISK = N'{TSql.EscapeLiteral(file.RestoreDevice)}'"
+                : $"URL = N'{TSql.EscapeLiteral(BlobUrlEncoder.Encode(file.BlobUrl))}'";
+
             var prefix = i == 0 ? "    FROM" : "        ";
             var suffix = i < set.Files.Count - 1 ? "," : "";
-            sb.AppendLine($"{prefix} URL = N'{TSql.EscapeLiteral(url)}'{suffix}");
+            sb.AppendLine($"{prefix} {device}{suffix}");
         }
 
         sb.AppendLine("    WITH");
