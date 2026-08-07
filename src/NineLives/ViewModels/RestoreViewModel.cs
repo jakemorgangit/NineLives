@@ -654,6 +654,28 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// What one header read cost, in the terms #130 needs to settle its design.
+    ///
+    /// Kept as a property as well as a log line so it can be read off the screen without going to
+    /// the file - the point of measuring is that somebody looks at the number.
+    /// </summary>
+    [ObservableProperty]
+    private string _headerReadTiming = string.Empty;
+
+    /// <summary>
+    /// Per FILE rather than per set: a striped set is several reads, and the question #130 asks is
+    /// what it would cost to read every file in a container.
+    /// </summary>
+    internal static string DescribeHeaderTiming(int setCount, int fileCount, TimeSpan elapsed)
+    {
+        if (fileCount == 0) return string.Empty;
+
+        var perFile = elapsed.TotalMilliseconds / fileCount;
+        return $"{fileCount} file(s) in {setCount} set(s) took {elapsed.TotalMilliseconds:N0} ms " +
+               $"({perFile:N0} ms per file).";
+    }
+
+    /// <summary>
     /// Works out which points this database can be restored to, and hands them to the timeline.
     /// </summary>
     private void ComputeAndDisplayRestorePoints()
@@ -896,6 +918,15 @@ public partial class RestoreViewModel : ViewModelBase
         try
         {
             var headers = new List<ChainHeader>();
+
+            // Timed, because #130 turns on a number nobody has: how long ONE header read actually
+            // costs against a real container. Building chains from headers rather than filenames is
+            // only sensible if that number is small, and the whole design in that issue is written
+            // around an assumption that it is not. This is the cheapest place to find out - the
+            // work is already being done, one read per chain member, against real backups.
+            var headerTimer = System.Diagnostics.Stopwatch.StartNew();
+            var filesRead = 0;
+
             foreach (var set in RestoreChain.AllSets)
             {
                 ct.ThrowIfCancellationRequested();
@@ -905,6 +936,7 @@ public partial class RestoreViewModel : ViewModelBase
                 {
                     var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
                     headers.Add(new ChainHeader(set, header));
+                    filesRead += urls.Count;
                 }
                 catch (OperationCanceledException)
                 {
@@ -920,12 +952,17 @@ public partial class RestoreViewModel : ViewModelBase
                 }
             }
 
+            headerTimer.Stop();
+            HeaderReadTiming = DescribeHeaderTiming(headers.Count, filesRead, headerTimer.Elapsed);
+            _log.Info($"[headeronly] {HeaderReadTiming}");
+
             UpdateChainIssues(RestoreChain, headers);
             ChainLsnVerified = true;
 
             SetStatus(HasChainIssues
                 ? $"Chain check found problems - see the panel above."
-                : $"Chain checked: {headers.Count} header(s) read, the LSN chain is unbroken.");
+                : $"Chain checked: {headers.Count} header(s) read, the LSN chain is unbroken. " +
+                  HeaderReadTiming);
         }
         catch (OperationCanceledException)
         {

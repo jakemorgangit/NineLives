@@ -232,6 +232,138 @@ public class SqlServerService : ISqlServerService
         return databases;
     }
 
+    /// <summary>
+    /// What this instance recorded backing up, read from msdb (#149).
+    ///
+    /// The first half of restoring from a shared backup location: there is no container to list,
+    /// but the instance that took the backups knows exactly what it took, when, to which files and
+    /// at which LSNs.
+    ///
+    /// Ordered newest first, and capped, because msdb on a busy instance holds years of history and
+    /// a restore is almost always from the recent end of it. A cap is honest about what it returns -
+    /// see BackupHistoryLimit.
+    ///
+    /// It reports what msdb SAYS. Whether those files still exist is a different question, asked
+    /// separately and on the target, because msdb keeps history for backups whose files were
+    /// deleted, archived or pruned by a retention job long ago.
+    /// </summary>
+    public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
+        ServerConnection server, string? databaseName = null, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+
+        // backupset holds one row per backup; backupmediafamily one per FILE it was written to, so
+        // a striped backup is several rows and family_sequence_number is the stripe order. Grouping
+        // in the app rather than with STRING_AGG keeps this readable on every supported version.
+        cmd.CommandText = $@"
+            SELECT TOP ({BackupHistoryLimit})
+                   bs.backup_set_id,
+                   bs.database_name,
+                   bs.type,
+                   bs.backup_start_date,
+                   bs.backup_finish_date,
+                   bs.is_copy_only,
+                   bs.first_lsn,
+                   bs.last_lsn,
+                   bs.checkpoint_lsn,
+                   bs.database_backup_lsn,
+                   bs.backup_size,
+                   bs.server_name,
+                   bmf.physical_device_name,
+                   bmf.family_sequence_number
+            FROM msdb.dbo.backupset AS bs
+            JOIN msdb.dbo.backupmediafamily AS bmf
+              ON bmf.media_set_id = bs.media_set_id
+            WHERE (@database IS NULL OR bs.database_name = @database)
+              AND bmf.device_type IN (2, 102)   -- disk, including logical disk devices
+            ORDER BY bs.backup_start_date DESC, bs.backup_set_id DESC, bmf.family_sequence_number";
+
+        cmd.Parameters.AddWithValue("@database", (object?)databaseName ?? DBNull.Value);
+
+        // One row per FILE, gathered back into one entry per backup set.
+        var files = new Dictionary<int, List<(int Sequence, string Path)>>();
+        var sets = new Dictionary<int, BackupHistoryEntry>();
+        var order = new List<int>();
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id = reader.GetInt32(0);
+
+            if (!sets.ContainsKey(id))
+            {
+                order.Add(id);
+                sets[id] = new BackupHistoryEntry
+                {
+                    DatabaseName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    Type = TypeFromMsdb(reader.IsDBNull(2) ? null : reader.GetString(2)),
+                    StartedAt = reader.GetDateTime(3),
+                    FinishedAt = reader.IsDBNull(4) ? reader.GetDateTime(3) : reader.GetDateTime(4),
+                    IsCopyOnly = !reader.IsDBNull(5) && reader.GetBoolean(5),
+                    FirstLsn = reader.IsDBNull(6) ? null : reader.GetDecimal(6),
+                    LastLsn = reader.IsDBNull(7) ? null : reader.GetDecimal(7),
+                    CheckpointLsn = reader.IsDBNull(8) ? null : reader.GetDecimal(8),
+                    DatabaseBackupLsn = reader.IsDBNull(9) ? null : reader.GetDecimal(9),
+                    BackupSizeBytes = reader.IsDBNull(10) ? null : (long)reader.GetDecimal(10),
+                    ServerName = reader.IsDBNull(11) ? null : reader.GetString(11)
+                };
+                files[id] = [];
+            }
+
+            // family_sequence_number is tinyint, not int - GetInt32 throws an InvalidCastException
+            // on it. Found by running this against a real instance rather than by reading the docs.
+            if (!reader.IsDBNull(12))
+                files[id].Add((
+                    reader.IsDBNull(13) ? 1 : Convert.ToInt32(reader.GetValue(13)),
+                    reader.GetString(12)));
+        }
+
+        return order
+            .Select(id => CloneWithFiles(sets[id],
+                files[id].OrderBy(f => f.Sequence).Select(f => f.Path).ToList()))
+            .ToList();
+    }
+
+    /// <summary>
+    /// How far back to read. msdb on a busy instance holds years of history, and a restore is
+    /// almost always from the recent end of it - but the number is stated here rather than left
+    /// implicit, because silently returning "the newest 500" while looking like "everything" is
+    /// how somebody concludes a backup is missing when it is simply older than the cap.
+    /// </summary>
+    public const int BackupHistoryLimit = 500;
+
+    private static BackupHistoryEntry CloneWithFiles(BackupHistoryEntry entry, List<string> files) => new()
+    {
+        DatabaseName = entry.DatabaseName,
+        Type = entry.Type,
+        StartedAt = entry.StartedAt,
+        FinishedAt = entry.FinishedAt,
+        IsCopyOnly = entry.IsCopyOnly,
+        FirstLsn = entry.FirstLsn,
+        LastLsn = entry.LastLsn,
+        CheckpointLsn = entry.CheckpointLsn,
+        DatabaseBackupLsn = entry.DatabaseBackupLsn,
+        BackupSizeBytes = entry.BackupSizeBytes,
+        ServerName = entry.ServerName,
+        Files = files
+    };
+
+    /// <summary>
+    /// msdb's one-letter backup type. D is a full, I a differential, L a log; the rest - file and
+    /// filegroup backups, partial backups - are not chain members this app restores, and are
+    /// reported as Unknown rather than guessed at.
+    /// </summary>
+    internal static BackupType TypeFromMsdb(string? type) => type switch
+    {
+        "D" => BackupType.Full,
+        "I" => BackupType.Differential,
+        "L" => BackupType.TransactionLog,
+        _ => BackupType.Unknown
+    };
+
     // These two read backup metadata off blob URLs, and neither takes a credential name any more.
     //
     // They used to, and passing one could never work. SQL Server rejects WITH CREDENTIAL against a
