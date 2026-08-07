@@ -1,5 +1,6 @@
 ﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
+using Blackcat.NineLives.ViewModels;
 
 namespace Blackcat.NineLives.Tests;
 
@@ -253,5 +254,22 @@ public sealed class FakeSqlServerService : ISqlServerService
     {
         CredentialWrites.Add(credentialName);
         return Task.FromResult(CredentialChange.None);
+    }
+}
+
+/// <summary>
+/// What a person does after a load: pick a database, then a restore point.
+///
+/// The app deliberately chooses neither any more - preselecting the first database and the latest
+/// point meant it had silently decided what to restore, and everything downstream described a
+/// restore nobody had asked for. Tests that need a chain therefore have to make the choices a user
+/// would, which is also a fair description of what they were always relying on.
+/// </summary>
+internal static class RestoreSetup
+{
+    public static void ChooseADatabaseAndAPoint(RestoreViewModel vm)
+    {
+        vm.SelectedDatabaseName ??= vm.DiscoveredDatabases.FirstOrDefault();
+        vm.Timeline.SelectedPoint ??= vm.Timeline.Points.LastOrDefault();
     }
 }

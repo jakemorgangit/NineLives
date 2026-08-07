@@ -120,7 +120,7 @@ public partial class RestoreTimelineViewModel : ObservableObject
         }
 
         HasPoints = true;
-        ApplyFilters(selectLatest: true);
+        ApplyFilters();
     }
 
     /// <summary>
@@ -154,7 +154,7 @@ public partial class RestoreTimelineViewModel : ObservableObject
     /// like a zoom: narrow to a two-hour window and those points spread across the whole track
     /// instead of staying bunched in the sliver they occupied before (#27).
     /// </summary>
-    private void ApplyFilters(bool selectLatest = false)
+    private void ApplyFilters()
     {
         var previous = SelectedPoint;
         var visible = _all.Where(Matches).ToList();
@@ -176,9 +176,13 @@ public partial class RestoreTimelineViewModel : ObservableObject
 
         // Keep the selection when it survives the filter - changing a type toggle should not throw
         // away the point someone had already chosen.
-        SelectedPoint = !selectLatest && previous != null && visible.Contains(previous)
-            ? previous
-            : visible[^1];
+        //
+        // A FRESH set of points selects nothing. Landing on the latest point looks helpful and is
+        // not: it is the app deciding which moment to restore to, on a screen whose purpose is
+        // choosing that moment, and everything downstream - the chain, the script, the summary -
+        // then describes a restore nobody asked for. The one thing this tool must never do is
+        // answer that question on somebody's behalf.
+        SelectedPoint = previous != null && visible.Contains(previous) ? previous : null;
     }
 
     private bool Matches(RestorePoint p)

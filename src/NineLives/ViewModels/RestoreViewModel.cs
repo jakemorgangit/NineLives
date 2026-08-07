@@ -119,6 +119,13 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public PointInTimeViewModel PointInTime { get; } = new();
 
+    /// <summary>
+    /// The numbered steps, and whether each is open (#117 item 3). Every step was expanded at all
+    /// times, including the ones already finished and the ones not yet reachable, on a screen of
+    /// roughly 1,300 lines of markup in one column.
+    /// </summary>
+    public RestoreStepsViewModel Steps { get; } = new();
+
     // ── Chain gap detection ──────────────────────────────────────────────────────
     // Structural validation of the selected chain, run at selection time. The app otherwise
     // assumes every discovered backup is present and intact, so a missing stripe or a hole in
@@ -496,6 +503,11 @@ public partial class RestoreViewModel : ViewModelBase
         {
             if (e.PropertyName is nameof(IsBusy) or nameof(TargetDatabaseName))
                 RefreshCheckState();
+
+            if (e.PropertyName is nameof(BackupsLoaded) or nameof(SelectedDatabaseName)
+                or nameof(SelectedServerName) or nameof(SelectedContainer)
+                or nameof(TargetDatabaseName))
+                RefreshSteps();
         };
 
         // The selection now lives on the timeline (#115 seam 2), which is a different object, so
@@ -511,13 +523,19 @@ public partial class RestoreViewModel : ViewModelBase
         // the caller updates once at the end rather than four times through a half-built state.
         PointInTime.PropertyChanged += (_, _) =>
         {
-            if (!PointInTime.IsUpdating) UpdateRestoreSummary();
+            if (PointInTime.IsUpdating) return;
+            Steps.Options.Invalidate();
+            UpdateRestoreSummary();
         };
 
         // One subscription in place of a one-line change handler per option (#115 seam 7). An
         // option added later is kept in step with the script by existing, rather than by whoever
         // adds it remembering to write a handler - which is what #110 was.
-        Options.PropertyChanged += (_, _) => UpdateRestoreSummary();
+        Options.PropertyChanged += (_, _) =>
+        {
+            Steps.Options.Invalidate();
+            UpdateRestoreSummary();
+        };
 
         RefreshContainers();
     }
@@ -558,8 +576,11 @@ public partial class RestoreViewModel : ViewModelBase
             .ToList();
 
         DiscoveredDatabases = new ObservableCollection<string>(dbs);
-        if (DiscoveredDatabases.Count > 0)
-            SelectedDatabaseName = DiscoveredDatabases[0];
+
+        // Nothing is chosen for the user. Picking the first database alphabetically is a decision
+        // about WHICH DATABASE TO RESTORE, made silently, and the rest of the screen then fills in
+        // around it as though somebody had asked for it - a chain, a restore point, a target name.
+        // On a screen whose last button overwrites a database, the app does not get to guess.
     }
 
     partial void OnSelectedDatabaseNameChanged(string? value) => RefreshSelectedDatabase(value);
@@ -574,7 +595,17 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void RefreshSelectedDatabase(string? value)
     {
-        if (value == null || _allSets.Count == 0) return;
+        // No database chosen: nothing to compute a chain from, so show nothing rather than
+        // everything. Returning early used to be safe because something was always selected.
+        // No database chosen: nothing to compute a chain from, so show nothing rather than
+        // everything. Returning early used to be safe because something was always selected.
+        if (string.IsNullOrEmpty(value) || _allSets.Count == 0)
+        {
+            _dbSets = [];
+            FullCount = DiffCount = LogCount = SetCount = 0;
+            Timeline.Clear();
+            return;
+        }
 
         _dbSets = _allSets
             .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
@@ -615,6 +646,10 @@ public partial class RestoreViewModel : ViewModelBase
     private void OnSelectedRestorePointChanged(RestorePoint? value)
     {
         ShowChainDetails = false;
+
+        // A confirmed point that then moves is no longer confirmed. Leaving it standing would let
+        // the script, the summary and the execute button describe a moment nobody chose.
+        Steps.Point.Invalidate();
 
         // Verification belongs to the chain that was verified. Leaving the results on screen
         // after the selection moves would show a green tick against backups nothing has read.
@@ -701,26 +736,10 @@ public partial class RestoreViewModel : ViewModelBase
             DiscoveredDatabases = new ObservableCollection<string>(dbs);
             BackupsLoaded = _allBackups.Count > 0;
 
-            if (DiscoveredServers.Count > 0)
-            {
-                SelectedServerName = DiscoveredServers[0];
-            }
-            else if (DiscoveredDatabases.Count > 0)
-            {
-                SelectedDatabaseName = DiscoveredDatabases[0];
-            }
-            else
-            {
-                _dbSets = _allSets;
-                FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
-                DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
-                LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
-                SetCount = _dbSets.Count;
-                ComputeAndDisplayRestorePoints();
-            }
-
-
-            // Unconditionally, not just when the selection changed - see RefreshSelectedDatabase.
+            // The lists are offered, not answered - and until one IS answered there is nothing to
+            // show. Falling back to every set in the container meant a timeline of every backup of
+            // every database on every server: on a real container that is thousands of points, all
+            // of them meaningless, because a restore chain only exists within one database.
             RefreshSelectedDatabase(SelectedDatabaseName);
 
             // Only when nothing above went wrong. Selecting the first server or database runs the
@@ -892,6 +911,8 @@ public partial class RestoreViewModel : ViewModelBase
         // the thing people read before running a restore against production.
         RegenerateScript();
 
+        RefreshSteps();
+
         if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
         {
             RestoreSummaryText = string.Empty;
@@ -933,6 +954,78 @@ public partial class RestoreViewModel : ViewModelBase
             parts.Add("Options: " + string.Join("; ", optionsList) + ".");
 
         RestoreSummaryText = string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// Tells each step where it stands. Driven from the same places as the restore summary, so a
+    /// step's heading cannot disagree with the screen underneath it.
+    /// </summary>
+    private void RefreshSteps()
+    {
+        // Step 1 finishes by itself, because there is nothing to confirm: a database either has
+        // been chosen or has not. It needs BOTH the container loaded and a database picked - the
+        // step holds the server and database dropdowns, so completing it on the load alone threw
+        // people out of the step before they could use them.
+        Steps.Report(
+            Steps.Source,
+            BackupsLoaded && !string.IsNullOrWhiteSpace(SelectedDatabaseName),
+            DescribeSource());
+
+        // Described, and confirmed by the user rather than by a click. Choosing a restore point is
+        // the decision this application exists to support: collapsing the step the instant a dot is
+        // clicked takes the timeline away from somebody who is still comparing points.
+        Steps.Point.Describe(
+            Timeline.SelectedPoint is { } point
+                ? $"{point.TimestampDisplay}, {RestoreChain?.Summary ?? "no chain"}"
+                : string.Empty);
+        Steps.Point.CanConfirm = Timeline.SelectedPoint != null && RestoreChain != null;
+
+        // Described, not completed. The options have defaults, so there is no point at which they
+        // are finished - and the target name is derived from the chosen database, so treating a
+        // non-empty one as completion folded this step away the moment a database was picked, and
+        // the hand-over from step 2 then skipped straight over it to step 4.
+        Steps.Options.Describe(DescribeOptions());
+        Steps.Options.CanConfirm = !string.IsNullOrWhiteSpace(TargetDatabaseName);
+    }
+
+    private string DescribeSource()
+    {
+        if (SelectedContainer == null) return string.Empty;
+
+        var parts = new List<string> { SelectedContainer.Name };
+        if (!string.IsNullOrWhiteSpace(SelectedDatabaseName))
+        {
+            parts.Add(string.IsNullOrWhiteSpace(SelectedServerName)
+                ? SelectedDatabaseName!
+                : $"{SelectedDatabaseName} on {SelectedServerName}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// The short form for a collapsed step: the target and the handful of options that change what
+    /// the restore DOES. Not the full sentence from the restore summary - that is a paragraph, and
+    /// this has to fit on the heading beside the step title.
+    /// </summary>
+    private string DescribeOptions()
+    {
+        if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return string.Empty;
+
+        var parts = new List<string> { $"as {TargetDatabaseName}" };
+
+        parts.Add(Options.RecoveryMode switch
+        {
+            RecoveryMode.NoRecovery => "NORECOVERY",
+            RecoveryMode.Standby => "STANDBY",
+            _ => "RECOVERY"
+        });
+
+        if (Options.WithReplace) parts.Add("REPLACE");
+        if (UseWithMove) parts.Add("MOVE");
+        if (PointInTime.Effective is DateTime stopAt) parts.Add($"STOPAT {stopAt:yyyy-MM-dd HH:mm:ss}");
+
+        return string.Join(", ", parts);
     }
 
     /// <summary>

@@ -48,12 +48,34 @@
                 </StackPanel>
             </Border>
 
+            <!-- The live summary of what a restore would do, at the top rather than buried
+                 between steps 3 and 4 (#117 item 3).
+
+                 It is not a step - it is the answer the steps are building towards, and it changes
+                 with every option above it. Sitting inside the accordion it was invisible whenever
+                 another pane was open, which is most of the time. -->
+            <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                    Background="{DynamicResource WarningPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource WarningBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
+                <StackPanel>
+                    <TextBlock Text="THIS RESTORE WILL"
+                               Style="{StaticResource LabelText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding RestoreSummaryText}"
+                               Style="{StaticResource BodyText}"
+                               TextWrapping="Wrap"
+                               LineHeight="22" />
+                </StackPanel>
+            </Border>
+
             <!-- Step 1: Container + Database -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
-                    <TextBlock Text="1. SELECT SOURCE"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,12" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Source. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Source}" />
+                    <StackPanel Visibility="{Binding Steps.Source.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -152,6 +174,7 @@
                                    Style="{StaticResource SecondaryText}"
                                    VerticalAlignment="Center" HorizontalAlignment="Right" />
                     </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -193,11 +216,11 @@
 
             <!-- Step 2: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding Timeline.HasPoints, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Point.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="2. SELECT RESTORE POINT"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,4" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Point. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Point}" />
+                    <StackPanel Visibility="{Binding Steps.Point.IsExpanded, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="Click a point on the timeline, or pick one from the list below."
                                Style="{StaticResource SecondaryText}"
                                Margin="0,0,0,12" />
@@ -214,7 +237,11 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Wraps rather than running on. The type toggles plus two 150px date
+                                 boxes have a minimum width that a narrow window cannot give them,
+                                 and a Grid does not clip its children - so the row used to spill
+                                 over the count beside it. -->
+                            <WrapPanel Grid.Column="0" VerticalAlignment="Center">
                                 <CheckBox Content="Full" IsChecked="{Binding Timeline.ShowFull}"
                                           Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
                                 <CheckBox Content="Diff" IsChecked="{Binding Timeline.ShowDiff}"
@@ -235,12 +262,13 @@
                                          Style="{StaticResource DarkTextBox}"
                                          Width="150"
                                          ToolTip="yyyy-MM-dd or yyyy-MM-dd HH:mm:ss. Leave empty for no upper bound." />
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Grid.Column="1" Text="{Binding Timeline.CountText}"
                                        Style="{StaticResource SecondaryText}"
                                        VerticalAlignment="Center"
                                        HorizontalAlignment="Right"
+                                       TextTrimming="CharacterEllipsis"
                                        Margin="12,0,12,0" />
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -527,12 +555,12 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                        <!-- Wraps inside its own column. With no wrapping it simply ran on
+                             underneath the buttons - a Grid does not clip its children. -->
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" Margin="0,0,12,0">
                             <Run Text="Selected: " Foreground="{DynamicResource SecondaryTextBrush}" />
                             <Run Text="{Binding Timeline.SelectedPoint.TimestampDisplay, Mode=OneWay}"
                                  FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
@@ -540,13 +568,17 @@
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         </TextBlock>
 
+                        <!-- One wrapping panel, so on a narrow window the buttons fold onto
+                             another line instead of over the text beside them. -->
+                        <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+
                         <!-- On-demand: one RESTORE HEADERONLY per chain member, so it is a
                              deliberate action rather than automatic on selection.
 
                              Named for the question it answers rather than for the word "validate".
                              Two of the buttons on this screen used to say "verify" and mean
                              different things, and a third said it while verifying nothing. -->
-                        <Button Grid.Column="1"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ValidateChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
@@ -582,7 +614,7 @@
                              checks the LSNs line up, this one reads each backup end to end and
                              checks it is intact. A truncated blob passes the first and fails this.
                              It is also the only one here that costs real time. -->
-                        <Button Grid.Column="2"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding VerifyChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
@@ -617,7 +649,7 @@
                         <!-- Only while something is running. RESTORE VERIFYONLY reads every byte
                              of every backup in the chain at CommandTimeout = 0, so on a large
                              chain this is the difference between waiting and killing the app. -->
-                        <Button Grid.Column="3"
+                        <Button
                                 Content="Stop"
                                 Command="{Binding CancelQueryCommand}"
                                 Style="{StaticResource SecondaryButton}"
@@ -626,7 +658,7 @@
                                 Visibility="{Binding CanCancelQuery, Converter={StaticResource BoolToVis}}"
                                 ToolTip="Stop the server query that is running." />
 
-                        <Button Grid.Column="4"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">
@@ -645,6 +677,7 @@
                                 </TextBlock>
                             </Button.Content>
                         </Button>
+                        </WrapPanel>
                     </Grid>
 
                     <!-- The pair above are the genuinely subtle one: both act on the whole chain
@@ -835,16 +868,32 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+                    </StackPanel>
+                        <!-- Finishing this step is something the user says (#117 item 3). This is the moment the database will be restored to. Confirm to continue. -->
+                        <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
+                                Padding="12,10" Margin="0,16,0,0"
+                                Visibility="{Binding Steps.Point.IsAwaitingConfirmation, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,12,0" TextWrapping="Wrap"
+                                           Text="This is the moment the database will be restored to. Confirm to continue." />
+                                <Button Content="Confirm restore point"
+                                        Command="{Binding Steps.Point.ConfirmCommand}"
+                                        IsEnabled="{Binding Steps.Point.CanConfirm}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
                 </StackPanel>
             </Border>
 
             <!-- Step 3: Restore Options -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Options.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="3. RESTORE OPTIONS"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,16" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Options. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Options}" />
+                    <StackPanel Visibility="{Binding Steps.Options.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -1218,33 +1267,34 @@
                             </Border>
                         </StackPanel>
                     </Grid>
-                </StackPanel>
-            </Border>
-
-            <!-- Restore Summary -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
-                <StackPanel>
-                    <TextBlock Text="RESTORE SUMMARY"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,8" />
-                    <Border Background="{DynamicResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="12,10">
-                        <TextBlock Text="{Binding RestoreSummaryText}"
-                                   Style="{StaticResource BodyText}"
-                                   TextWrapping="Wrap"
-                                   LineHeight="22" />
-                    </Border>
+                        <!-- Finishing this step is something the user says (#117 item 3). Happy with these? Confirm to move on to generating the script. -->
+                        <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
+                                Padding="12,10" Margin="0,16,0,0"
+                                Visibility="{Binding Steps.Options.IsAwaitingConfirmation, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,12,0" TextWrapping="Wrap"
+                                           Text="Happy with these? Confirm to move on to generating the script." />
+                                <Button Content="Confirm options"
+                                        Command="{Binding Steps.Options.ConfirmCommand}"
+                                        IsEnabled="{Binding Steps.Options.CanConfirm}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
             <!-- Step 4: Generate + Execute -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Execute.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="4. GENERATE &amp; EXECUTE"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,16" />
+                    <!-- Collapsible like the rest (#117 item 3). It is the tallest pane on the screen -
+                         script, console, recovery actions - so leaving it permanently open undid most of
+                         what collapsing the others bought. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Execute}" />
+                    <StackPanel Visibility="{Binding Steps.Execute.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Button Content="Generate Script"
@@ -1524,6 +1574,7 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -57,14 +57,19 @@ public class RestoreTimelineViewModelTests
     // ── loading ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void LoadingShowsEveryPointAndSelectsTheMostRecent()
+    public void LoadingShowsEveryPointAndSELECTSNOTHING()
     {
         var timeline = Loaded();
 
         Assert.True(timeline.HasPoints);
         Assert.True(timeline.HasVisiblePoints);
         Assert.Equal(4, timeline.Points.Count);
-        Assert.Equal(T0.AddHours(3), timeline.SelectedPoint!.Timestamp);
+
+        // It used to land on the most recent point, which looks helpful and is not: it is the app
+        // deciding which moment to restore to, on the screen whose entire purpose is choosing that
+        // moment. Everything downstream - the chain, the script, the summary - then described a
+        // restore nobody had asked for.
+        Assert.Null(timeline.SelectedPoint);
     }
 
     [Fact]
@@ -91,7 +96,7 @@ public class RestoreTimelineViewModelTests
     public void LoadingADatabaseWithNoPointsDropsThePreviousSelection()
     {
         var timeline = Loaded();
-        Assert.NotNull(timeline.SelectedPoint);
+        timeline.SelectedPoint = timeline.Points[^1];   // as a user would, since nothing is preselected
 
         timeline.Load([]);
 
