@@ -262,7 +262,10 @@ public class BlobStorageService : IBlobStorageService
             blob.Name,
             blob.Properties.ContentLength ?? 0,
             blob.Properties.LastModified ?? DateTimeOffset.MinValue,
-            files);
+            files,
+            // Azure's identity for the blob's content. Carried through so an audit result can be
+            // cached against it and only re-read when the blob itself changes (#130).
+            blob.Properties.ETag?.ToString());
 
     /// <summary>
     /// Everything this app infers about a backup from where it sits in the container and what it is
@@ -277,7 +280,8 @@ public class BlobStorageService : IBlobStorageService
         string blobName,
         long sizeBytes,
         DateTimeOffset lastModified,
-        List<BackupFileInfo> files)
+        List<BackupFileInfo> files,
+        string? etag = null)
     {
         {
             var blobUrl = $"{config.ContainerUrl.TrimEnd('/')}/{blobName}";
@@ -288,7 +292,8 @@ public class BlobStorageService : IBlobStorageService
                 BlobUrl = blobUrl,
                 Type = BackupType.Unknown,
                 SizeBytes = sizeBytes,
-                LastModified = lastModified
+                LastModified = lastModified,
+                ETag = etag
             };
 
             var pathParts = file.BlobName.Split('/', StringSplitOptions.RemoveEmptyEntries);

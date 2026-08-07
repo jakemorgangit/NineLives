@@ -117,10 +117,44 @@ public static class BackupTime
             : value.ToString("yyyy-MM-dd HH:mm:ss");
 }
 
+/// <summary>Whether a backup has been checked against its own header (#130).</summary>
+public enum BackupAuditState
+{
+    /// <summary>Nobody has read this backup's header, so what it is remains an inference.</summary>
+    Unaudited,
+
+    /// <summary>The header agreed with what the path and filename claimed.</summary>
+    Passed,
+
+    /// <summary>The header disagreed, or could not be read at all.</summary>
+    Failed
+}
+
 public class BackupFileInfo
 {
     public string BlobName { get; set; } = string.Empty;
     public string BlobUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Azure's identity for this blob's CONTENT, when it gave one.
+    ///
+    /// The key an audit result is cached against. A backup header never changes, so the only reason
+    /// to read one twice is that the blob is a different blob - and the ETag is exactly what Azure
+    /// changes when that happens (#130).
+    /// </summary>
+    public string? ETag { get; set; }
+
+    /// <summary>
+    /// Whether this backup has been checked against its own header.
+    ///
+    /// Worth showing on the file rather than only in a findings list: a chain built from inference
+    /// and a chain confirmed by the backups themselves look identical otherwise, and the difference
+    /// is exactly what somebody wants to know before restoring from it.
+    /// </summary>
+    public BackupAuditState AuditState { get; set; } = BackupAuditState.Unaudited;
+
+    public bool AuditPassed => AuditState == BackupAuditState.Passed;
+    public bool AuditFailed => AuditState == BackupAuditState.Failed;
 
     /// <summary>
     /// Where this backup lives on disk, when it was never in blob storage at all (#149).

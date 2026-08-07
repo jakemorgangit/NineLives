@@ -30,6 +30,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
     private readonly IBlobStorageService _blob;
     private readonly ISqlServerService _sql;
     private readonly OperationLog _log;
+    private readonly IBackupAuditStore _auditStore;
     private readonly OperationCancellation _loadCancellation = new();
 
     /// <param name="log">
@@ -37,11 +38,16 @@ public partial class BackupInventoryViewModel : ViewModelBase
     /// put "[headeronly] fake: 1 statement(s)" into a real user's log file - a test run writing
     /// into the profile of whoever ran it, which is the same class of side effect #41 was about.
     /// </param>
-    public BackupInventoryViewModel(IBlobStorageService blob, ISqlServerService sql, OperationLog? log = null)
+    public BackupInventoryViewModel(
+        IBlobStorageService blob,
+        ISqlServerService sql,
+        OperationLog? log = null,
+        IBackupAuditStore? auditStore = null)
     {
         _blob = blob;
         _sql = sql;
         _log = log ?? App.Log;
+        _auditStore = auditStore ?? new BackupAuditStore();
     }
 
     /// <summary>Raised when the working set changes, so the chain and timeline can be rebuilt.</summary>
@@ -132,6 +138,117 @@ public partial class BackupInventoryViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _identifyProgressText = string.Empty;
+
+    // ── auditing a database against its own headers (#130) ──────────────────────
+
+    /// <summary>What the audit disagreed with, newest run only.</summary>
+    [ObservableProperty]
+    private ObservableCollection<BackupAuditFinding> _auditFindings = [];
+
+    [ObservableProperty]
+    private bool _isAuditing;
+
+    /// <summary>How far through, as a percentage, for the bar.</summary>
+    [ObservableProperty]
+    private double _auditProgress;
+
+    [ObservableProperty]
+    private string _auditProgressText = string.Empty;
+
+    /// <summary>What the last audit concluded, or empty before one has run.</summary>
+    [ObservableProperty]
+    private string _auditSummary = string.Empty;
+
+    public bool HasAuditFindings => AuditFindings.Count > 0;
+    public bool HasAuditSummary => AuditSummary.Length > 0;
+
+    partial void OnAuditFindingsChanged(ObservableCollection<BackupAuditFinding> value)
+        => OnPropertyChanged(nameof(HasAuditFindings));
+
+    partial void OnAuditSummaryChanged(string value) => OnPropertyChanged(nameof(HasAuditSummary));
+
+    /// <summary>
+    /// What auditing the current selection would cost, said BEFORE it is started.
+    ///
+    /// A three-minute operation somebody did not expect reads as a hang. The number is not a guess:
+    /// a header read was measured at about 1.7 seconds against a real container, and what is already
+    /// cached is subtracted - so re-running after a fix says so rather than quoting the full price
+    /// again.
+    /// </summary>
+    public string AuditEstimate
+    {
+        get
+        {
+            if (WorkingSet.Count == 0) return string.Empty;
+
+            var toRead = BackupAuditor.NotYetAudited(WorkingSet, _auditStore.Load()).Count;
+            return BackupAuditor.DescribeEstimate(toRead);
+        }
+    }
+
+    public bool CanAudit => WorkingSet.Count > 0 && !IsAuditing;
+
+    /// <summary>
+    /// Reads every set in the current selection and reports where the headers disagree.
+    ///
+    /// Findings are reported, not applied. A database full of them almost always means the PATH
+    /// PATTERN is wrong, and correcting each symptom silently would hide the one thing worth
+    /// knowing.
+    /// </summary>
+    public async Task AuditAsync(ServerConnection server)
+    {
+        if (WorkingSet.Count == 0) return;
+
+        var sets = WorkingSet.ToList();
+        var ct = _loadCancellation.Begin();
+
+        IsAuditing = true;
+        AuditProgress = 0;
+        AuditFindings = [];
+        AuditSummary = string.Empty;
+        ClearStatus();
+        RaiseCancelStateChanged();
+
+        try
+        {
+            var auditor = new BackupAuditor(_sql, _auditStore);
+            var progress = new Progress<int>(n =>
+            {
+                AuditProgress = sets.Count == 0 ? 0 : 100.0 * n / sets.Count;
+                AuditProgressText = $"Checked {n:N0} of {sets.Count:N0} backup set(s)...";
+            });
+
+            var findings = await auditor.AuditAsync(
+                server, sets, progress, t => _log.Info($"[audit] {t}"), ct);
+
+            AuditFindings = new ObservableCollection<BackupAuditFinding>(findings);
+
+            AuditSummary = findings.Count == 0
+                ? $"All {sets.Count:N0} backup set(s) match their headers."
+                : $"{findings.Count:N0} of {sets.Count:N0} backup set(s) do not match their headers.";
+
+            SetStatus(AuditSummary);
+            _log.Info($"[audit] {AuditSummary}");
+        }
+        catch (OperationCanceledException)
+        {
+            // What it got through is cached, so stopping costs nothing already paid for.
+            SetStatus("Audit stopped. What it had already checked has been kept.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"The audit could not finish: {ex.Message}");
+        }
+        finally
+        {
+            _loadCancellation.End();
+            IsAuditing = false;
+            AuditProgressText = string.Empty;
+            RaiseCancelStateChanged();
+            OnPropertyChanged(nameof(AuditEstimate));
+            OnPropertyChanged(nameof(CanAudit));
+        }
+    }
 
     private void RefreshUnclassifiedCount()
         => UnclassifiedCount = _allBackups.Count(BackupHeaderIdentifier.NeedsIdentifying);
@@ -256,6 +373,14 @@ public partial class BackupInventoryViewModel : ViewModelBase
             sets = sets.Where(s => s.MatchesServer(SelectedServerName)).ToList();
 
         WorkingSet = sets;
+
+        // A different selection means a different estimate, and findings that belonged to the last
+        // one. Leaving either up attaches an answer to a question nobody asked.
+        AuditFindings = [];
+        AuditSummary = string.Empty;
+        OnPropertyChanged(nameof(AuditEstimate));
+        OnPropertyChanged(nameof(CanAudit));
+
         FullCount = sets.Count(s => s.Type == BackupType.Full);
         DiffCount = sets.Count(s => s.Type == BackupType.Differential);
         LogCount = sets.Count(s => s.Type == BackupType.TransactionLog);

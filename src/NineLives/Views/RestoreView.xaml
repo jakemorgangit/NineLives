@@ -322,6 +322,102 @@
                 </StackPanel>
             </Border>
 
+            <!-- Audit this database against its own headers (#130).
+
+                 Belt and braces rather than a fix. Path-and-filename inference is right most of the
+                 time and wrong in ways that stay invisible until a restore is needed, so this is
+                 the button for when a set looks fragmented or a container is new and nobody has
+                 confirmed the pattern yet.
+
+                 The estimate goes in FRONT of it because a three-minute operation nobody expected
+                 reads as a hang. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding Inventory.BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="AUDIT THESE BACKUPS" Style="{StaticResource LabelText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,6,0,0"
+                               Text="Reads each backup's own header and checks it against what the path and filename claimed. The header is what a RESTORE reads, so it settles the question - a log filed as a full, or a backup filed under the wrong database, both look perfectly normal until the restore fails." />
+
+                    <TextBlock Text="{Binding Inventory.AuditEstimate}"
+                               Style="{StaticResource BodyText}"
+                               TextWrapping="Wrap"
+                               Margin="0,10,0,0"
+                               Visibility="{Binding Inventory.AuditEstimate, Converter={StaticResource NullToVis}}" />
+
+                    <TextBlock Text="{Binding AuditBlockedReason}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,0"
+                               Visibility="{Binding AuditBlockedReason, Converter={StaticResource NullToVis}}" />
+
+                    <WrapPanel Margin="0,10,0,0">
+                        <Button Content="Audit this database"
+                                Command="{Binding AuditDatabaseCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0" />
+                        <Button Content="Stop"
+                                Command="{Binding CancelLoadCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0"
+                                Visibility="{Binding Inventory.IsAuditing, Converter={StaticResource BoolToVis}}" />
+                    </WrapPanel>
+
+                    <StackPanel Margin="0,10,0,0"
+                                Visibility="{Binding Inventory.IsAuditing, Converter={StaticResource BoolToVis}}">
+                        <ProgressBar Value="{Binding Inventory.AuditProgress}"
+                                     Maximum="100"
+                                     Height="6"
+                                     Style="{StaticResource DarkProgressBar}" />
+                        <TextBlock Text="{Binding Inventory.AuditProgressText}"
+                                   Style="{StaticResource SecondaryText}"
+                                   Margin="0,6,0,0" />
+                    </StackPanel>
+
+                    <!-- Everything agreed: worth saying, because the whole value of the audit is
+                         being able to trust a chain that was assembled by inference. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,10,0,0"
+                            BorderThickness="1"
+                            Visibility="{Binding Inventory.HasAuditSummary, Converter={StaticResource BoolToVis}}">
+                        <!-- Green only when everything agreed. A summary that says one set does NOT
+                             match, in a success-coloured box, is one people read as a pass. -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource SuccessPanelBackgroundBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource SuccessPanelBorderBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Inventory.HasAuditFindings}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding Inventory.AuditSummary}"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource BodyText}" />
+                    </Border>
+
+                    <!-- Reported, not corrected. A database full of these almost always means the
+                         PATH PATTERN is wrong, and fixing each symptom quietly would hide it. -->
+                    <ItemsControl ItemsSource="{Binding Inventory.AuditFindings}" Margin="0,10,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,6"
+                                        Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                        BorderThickness="1">
+                                    <TextBlock Text="{Binding Description}"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource BodyText}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
             <!-- Findings about the discovered backups rather than the selected chain: things that
                  exist in the container but can never be offered as a restore point (#46).
 
@@ -996,10 +1092,37 @@
                                                 <TextBlock Text="{Binding TypeDisplay}" Foreground="{StaticResource BadgeTextBrush}"
                                                            FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
                                             </Border>
-                                            <TextBlock Grid.Column="1" Text="{Binding BlobName}"
-                                                       Style="{StaticResource BodyText}" VerticalAlignment="Center"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       ToolTip="{Binding BlobUrl}" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <TextBlock Text="{Binding BlobName}"
+                                                           Style="{StaticResource BodyText}" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding BlobUrl}" />
+
+                                                <!-- Checked against its own header (#130). A chain
+                                                     built from inference and one confirmed by the
+                                                     backups themselves look identical otherwise,
+                                                     and that difference is exactly what somebody
+                                                     wants to know before restoring from it. -->
+                                                <Border CornerRadius="8" Padding="7,1" Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource SuccessBrush}"
+                                                        Visibility="{Binding AuditPassed, Converter={StaticResource BoolToVis}}"
+                                                        ToolTip="SQL Server read this backup's header and it matches what the path says it is.">
+                                                    <TextBlock Text="&#x2713; audited"
+                                                               Foreground="{StaticResource BadgeTextBrush}"
+                                                               FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+
+                                                <Border CornerRadius="8" Padding="7,1" Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource ErrorBrush}"
+                                                        Visibility="{Binding AuditFailed, Converter={StaticResource BoolToVis}}"
+                                                        ToolTip="This backup's header does not match what the path says it is - see the audit findings above.">
+                                                    <TextBlock Text="&#x2717; mismatch"
+                                                               Foreground="{StaticResource BadgeTextBrush}"
+                                                               FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
                                             <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}"
                                                        Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="3"

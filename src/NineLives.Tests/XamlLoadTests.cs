@@ -832,6 +832,112 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("HistoryView (empty)", () =>
             new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
 
+    // ── auditing against headers (#130) ─────────────────────────────────────────
+
+    /// <summary>
+    /// A finding says what it found, on screen.
+    ///
+    /// Found by rendering it: the text was bound to a METHOD, and a binding cannot call one. WPF
+    /// rendered an empty amber box, threw nothing, and traced nothing - a finding that reported
+    /// nothing at all, on the panel whose entire job is reporting.
+    /// </summary>
+    [Fact]
+    public void AnAuditFindingSaysWhatItFound()
+    {
+        wpf.Invoke(() =>
+        {
+            // The audit panel only exists once something has been loaded to audit.
+            var vm = LoadedRestoreViewModel();
+            vm.Inventory.AuditSummary = "1 of 3 backup set(s) do not match their headers.";
+            vm.Inventory.AuditFindings =
+            [
+                new BackupAuditFinding("s1", "MyDb_LOG_20260802.trn",
+                    BackupAuditVerdict.WrongType, "Log", "Differential")
+            ];
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("MyDb_LOG_20260802.trn", StringComparison.Ordinal)
+                                     && t.Contains("Differential", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// A backup checked against its own header is marked as such, and one that disagreed is marked
+    /// differently.
+    ///
+    /// The point of the pill: a chain built from inference and one confirmed by the backups
+    /// themselves look identical otherwise, and that difference is what somebody wants to know
+    /// before restoring from it.
+    /// </summary>
+    [Fact]
+    public void AnAuditedFileCarriesAPillAndAMismatchedOneCarriesADifferentPill()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+
+            // The chain list lives inside step 2, which is collapsed by default - and a collapsed
+            // pane is not on screen, so nothing inside it would be found.
+            vm.Steps.Point.IsVisible = true;
+            vm.Steps.Point.IsExpanded = true;
+            vm.ShowChainDetails = true;
+            vm.ChainFiles =
+            [
+                new BackupFileInfo { BlobName = "passed.bak", Type = BackupType.Full, AuditState = BackupAuditState.Passed },
+                new BackupFileInfo { BlobName = "failed.trn", Type = BackupType.TransactionLog, AuditState = BackupAuditState.Failed },
+                new BackupFileInfo { BlobName = "unchecked.trn", Type = BackupType.TransactionLog }
+            ];
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("✓ audited", shown);
+            Assert.Contains("✗ mismatch", shown);
+
+            // Exactly one of each: an unaudited file carries neither, because "not checked" is not
+            // a claim about the backup.
+            Assert.Single(shown, t => t == "✓ audited");
+            Assert.Single(shown, t => t == "✗ mismatch");
+        });
+    }
+
+    /// <summary>A Restore screen with one backup loaded, so the panels that need one are on screen.</summary>
+    private RestoreViewModel LoadedRestoreViewModel()
+    {
+        var store = new FakeCredentialStore();
+        store.Config.BlobContainers.Add(new BlobContainerConfig
+        { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
+
+        var blob = new FakeBlobStorageService
+        {
+            Files =
+            [
+                new BackupFileInfo
+                {
+                    BlobName = "FULL/SRV01/MyDb/MyDb_FULL_20260801_220000.bak",
+                    BlobUrl = "https://acct.blob.core.windows.net/backups/FULL/SRV01/MyDb/MyDb_FULL_20260801_220000.bak",
+                    Type = BackupType.Full,
+                    InferredDatabaseName = "MyDb",
+                    InferredServerName = "SRV01"
+                }
+            ]
+        };
+
+        var vm = new RestoreViewModel(
+            blob, new FakeSqlServerService(), new BackupChainBuilder(),
+            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore());
+
+        vm.RefreshContainers();
+        vm.LoadBackupsCommand.Execute(null);
+        return vm;
+    }
+
     // ── files the filename could not place (#130) ───────────────────────────────
 
     /// <summary>
