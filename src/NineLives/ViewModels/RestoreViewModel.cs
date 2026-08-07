@@ -811,6 +811,52 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanIdentifyUnclassified));
         OnPropertyChanged(nameof(IdentifyBlockedReason));
         IdentifyUnclassifiedCommand.NotifyCanExecuteChanged();
+
+        OnPropertyChanged(nameof(CanAuditDatabase));
+        OnPropertyChanged(nameof(AuditBlockedReason));
+        AuditDatabaseCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Checks every backup of the selected database against its own header (#130).
+    ///
+    /// Belt and braces rather than a fix: inference is right most of the time, and the times it is
+    /// not are invisible until a restore is needed. This is the button for when a set looks
+    /// fragmented, or a container is new and nobody has confirmed the path pattern yet.
+    /// </summary>
+    public bool CanAuditDatabase => Inventory.CanAudit && IsConnectedToServer;
+
+    public string AuditBlockedReason =>
+        Inventory.WorkingSet.Count == 0 ? string.Empty
+        : IsConnectedToServer ? string.Empty
+        : "Connect to a SQL Server instance to audit these backups - it is the server that reads the headers, not this app.";
+
+    [RelayCommand(CanExecute = nameof(CanAuditDatabase))]
+    private async Task AuditDatabaseAsync()
+    {
+        var server = ConnectedServer;
+        if (server == null) return;
+
+        await Inventory.AuditAsync(server);
+
+        // The audit marks the files it checked, and the chain on screen holds those same objects -
+        // but a list does not re-render because a property nobody is watching changed underneath it.
+        RefreshChainFiles();
+        RefreshIdentifyState();
+    }
+
+    /// <summary>
+    /// Re-publishes the chain's files so their audit pills appear.
+    ///
+    /// BackupFileInfo is a plain model with no change notification - deliberately, it is a
+    /// serialised listing rather than a viewmodel - so the collection is replaced rather than the
+    /// items being expected to announce themselves.
+    /// </summary>
+    private void RefreshChainFiles()
+    {
+        if (RestoreChain == null) return;
+
+        ChainFiles = new ObservableCollection<BackupFileInfo>(RestoreChain.AllFiles);
     }
 
     [RelayCommand]
