@@ -34,6 +34,24 @@ public interface ISqlServerService
     Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default);
 
+    /// <summary>
+    /// Reads several backup headers over ONE connection (#130).
+    ///
+    /// Measured on a real container: three HEADERONLY statements over nine striped files took
+    /// 17.4 seconds - about 5.8 seconds each, every one of them opening its own connection first.
+    /// Anything that reads more than one header is therefore paying the connect cost per read, and
+    /// that is the part worth removing before deciding what an audit over a whole database costs.
+    ///
+    /// Each request is one statement covering one set's files, because a stripe on its own is not a
+    /// readable backup. Results come back in request order, null where the header could not be read.
+    /// </summary>
+    Task<List<BackupFileInfo?>> RestoreHeaderOnlyBatchAsync(
+        ServerConnection server,
+        IReadOnlyList<IReadOnlyList<string>> requests,
+        IProgress<int>? progress = null,
+        Action<string>? timing = null,
+        CancellationToken ct = default);
+
     Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
         ServerConnection server,
         IReadOnlyList<string> blobUrls,

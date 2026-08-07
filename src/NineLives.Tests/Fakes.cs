@@ -220,6 +220,34 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.FromResult(Header == null ? null : Clone(Header));
     }
 
+    /// <summary>Every batch of header requests, so a test can prove they went over ONE connection.</summary>
+    public List<IReadOnlyList<IReadOnlyList<string>>> HeaderBatches { get; } = [];
+
+    public Task<List<BackupFileInfo?>> RestoreHeaderOnlyBatchAsync(
+        ServerConnection server,
+        IReadOnlyList<IReadOnlyList<string>> requests,
+        IProgress<int>? progress = null,
+        Action<string>? timing = null,
+        CancellationToken ct = default)
+    {
+        HeaderBatches.Add(requests);
+
+        var results = new List<BackupFileInfo?>();
+        foreach (var urls in requests)
+        {
+            HeaderReads.Add(urls);
+
+            var unreadable = HeaderThrowsForUrlContaining != null &&
+                urls.Any(u => u.Contains(HeaderThrowsForUrlContaining, StringComparison.Ordinal));
+
+            results.Add(unreadable || Header == null ? null : Clone(Header));
+            progress?.Report(results.Count);
+        }
+
+        timing?.Invoke($"fake: {requests.Count} statement(s)");
+        return Task.FromResult(results);
+    }
+
     private static BackupFileInfo Clone(BackupFileInfo source) => new()
     {
         DatabaseName = source.DatabaseName,
