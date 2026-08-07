@@ -237,7 +237,11 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Wraps rather than running on. The type toggles plus two 150px date
+                                 boxes have a minimum width that a narrow window cannot give them,
+                                 and a Grid does not clip its children - so the row used to spill
+                                 over the count beside it. -->
+                            <WrapPanel Grid.Column="0" VerticalAlignment="Center">
                                 <CheckBox Content="Full" IsChecked="{Binding Timeline.ShowFull}"
                                           Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
                                 <CheckBox Content="Diff" IsChecked="{Binding Timeline.ShowDiff}"
@@ -258,12 +262,13 @@
                                          Style="{StaticResource DarkTextBox}"
                                          Width="150"
                                          ToolTip="yyyy-MM-dd or yyyy-MM-dd HH:mm:ss. Leave empty for no upper bound." />
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Grid.Column="1" Text="{Binding Timeline.CountText}"
                                        Style="{StaticResource SecondaryText}"
                                        VerticalAlignment="Center"
                                        HorizontalAlignment="Right"
+                                       TextTrimming="CharacterEllipsis"
                                        Margin="12,0,12,0" />
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -550,12 +555,12 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                        <!-- Wraps inside its own column. With no wrapping it simply ran on
+                             underneath the buttons - a Grid does not clip its children. -->
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" Margin="0,0,12,0">
                             <Run Text="Selected: " Foreground="{DynamicResource SecondaryTextBrush}" />
                             <Run Text="{Binding Timeline.SelectedPoint.TimestampDisplay, Mode=OneWay}"
                                  FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
@@ -563,13 +568,17 @@
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         </TextBlock>
 
+                        <!-- One wrapping panel, so on a narrow window the buttons fold onto
+                             another line instead of over the text beside them. -->
+                        <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+
                         <!-- On-demand: one RESTORE HEADERONLY per chain member, so it is a
                              deliberate action rather than automatic on selection.
 
                              Named for the question it answers rather than for the word "validate".
                              Two of the buttons on this screen used to say "verify" and mean
                              different things, and a third said it while verifying nothing. -->
-                        <Button Grid.Column="1"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ValidateChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
@@ -605,7 +614,7 @@
                              checks the LSNs line up, this one reads each backup end to end and
                              checks it is intact. A truncated blob passes the first and fails this.
                              It is also the only one here that costs real time. -->
-                        <Button Grid.Column="2"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding VerifyChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
@@ -640,7 +649,7 @@
                         <!-- Only while something is running. RESTORE VERIFYONLY reads every byte
                              of every backup in the chain at CommandTimeout = 0, so on a large
                              chain this is the difference between waiting and killing the app. -->
-                        <Button Grid.Column="3"
+                        <Button
                                 Content="Stop"
                                 Command="{Binding CancelQueryCommand}"
                                 Style="{StaticResource SecondaryButton}"
@@ -649,7 +658,7 @@
                                 Visibility="{Binding CanCancelQuery, Converter={StaticResource BoolToVis}}"
                                 ToolTip="Stop the server query that is running." />
 
-                        <Button Grid.Column="4"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">
@@ -668,6 +677,7 @@
                                 </TextBlock>
                             </Button.Content>
                         </Button>
+                        </WrapPanel>
                     </Grid>
 
                     <!-- The pair above are the genuinely subtle one: both act on the whole chain

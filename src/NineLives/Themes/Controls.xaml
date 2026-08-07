@@ -988,6 +988,12 @@
                                     Padding="6,2"
                                     Cursor="Hand"
                                     FontSize="12" />
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
     <!-- A collapsible step heading on the Restore screen (#117 item 3).
 
