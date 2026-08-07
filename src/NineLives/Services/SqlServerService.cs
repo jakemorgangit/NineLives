@@ -755,7 +755,7 @@ public class SqlServerService : ISqlServerService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task ExecuteRestoreWithProgressAsync(
+    public async Task ExecuteWithProgressAsync(
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
     {
@@ -797,7 +797,7 @@ public class SqlServerService : ISqlServerService
                 // propagates as the failure it is.
                 messageCallback?.Invoke(
                     $"Cancelled during statement {i + 1} of {executable.Count}: {Summarize(statement)}");
-                throw new OperationCanceledException("The restore was cancelled.", ct);
+                throw new OperationCanceledException("Cancelled.", ct);
             }
             catch (SqlException)
             {

@@ -45,7 +45,13 @@ public interface ISqlServerService
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default);
 
-    Task ExecuteRestoreWithProgressAsync(
+    /// <summary>
+    /// Runs a script statement by statement, reporting SQL Server's own progress as it goes.
+    ///
+    /// Not restore-specific despite where it started: a BACKUP reports STATS through exactly the
+    /// same InfoMessage channel, so both halves of the orchestrator share one execution path (#165).
+    /// </summary>
+    Task ExecuteWithProgressAsync(
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default);
 

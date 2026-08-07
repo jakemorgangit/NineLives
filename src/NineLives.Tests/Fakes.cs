@@ -174,8 +174,11 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Task<string> GetServerVersionAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult("Microsoft SQL Server 2022");
 
+    /// <summary>What the fake instance says it holds.</summary>
+    public List<string> DatabaseList { get; set; } = [];
+
     public Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(new List<string>());
+        => Task.FromResult(DatabaseList);
 
     public Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult((@"D:\Data", @"D:\Logs"));
@@ -228,7 +231,7 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.CompletedTask;
     }
 
-    public Task ExecuteRestoreWithProgressAsync(
+    public Task ExecuteWithProgressAsync(
         ServerConnection server, string sql, Action<string>? messageCallback = null, CancellationToken ct = default)
     {
         ExecutedAgainst.Add(server);

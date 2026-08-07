@@ -832,6 +832,69 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("HistoryView (empty)", () =>
             new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
 
+    // ── the Backup screen (#165) ────────────────────────────────────────────────
+
+    [Fact]
+    public void BackupViewLoads()
+        => Check("BackupView", () => new BackupView { DataContext = NewBackupViewModel() });
+
+    [Fact]
+    public void TheBackupViewLoadsWithASharedPathChosen()
+        => Check("BackupView (shared path)", () =>
+        {
+            var vm = NewBackupViewModel();
+            vm.Medium = BackupMedium.SharedPath;
+            return new BackupView { DataContext = vm };
+        });
+
+    /// <summary>
+    /// Turning COPY_ONLY off puts what it costs on screen, in the terms it costs it in.
+    ///
+    /// This is the one thing on the screen that changes the SOURCE, and it is the one thing nothing
+    /// about pressing the button would otherwise say. A collapsed banner is not a warning, so this
+    /// asserts on what is drawn.
+    /// </summary>
+    [Fact]
+    public void TurningCopyOnlyOffWarnsAboutTheSourceOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewBackupViewModel();
+            vm.CopyOnly = false;
+
+            var view = new BackupView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("THIS WILL CHANGE THE SOURCE DATABASE", shown);
+            Assert.Contains(shown, t => t.Contains("differential base", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void ACopyOnlyBackupSaysNothingAboutChangingTheSource()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new BackupView { DataContext = NewBackupViewModel() };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain("THIS WILL CHANGE THE SOURCE DATABASE", shown);
+        });
+    }
+
+    private static BackupViewModel NewBackupViewModel()
+    {
+        var store = Store();
+        return new BackupViewModel(
+            store,
+            new SqlServerService(store),
+            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))));
+    }
+
     // ── the Restore screen under a shared path (#149, #165) ─────────────────
 
     /// <summary>

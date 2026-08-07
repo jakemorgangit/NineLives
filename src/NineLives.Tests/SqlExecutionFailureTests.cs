@@ -65,7 +65,7 @@ public class SqlExecutionFailureTests
         var messages = new List<string>();
 
         await Assert.ThrowsAsync<SqlException>(() =>
-            Service().ExecuteRestoreWithProgressAsync(
+            Service().ExecuteWithProgressAsync(
                 TestServer(), FailingBatch, messages.Add));
     }
 
@@ -75,7 +75,7 @@ public class SqlExecutionFailureTests
         var messages = new List<string>();
 
         var ex = await Assert.ThrowsAsync<SqlException>(() =>
-            Service().ExecuteRestoreWithProgressAsync(
+            Service().ExecuteWithProgressAsync(
                 TestServer(), FailingRestore, messages.Add));
 
         // 3201 = cannot open backup device. This is the error an expired SAS produces.
@@ -99,7 +99,7 @@ public class SqlExecutionFailureTests
         ]);
 
         await Assert.ThrowsAsync<SqlException>(() =>
-            Service().ExecuteRestoreWithProgressAsync(TestServer(), script, messages.Add));
+            Service().ExecuteWithProgressAsync(TestServer(), script, messages.Add));
 
         Assert.Contains(messages, m => m.Contains("nine-lives-statement-1"));
         Assert.DoesNotContain(messages, m => m.Contains("should-not-run"));
@@ -112,7 +112,7 @@ public class SqlExecutionFailureTests
         // is what RESTORE's "X percent processed" and PRINT are - must still arrive after the fix.
         var messages = new List<string>();
 
-        await Service().ExecuteRestoreWithProgressAsync(
+        await Service().ExecuteWithProgressAsync(
             TestServer(), "PRINT 'nine-lives-progress-message';", messages.Add);
 
         Assert.Contains(messages, m => m.Contains("nine-lives-progress-message"));
@@ -125,7 +125,7 @@ public class SqlExecutionFailureTests
         // otherwise ordinary restore chatter would abort a healthy restore.
         var messages = new List<string>();
 
-        await Service().ExecuteRestoreWithProgressAsync(
+        await Service().ExecuteWithProgressAsync(
             TestServer(), "RAISERROR('nine-lives-informational', 10, 1);", messages.Add);
 
         Assert.Contains(messages, m => m.Contains("nine-lives-informational"));
