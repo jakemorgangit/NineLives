@@ -87,11 +87,11 @@ public class RestoreViewModelTests
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        Assert.True(vm.BackupsLoaded);
-        Assert.NotEmpty(vm.DiscoveredDatabases);
+        Assert.True(vm.Inventory.BackupsLoaded);
+        Assert.NotEmpty(vm.Inventory.DiscoveredDatabases);
 
-        Assert.Null(vm.SelectedServerName);
-        Assert.Null(vm.SelectedDatabaseName);
+        Assert.Null(vm.Inventory.SelectedServerName);
+        Assert.Null(vm.Inventory.SelectedDatabaseName);
         Assert.Null(vm.Timeline.SelectedPoint);
 
         // And NOTHING is drawn. This is the part that bit hardest: with no database chosen the
@@ -100,7 +100,7 @@ public class RestoreViewModelTests
         // of them meaningful, because a restore chain only exists within one database.
         Assert.False(vm.Timeline.HasPoints);
         Assert.Empty(vm.Timeline.Points);
-        Assert.Equal(0, vm.SetCount);
+        Assert.Equal(0, vm.Inventory.SetCount);
 
         // And nothing downstream has been built from a choice nobody made.
         Assert.Null(vm.RestoreChain);
@@ -120,14 +120,14 @@ public class RestoreViewModelTests
         vm.SelectedContainer = Container();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
-        vm.SelectedDatabaseName = "MyDb";
+        vm.Inventory.SelectedDatabaseName = "MyDb";
         Assert.True(vm.Timeline.HasPoints);
 
-        vm.SelectedDatabaseName = null;
+        vm.Inventory.SelectedDatabaseName = null;
 
         Assert.False(vm.Timeline.HasPoints);
         Assert.Empty(vm.Timeline.Points);
-        Assert.Equal(0, vm.SetCount);
+        Assert.Equal(0, vm.Inventory.SetCount);
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public class RestoreViewModelTests
         // Nothing is preselected any more, so the test makes the choices a user would.
         RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
-        Assert.True(vm.BackupsLoaded);
+        Assert.True(vm.Inventory.BackupsLoaded);
         Assert.True(vm.Timeline.HasPoints);
 
         // A full plus three logs: the full itself, then one point per log.
@@ -245,20 +245,20 @@ public class RestoreViewModelTests
         RestoreSetup.ChooseADatabaseAndAPoint(vm);
         vm.TargetDatabaseName = "MyDb_Restored";
 
-        Assert.True(vm.BackupsLoaded);
+        Assert.True(vm.Inventory.BackupsLoaded);
         Assert.NotEmpty(vm.Timeline.Points);
         Assert.NotEmpty(vm.GeneratedScript);
 
         vm.SelectedContainer = Container();   // a different container
 
-        Assert.False(vm.BackupsLoaded);
+        Assert.False(vm.Inventory.BackupsLoaded);
         Assert.Empty(vm.Timeline.Points);
         Assert.False(vm.Timeline.HasPoints);
         Assert.Null(vm.Timeline.SelectedPoint);
         Assert.Null(vm.RestoreChain);
         Assert.Empty(vm.GeneratedScript);
         Assert.False(vm.HasScript);
-        Assert.Empty(vm.DiscoveredDatabases);
+        Assert.Empty(vm.Inventory.DiscoveredDatabases);
     }
 
     [Fact]
@@ -405,7 +405,7 @@ public class RestoreViewModelTests
         Assert.NotEmpty(vm.GeneratedScript);
 
         // OtherDb has logs but no full, so there is nothing it can be restored to.
-        vm.SelectedDatabaseName = "OtherDb";
+        vm.Inventory.SelectedDatabaseName = "OtherDb";
 
         Assert.Empty(vm.Timeline.Points);
         Assert.Null(vm.Timeline.SelectedPoint);
@@ -493,8 +493,8 @@ public class RestoreViewModelTests
 
         // The server as well as the database: the scope is built from both, and the load no longer
         // picks either.
-        vm.SelectedServerName = "SRV01";
-        vm.SelectedDatabaseName = "MyDb";
+        vm.Inventory.SelectedServerName = "SRV01";
+        vm.Inventory.SelectedDatabaseName = "MyDb";
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
         // Nothing is preselected any more, so the test makes the choices a user would.
@@ -517,8 +517,8 @@ public class RestoreViewModelTests
 
         // Nothing is preselected any more, so the test makes the choices a user would.
         RestoreSetup.ChooseADatabaseAndAPoint(vm);
-        vm.SelectedServerName = @"SRV01\PROD";
-        vm.SelectedDatabaseName = "MyDb";
+        vm.Inventory.SelectedServerName = @"SRV01\PROD";
+        vm.Inventory.SelectedDatabaseName = "MyDb";
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
         // Nothing is preselected any more, so the test makes the choices a user would.
@@ -540,7 +540,7 @@ public class RestoreViewModelTests
         // Nothing is preselected any more, so the test makes the choices a user would.
         RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
-        Assert.False(vm.BackupsLoaded);
+        Assert.False(vm.Inventory.BackupsLoaded);
         Assert.Contains("No SAS token found.", vm.StatusMessage);
     }
 }
