@@ -229,6 +229,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
@@ -277,6 +278,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
@@ -315,6 +317,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
@@ -348,6 +351,7 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsConnectedToServer = true;
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
@@ -376,6 +380,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             Realise(view);
@@ -433,6 +438,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
@@ -479,6 +485,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
@@ -512,6 +519,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             Realise(view);
@@ -538,6 +546,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
@@ -582,6 +591,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
@@ -633,6 +643,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
@@ -738,6 +749,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();

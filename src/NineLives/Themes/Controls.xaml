@@ -1010,17 +1010,37 @@
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
+                            <!-- A tick and a green title once the step is answered, so the state
+                                 of the whole screen reads at a glance (#117 item 3). -->
                             <TextBlock Grid.Column="0"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"
+                                       FontSize="13"
+                                       Text="&#x2713;"
+                                       Foreground="{DynamicResource SuccessBrush}"
+                                       Visibility="{Binding IsComplete, Converter={StaticResource BoolToVis}}" />
+
+                            <TextBlock Grid.Column="1"
                                        Text="{Binding Title}"
-                                       Style="{StaticResource SubHeaderText}"
-                                       VerticalAlignment="Center" />
+                                       VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SubHeaderText}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsComplete}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
 
                             <!-- Only when collapsed: expanded, the contents say it better. -->
-                            <TextBlock Grid.Column="1"
+                            <TextBlock Grid.Column="2"
                                        Text="{Binding Summary}"
                                        TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Center"
@@ -1037,7 +1057,7 @@
                                 </TextBlock.Style>
                             </TextBlock>
 
-                            <TextBlock Grid.Column="2"
+                            <TextBlock Grid.Column="3"
                                        VerticalAlignment="Center"
                                        FontSize="11"
                                        Foreground="{DynamicResource SecondaryTextBrush}">

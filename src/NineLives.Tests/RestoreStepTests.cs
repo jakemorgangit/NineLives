@@ -121,12 +121,17 @@ public class RestoreStepTests
     public void OpeningAStepClosesTheOthers()
     {
         var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Source, true, "a source");
+        steps.Point.CanConfirm = true;
+        steps.Point.ConfirmCommand.Execute(null);
 
-        steps.Options.ToggleCommand.Execute(null);
+        // The hand-over has already opened step 3, so reopen step 2 - going BACK is the case
+        // worth pinning anyway, and it must still close whatever was open.
+        steps.Point.ToggleCommand.Execute(null);
 
-        Assert.True(steps.Options.IsExpanded);
+        Assert.True(steps.Point.IsExpanded);
         Assert.False(steps.Source.IsExpanded);
-        Assert.False(steps.Point.IsExpanded);
+        Assert.False(steps.Options.IsExpanded);
         Assert.False(steps.Execute.IsExpanded);
     }
 
@@ -157,14 +162,21 @@ public class RestoreStepTests
     /// <summary>Already-done steps are skipped over - going back and changing step 1 should not
     /// drop somebody into a step 2 they finished ten minutes ago.</summary>
     [Fact]
-    public void TheHandOverSkipsStepsThatAreAlreadyDone()
+    public void GoingBackAndReanswveringStepOneReturnsToStepTwo()
     {
-        var steps = new RestoreStepsViewModel();
-        steps.Report(steps.Point, isComplete: true, summary: "a point");
-        steps.Report(steps.Source, isComplete: true, summary: "a source");
+        var steps = Confirmed();
 
-        Assert.False(steps.Point.IsExpanded);
-        Assert.True(steps.Options.IsExpanded);
+        // Choosing a different database: step 1 goes incomplete, which withdraws everything after
+        // it, and answering it again puts the user back at the restore point rather than at the
+        // end of a sequence whose answers have just been thrown away.
+        steps.Report(steps.Source, isComplete: false, summary: string.Empty);
+        Assert.False(steps.Point.IsVisible);
+
+        steps.Report(steps.Source, isComplete: true, summary: "backups, OtherDb on SRV01");
+
+        Assert.True(steps.Point.IsVisible);
+        Assert.True(steps.Point.IsExpanded);
+        Assert.False(steps.Point.IsComplete);
     }
 
     /// <summary>
@@ -186,15 +198,15 @@ public class RestoreStepTests
         Assert.False(step.IsComplete);
     }
 
-    /// <summary>Choosing a restore point hands over to the options, not past them.</summary>
+    /// <summary>Confirming a restore point hands over to the options, not past them.</summary>
     [Fact]
     public void TheHandOverFromThePointLandsOnTheOptions()
     {
         var steps = new RestoreStepsViewModel();
-        steps.Options.Describe("as MyDb_Restored, RECOVERY");
-
         steps.Report(steps.Source, true, "backups, MyDb on SRV01");
-        steps.Report(steps.Point, true, "2026-01-10 22:00, Full + 2 logs");
+
+        steps.Point.CanConfirm = true;
+        steps.Point.ConfirmCommand.Execute(null);
 
         Assert.True(steps.Options.IsExpanded);
         Assert.False(steps.Execute.IsExpanded);
@@ -207,12 +219,108 @@ public class RestoreStepTests
     [Fact]
     public void TheLastStepIsWhereTheHandOverEnds()
     {
-        var steps = new RestoreStepsViewModel();
-        steps.Report(steps.Source, true, "source");
-        steps.Report(steps.Point, true, "point");
-        steps.Report(steps.Options, true, "options");
+        var steps = Confirmed();
 
         Assert.True(steps.Execute.IsExpanded);
         Assert.Equal(1, steps.All.Count(s => s.IsExpanded));
+    }
+
+    // ── only what can be acted on ───────────────────────────────────────────────
+
+    /// <summary>Walks the whole sequence the way a user does.</summary>
+    private static RestoreStepsViewModel Confirmed()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Source, true, "backups, MyDb on SRV01");
+        steps.Point.CanConfirm = true;
+        steps.Point.ConfirmCommand.Execute(null);
+        steps.Options.CanConfirm = true;
+        steps.Options.ConfirmCommand.Execute(null);
+        return steps;
+    }
+
+    /// <summary>
+    /// A step nobody can act on yet is noise - and on this screen it was noise between somebody
+    /// and the dropdown they were trying to use. Loading a container used to reveal steps 2, 3 and
+    /// 4 immediately, before a database had even been chosen.
+    /// </summary>
+    [Fact]
+    public void OnlyTheFirstStepIsOfferedUntilItIsAnswered()
+    {
+        var steps = new RestoreStepsViewModel();
+
+        Assert.True(steps.Source.IsVisible);
+        Assert.False(steps.Point.IsVisible);
+        Assert.False(steps.Options.IsVisible);
+        Assert.False(steps.Execute.IsVisible);
+    }
+
+    [Fact]
+    public void EachStepIsOfferedOnlyOnceTheOneBeforeItIsAnswered()
+    {
+        var steps = new RestoreStepsViewModel();
+
+        steps.Report(steps.Source, true, "backups, MyDb on SRV01");
+        Assert.True(steps.Point.IsVisible);
+        Assert.False(steps.Options.IsVisible);
+
+        steps.Point.CanConfirm = true;
+        steps.Point.ConfirmCommand.Execute(null);
+        Assert.True(steps.Options.IsVisible);
+        Assert.False(steps.Execute.IsVisible);
+
+        steps.Options.CanConfirm = true;
+        steps.Options.ConfirmCommand.Execute(null);
+        Assert.True(steps.Execute.IsVisible);
+    }
+
+    // ── confirmation ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Choosing a restore point is the decision this application exists to support. Folding the
+    /// step away the instant a dot is clicked takes the timeline from somebody who is still
+    /// comparing points - so it stays open until they say they are done.
+    /// </summary>
+    [Fact]
+    public void ChoosingAPointDoesNotFinishTheStep()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Source, true, "a source");
+
+        steps.Point.Describe("2026-01-10 22:00, Full + 2 logs");
+        steps.Point.CanConfirm = true;
+
+        Assert.False(steps.Point.IsComplete);
+        Assert.True(steps.Point.IsExpanded);
+        Assert.False(steps.Options.IsVisible);
+    }
+
+    [Fact]
+    public void ConfirmingIsRefusedUntilThereIsSomethingToConfirm()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Source, true, "a source");
+
+        steps.Point.ConfirmCommand.Execute(null);
+
+        Assert.False(steps.Point.IsComplete);
+    }
+
+    /// <summary>
+    /// Changing a confirmed point takes the confirmation back, and the steps that stood on it go
+    /// with it. A script and a summary describing a moment nobody chose is exactly the failure
+    /// this screen cannot have.
+    /// </summary>
+    [Fact]
+    public void ChangingWhatWasConfirmedWithdrawsTheConfirmation()
+    {
+        var steps = Confirmed();
+        Assert.True(steps.Execute.IsVisible);
+
+        steps.Point.Invalidate();
+
+        Assert.False(steps.Point.IsComplete);
+        Assert.False(steps.Options.IsVisible);
+        Assert.False(steps.Execute.IsVisible);
     }
 }

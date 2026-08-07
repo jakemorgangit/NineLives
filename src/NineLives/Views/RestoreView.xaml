@@ -55,8 +55,8 @@
                  with every option above it. Sitting inside the accordion it was invisible whenever
                  another pane was open, which is most of the time. -->
             <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
-                    Background="{DynamicResource SuccessPanelBackgroundBrush}"
-                    BorderBrush="{DynamicResource SuccessBrush}"
+                    Background="{DynamicResource WarningPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource WarningBrush}"
                     BorderThickness="1"
                     Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
                 <StackPanel>
@@ -216,7 +216,7 @@
 
             <!-- Step 2: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding Timeline.HasPoints, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Point.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <!-- Collapsible (#117 item 3). Title and summary come from Steps.Point. -->
                     <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Point}" />
@@ -859,12 +859,26 @@
                         </StackPanel>
                     </Border>
                     </StackPanel>
+                        <!-- Finishing this step is something the user says (#117 item 3). This is the moment the database will be restored to. Confirm to continue. -->
+                        <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
+                                Padding="12,10" Margin="0,16,0,0">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,12,0" TextWrapping="Wrap"
+                                           Text="This is the moment the database will be restored to. Confirm to continue." />
+                                <Button Content="Confirm restore point"
+                                        Command="{Binding Steps.Point.ConfirmCommand}"
+                                        IsEnabled="{Binding Steps.Point.CanConfirm}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
                 </StackPanel>
             </Border>
 
             <!-- Step 3: Restore Options -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Options.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <!-- Collapsible (#117 item 3). Title and summary come from Steps.Options. -->
                     <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Options}" />
@@ -1242,13 +1256,27 @@
                             </Border>
                         </StackPanel>
                     </Grid>
+                        <!-- Finishing this step is something the user says (#117 item 3). Happy with these? Confirm to move on to generating the script. -->
+                        <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
+                                Padding="12,10" Margin="0,16,0,0">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,12,0" TextWrapping="Wrap"
+                                           Text="Happy with these? Confirm to move on to generating the script." />
+                                <Button Content="Confirm options"
+                                        Command="{Binding Steps.Options.ConfirmCommand}"
+                                        IsEnabled="{Binding Steps.Options.CanConfirm}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </StackPanel>
             </Border>
 
             <!-- Step 4: Generate + Execute -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Execute.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <!-- Collapsible like the rest (#117 item 3). It is the tallest pane on the screen -
                          script, console, recovery actions - so leaving it permanently open undid most of

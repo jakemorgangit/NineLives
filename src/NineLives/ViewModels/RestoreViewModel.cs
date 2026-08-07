@@ -523,13 +523,19 @@ public partial class RestoreViewModel : ViewModelBase
         // the caller updates once at the end rather than four times through a half-built state.
         PointInTime.PropertyChanged += (_, _) =>
         {
-            if (!PointInTime.IsUpdating) UpdateRestoreSummary();
+            if (PointInTime.IsUpdating) return;
+            Steps.Options.Invalidate();
+            UpdateRestoreSummary();
         };
 
         // One subscription in place of a one-line change handler per option (#115 seam 7). An
         // option added later is kept in step with the script by existing, rather than by whoever
         // adds it remembering to write a handler - which is what #110 was.
-        Options.PropertyChanged += (_, _) => UpdateRestoreSummary();
+        Options.PropertyChanged += (_, _) =>
+        {
+            Steps.Options.Invalidate();
+            UpdateRestoreSummary();
+        };
 
         RefreshContainers();
     }
@@ -640,6 +646,10 @@ public partial class RestoreViewModel : ViewModelBase
     private void OnSelectedRestorePointChanged(RestorePoint? value)
     {
         ShowChainDetails = false;
+
+        // A confirmed point that then moves is no longer confirmed. Leaving it standing would let
+        // the script, the summary and the execute button describe a moment nobody chose.
+        Steps.Point.Invalidate();
 
         // Verification belongs to the chain that was verified. Leaving the results on screen
         // after the selection moves would show a green tick against backups nothing has read.
@@ -952,23 +962,30 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void RefreshSteps()
     {
+        // Step 1 finishes by itself, because there is nothing to confirm: a database either has
+        // been chosen or has not. It needs BOTH the container loaded and a database picked - the
+        // step holds the server and database dropdowns, so completing it on the load alone threw
+        // people out of the step before they could use them.
         Steps.Report(
             Steps.Source,
             BackupsLoaded && !string.IsNullOrWhiteSpace(SelectedDatabaseName),
             DescribeSource());
 
-        Steps.Report(
-            Steps.Point,
-            Timeline.SelectedPoint != null,
+        // Described, and confirmed by the user rather than by a click. Choosing a restore point is
+        // the decision this application exists to support: collapsing the step the instant a dot is
+        // clicked takes the timeline away from somebody who is still comparing points.
+        Steps.Point.Describe(
             Timeline.SelectedPoint is { } point
                 ? $"{point.TimestampDisplay}, {RestoreChain?.Summary ?? "no chain"}"
                 : string.Empty);
+        Steps.Point.CanConfirm = Timeline.SelectedPoint != null && RestoreChain != null;
 
         // Described, not completed. The options have defaults, so there is no point at which they
         // are finished - and the target name is derived from the chosen database, so treating a
         // non-empty one as completion folded this step away the moment a database was picked, and
         // the hand-over from step 2 then skipped straight over it to step 4.
         Steps.Options.Describe(DescribeOptions());
+        Steps.Options.CanConfirm = !string.IsNullOrWhiteSpace(TargetDatabaseName);
     }
 
     private string DescribeSource()
