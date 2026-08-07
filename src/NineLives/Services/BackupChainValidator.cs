@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -171,7 +171,7 @@ public class BackupChainValidator
         var reachable = new HashSet<BackupSet>();
         foreach (var point in restorePoints)
         {
-            if (point.PrimarySet != null) reachable.Add(point.PrimarySet);
+            reachable.Add(point.PrimarySet);
             foreach (var log in point.RequiredLogSets) reachable.Add(log);
         }
 
@@ -323,7 +323,7 @@ public class BackupChainValidator
             $"{chainBase.Timestamp:yyyy-MM-dd HH:mm}, against a typical log interval of {FormatGap(median.Value)}. " +
             "Log backups covering that period appear to be missing - commonly because logs are kept for a " +
             "shorter retention than fulls and differentials. The restore would fail with error 4305. " +
-            "Validate Chain will confirm against the backup headers."));
+            "Check chain will confirm against the backup headers."));
     }
 
     private static TimeSpan? MedianLogInterval(IReadOnlyList<BackupSet> logs)

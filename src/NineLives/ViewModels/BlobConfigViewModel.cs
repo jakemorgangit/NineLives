@@ -1,4 +1,5 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
+using System.Text;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +10,8 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class BlobConfigViewModel : ViewModelBase
 {
-    private readonly CredentialStore _credentialStore;
-    private readonly BlobStorageService _blobService;
+    private readonly ICredentialStore _credentialStore;
+    private readonly IBlobStorageService _blobService;
     private readonly OperationCancellation _testCancellation = new();
 
     /// <summary>True while a connection test is running and has not been asked to stop (#25).</summary>
@@ -30,8 +31,21 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private string _editTags = string.Empty;
 
+    private string _originalTags = string.Empty;
+
     [ObservableProperty]
     private string _editContainerUrl = string.Empty;
+
+    /// <summary>
+    /// How this container signs in (#29). Entra holds no secret of ours, which is the point:
+    /// many organisations now prohibit long-lived SAS tokens outright.
+    /// </summary>
+    [ObservableProperty]
+    private BlobAuthMode _editAuthMode = BlobAuthMode.SasToken;
+
+    public bool IsSasAuth => EditAuthMode.NeedsSasToken();
+
+    public bool IsEntraAuth => EditAuthMode.IsEntra();
 
     [ObservableProperty]
     private string _editSasToken = string.Empty;
@@ -46,6 +60,37 @@ public partial class BlobConfigViewModel : ViewModelBase
 
     [ObservableProperty]
     private string? _editAgPathPattern;
+
+    /// <summary>
+    /// The backup server's time zone, or null for "not known" (#102). Selected from
+    /// <see cref="TimeZones"/>.
+    /// </summary>
+    [ObservableProperty]
+    private TimeZoneOption? _editBackupServerTimeZone;
+
+    private string? _originalTimeZoneId;
+
+    /// <summary>
+    /// Every zone this machine knows, with an explicit "not known" first. Read once - the list
+    /// does not change while the app is running, and enumerating it is not free.
+    /// </summary>
+    public static IReadOnlyList<TimeZoneOption> TimeZones { get; } = BuildTimeZones();
+
+    private static IReadOnlyList<TimeZoneOption> BuildTimeZones()
+    {
+        var options = new List<TimeZoneOption> { TimeZoneOption.Unknown };
+        try
+        {
+            options.AddRange(TimeZoneInfo.GetSystemTimeZones()
+                .Select(z => new TimeZoneOption(z.Id, z.DisplayName)));
+        }
+        catch
+        {
+            // A machine with an unreadable zone database still gets "not known", which is the
+            // behaviour the app had before this existed.
+        }
+        return options;
+    }
 
     [ObservableProperty]
     private ObservableCollection<PathElement> _activePathElements = [];
@@ -105,11 +150,12 @@ public partial class BlobConfigViewModel : ViewModelBase
     private string _originalName = "";
     private string _originalUrl = "";
     private string _originalSas = "";
+    private BlobAuthMode _originalAuthMode = BlobAuthMode.SasToken;
     private string _originalPattern = "";
     private BackupSourceType _originalBackupSourceType = BackupSourceType.Standalone;
     private string? _originalAgPathPattern;
 
-    public BlobConfigViewModel(CredentialStore credentialStore, BlobStorageService blobService)
+    public BlobConfigViewModel(ICredentialStore credentialStore, IBlobStorageService blobService)
     {
         _credentialStore = credentialStore;
         _blobService = blobService;
@@ -158,6 +204,13 @@ public partial class BlobConfigViewModel : ViewModelBase
     partial void OnEditNameChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditContainerUrlChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditSasTokenChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditAuthModeChanged(BlobAuthMode value)
+    {
+        OnPropertyChanged(nameof(IsSasAuth));
+        OnPropertyChanged(nameof(IsEntraAuth));
+        if (SelectedContainer != null) UpdateSasExpiryStatus(SelectedContainer);
+        CheckForUnsavedChanges();
+    }
     partial void OnEditPathPatternChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditBackupSourceTypeChanged(BackupSourceType value)
     {
@@ -166,6 +219,11 @@ public partial class BlobConfigViewModel : ViewModelBase
         CheckForUnsavedChanges();
     }
     partial void OnEditAgPathPatternChanged(string? value) => CheckForUnsavedChanges();
+    partial void OnEditBackupServerTimeZoneChanged(TimeZoneOption? value) => CheckForUnsavedChanges();
+
+    // Tags are saved like every other field, so editing only the tags has to count as an unsaved
+    // change - otherwise the guard that protects unsaved edits lets them be discarded silently.
+    partial void OnEditTagsChanged(string value) => CheckForUnsavedChanges();
 
     private void CheckForUnsavedChanges()
     {
@@ -176,25 +234,68 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasUnsavedChanges =
             EditName != _originalName ||
             EditContainerUrl != _originalUrl ||
+            EditAuthMode != _originalAuthMode ||
             sasChanged ||
             EditPathPattern != _originalPattern ||
             EditBackupSourceType != _originalBackupSourceType ||
-            EditAgPathPattern != _originalAgPathPattern;
+            EditAgPathPattern != _originalAgPathPattern ||
+            EditTags != _originalTags ||
+            EditBackupServerTimeZone?.Id != _originalTimeZoneId;
+    }
+
+    /// <summary>
+    /// Captures a container's persisted fields and returns the action that puts them back. Used to
+    /// undo an in-place edit when the config write is refused.
+    /// </summary>
+    private static Action Snapshot(BlobContainerConfig container)
+    {
+        var name = container.Name;
+        var url = container.ContainerUrl;
+        var authMode = container.AuthMode;
+        var pattern = container.PathPattern;
+        var sourceType = container.BackupSourceType;
+        var agPattern = container.AgPathPattern;
+        var timeZoneId = container.BackupServerTimeZoneId;
+        var tags = container.Tags.ToList();
+
+        return () =>
+        {
+            container.Name = name;
+            container.ContainerUrl = url;
+            container.AuthMode = authMode;
+            container.PathPattern = pattern;
+            container.BackupSourceType = sourceType;
+            container.AgPathPattern = agPattern;
+            container.BackupServerTimeZoneId = timeZoneId;
+            ReplaceTags(container.Tags, tags);
+        };
     }
 
     private void StoreOriginalValues()
     {
         _originalName = EditName;
         _originalUrl = EditContainerUrl;
+        _originalAuthMode = EditAuthMode;
         _originalSas = HasStoredSasToken ? StoredSasSentinel : EditSasToken;
         _originalPattern = EditPathPattern;
         _originalBackupSourceType = EditBackupSourceType;
         _originalAgPathPattern = EditAgPathPattern;
+        _originalTags = EditTags;
+        _originalTimeZoneId = EditBackupServerTimeZone?.Id;
         HasUnsavedChanges = false;
     }
 
     private void UpdateSasExpiryStatus(BlobContainerConfig container)
     {
+        // Entra has no token of ours to expire. Reporting "expired" against a container that never
+        // had a SAS would send someone hunting for a token that is not the problem.
+        if (EditAuthMode.IsEntra() || (!IsEditing && container.AuthMode.IsEntra()))
+        {
+            SasExpiryText = string.Empty;
+            IsSasExpired = false;
+            return;
+        }
+
         var expiry = _credentialStore.ReadSasTokenExpiry(container);
 
         if (expiry.CouldNotParse)
@@ -350,10 +451,12 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = string.Empty;
         EditTags = string.Empty;
         EditContainerUrl = string.Empty;
+        EditAuthMode = BlobAuthMode.SasToken;
         EditSasToken = string.Empty;
         EditPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
         EditBackupSourceType = BackupSourceType.Standalone;
         EditAgPathPattern = null;
+        EditBackupServerTimeZone = TimeZoneOption.Unknown;
         SyncPathElementsFromPattern();
         SyncAgPathElementsFromPattern();
         HasStoredSasToken = false;
@@ -372,11 +475,13 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = SelectedContainer.Name;
         EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        EditAuthMode = SelectedContainer.AuthMode;
         var storedToken = _credentialStore.GetSasToken(SelectedContainer);
         HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
         EditSasToken = string.Empty; // Never show stored token; user can only replace it
         EditPathPattern = SelectedContainer.PathPattern;
         EditBackupSourceType = SelectedContainer.BackupSourceType;
+        EditBackupServerTimeZone = TimeZoneOption.For(SelectedContainer.BackupServerTimeZoneId, TimeZones);
         EditAgPathPattern = SelectedContainer.AgPathPattern;
         SyncPathElementsFromPattern();
         SyncAgPathElementsFromPattern();
@@ -404,14 +509,19 @@ public partial class BlobConfigViewModel : ViewModelBase
             return;
         }
 
-        bool haveTokenToSave = !string.IsNullOrWhiteSpace(EditSasToken);
-        if (IsNew && !haveTokenToSave)
+        bool haveTokenToSave = IsSasAuth && !string.IsNullOrWhiteSpace(EditSasToken);
+        if (IsNew && IsSasAuth && !haveTokenToSave)
         {
             SetError("SAS Token is required.");
             return;
         }
 
         BlobContainerConfig container;
+
+        // Undoes the edit if the save is refused. Null for a new container, which is removed from
+        // the list instead.
+        Action? restore = null;
+
         if (IsNew)
         {
             if (Containers.Any(c => c.Name.Equals(EditName, StringComparison.OrdinalIgnoreCase)))
@@ -426,9 +536,11 @@ public partial class BlobConfigViewModel : ViewModelBase
                 Id = BlobContainerConfig.NewId(),
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
+                AuthMode = EditAuthMode,
                 PathPattern = EditPathPattern,
                 BackupSourceType = EditBackupSourceType,
                 AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim(),
+                BackupServerTimeZoneId = EditBackupServerTimeZone?.Id,
                 Tags = [.. TagPalette.ParseTags(EditTags)]
             };
             Containers.Add(container);
@@ -436,26 +548,64 @@ public partial class BlobConfigViewModel : ViewModelBase
         else
         {
             container = SelectedContainer!;
+
+            // Snapshot before mutating, so a refused save can put the model back. Without this an
+            // edit that failed to persist left the in-memory container showing values that are not
+            // on disk - and the next save writes them without the user knowing they were pending.
+            restore = Snapshot(container);
+
             container.Name = EditName;
             // Mutate in place - see ReplaceTags.
             ReplaceTags(container.Tags, TagPalette.ParseTags(EditTags));
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
+            container.AuthMode = EditAuthMode;
             container.PathPattern = EditPathPattern;
             container.BackupSourceType = EditBackupSourceType;
+            container.BackupServerTimeZoneId = EditBackupServerTimeZone?.Id;
             var agPattern = IsAgPathSectionVisible ? PathElement.BuildPattern(AgActivePathElements) : null;
             container.AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim();
         }
 
-        if (haveTokenToSave)
-            _credentialStore.SaveSasToken(container, EditSasToken);
-        // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
+        // Config FIRST, secret second.
+        //
+        // The other order wrote a durable secret and then discovered the config could not be
+        // saved. Change a name and a token together, have config.json briefly locked, and the
+        // Credential Manager ends up holding the NEW token under a key the OLD config points at -
+        // or, for a rename, under a name nothing references. The form never shows a stored secret,
+        // so nothing on screen reveals the mismatch. Delete already follows this rule.
         if (!SaveContainers())
         {
             // Nothing reached the disk, so do not leave the list showing a container that is not
             // really there. Stay in the edit form so the save can be retried once whatever was
             // holding the file has let go.
             if (IsNew) Containers.Remove(container);
+            else restore?.Invoke();
             return;
+        }
+
+        // When editing and leaving SAS field empty, existing token is kept (never re-read or shown)
+        if (haveTokenToSave)
+        {
+            try
+            {
+                _credentialStore.SaveSasToken(container, EditSasToken);
+            }
+            catch (Exception ex)
+            {
+                // The config is saved and consistent; only the token is missing. Say exactly that,
+                // because "save failed" would send the user looking for the wrong problem.
+                SetError($"The container was saved, but the SAS token could not be stored: {ex.Message}");
+                return;
+            }
+        }
+        else if (IsEntraAuth)
+        {
+            // Switching to Entra leaves no reason to keep the SAS token, and an organisation that
+            // has banned long-lived SAS has banned it wherever it is sitting - including in this
+            // machine's Credential Manager. After the config write, for the same reason the save
+            // itself is ordered that way.
+            _credentialStore.DeleteSecret(container.CredentialKey);
+            HasStoredSasToken = false;
         }
 
         SelectedContainer = container;
@@ -508,8 +658,16 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasStoredSasToken = true; // Still have a token; user will replace it
         EditSasToken = string.Empty;
         EditPathPattern = SelectedContainer.PathPattern;
+        EditBackupServerTimeZone = TimeZoneOption.For(SelectedContainer.BackupServerTimeZoneId, TimeZones);
         EditBackupSourceType = SelectedContainer.BackupSourceType;
         EditAgPathPattern = SelectedContainer.AgPathPattern;
+
+        // Tags too. Save writes whatever is in this box over the container's tags, so leaving it
+        // empty here deleted every tag on any container whose token was refreshed - silently, and
+        // with no undo. Refresh Token is a separate button from Edit, so replacing an expired
+        // token was the natural way to hit it.
+        EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
+
         SyncPathElementsFromPattern();
         SyncAgPathElementsFromPattern();
         IsNew = false;
@@ -524,7 +682,22 @@ public partial class BlobConfigViewModel : ViewModelBase
         BlobContainerConfig? config;
         if (IsEditing)
         {
-            if (HasStoredSasToken && string.IsNullOrWhiteSpace(EditSasToken))
+            if (IsEntraAuth)
+            {
+                // Nothing stored to fall back on, and nothing needed - the token comes from the
+                // signed-in account. Built from the form, so what is tested is the URL on screen.
+                //
+                // Carrying the mode is the whole point: without it this fell through to the SAS
+                // branch below and refused with "No SAS token found" for a container that is never
+                // going to have one (#29).
+                config = new BlobContainerConfig
+                {
+                    Name = EditName,
+                    ContainerUrl = EditContainerUrl,
+                    AuthMode = EditAuthMode
+                };
+            }
+            else if (HasStoredSasToken && string.IsNullOrWhiteSpace(EditSasToken))
                 config = SelectedContainer; // Use stored token for test
             else
             {
@@ -569,8 +742,13 @@ public partial class BlobConfigViewModel : ViewModelBase
         catch (Exception ex)
         {
             TestSuccess = false;
-            TestResult = $"Connection failed: {ex.Message}";
             ContainerSummary = null;
+
+            // Azure's own message is accurate and useless in equal measure - a permission failure
+            // arrives with a request id, the original XML and eleven headers, and says nothing
+            // about what to change. Same instinct as the recovery guidance after a failed restore
+            // (#14): the moment it fails is the moment to say what to do about it.
+            TestResult = await ExplainFailureAsync(ex, config, ct);
         }
         finally
         {
@@ -578,6 +756,51 @@ public partial class BlobConfigViewModel : ViewModelBase
             IsBusy = false;
             CanCancelTest = false;
         }
+    }
+
+    /// <summary>
+    /// The failure, then who was refused, then what to do about it.
+    ///
+    /// The identity comes first among the details because it is the fact that settles the most
+    /// common confusion: a permission error against an account that demonstrably has access
+    /// usually means a different account was used than the one being thought about.
+    /// </summary>
+    private async Task<string> ExplainFailureAsync(
+        Exception ex, BlobContainerConfig config, CancellationToken ct)
+    {
+        var message = new StringBuilder($"Connection failed: {FirstLine(ex.Message)}");
+
+        if (config.AuthMode.IsEntra())
+        {
+            string? identity = null;
+            try
+            {
+                identity = await _blobService.DescribeSignedInIdentityAsync(config, ct);
+            }
+            catch
+            {
+                // Explaining a failure must not produce one.
+            }
+
+            if (identity != null)
+                message.Append($"{Environment.NewLine}{Environment.NewLine}Signed in as: {identity}");
+        }
+
+        var guidance = BlobFailureExplainer.Explain(ex, config);
+        if (guidance != null)
+            message.Append($"{Environment.NewLine}{Environment.NewLine}{guidance}");
+
+        return message.ToString();
+    }
+
+    /// <summary>
+    /// Azure appends the request id, the timestamp, the original XML and every response header to
+    /// its exception message. The first line is the part a human reads; the rest buries it.
+    /// </summary>
+    private static string FirstLine(string message)
+    {
+        var end = message.IndexOfAny(['\r', '\n']);
+        return end < 0 ? message : message[..end].TrimEnd();
     }
 
     /// <summary>Stops an in-progress connection test.</summary>

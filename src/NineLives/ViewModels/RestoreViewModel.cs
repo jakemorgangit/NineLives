@@ -1,6 +1,7 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -13,12 +14,12 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class RestoreViewModel : ViewModelBase
 {
-    private readonly BlobStorageService _blobService;
-    private readonly SqlServerService _sqlService;
+    private readonly IBlobStorageService _blobService;
+    private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
     private readonly BackupChainValidator _chainValidator = new();
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
     private List<BackupFileInfo> _allBackups = [];
     private List<BackupSet> _allSets = [];
@@ -28,6 +29,23 @@ public partial class RestoreViewModel : ViewModelBase
     // can both be in flight, and cancelling one must not touch the other (#25).
     private readonly OperationCancellation _loadCancellation = new();
     private readonly OperationCancellation _executeCancellation = new();
+
+    /// <summary>
+    /// The server queries a user starts and might want to abandon: verify, validate, the two
+    /// metadata reads, creating the credential, and the post-failure recovery actions (#111).
+    ///
+    /// They share one source because they are mutually exclusive buttons - starting one while
+    /// another runs should stop the first, which is exactly what Begin() does. RESTORE VERIFYONLY
+    /// reads every byte of every backup in the chain at CommandTimeout = 0, so on a large chain
+    /// this was hours with no Stop button and no timeout.
+    /// </summary>
+    private readonly OperationCancellation _queryCancellation = new();
+
+    /// <summary>
+    /// The server-side credential the restore authenticates with: what is on the instance, what to
+    /// say about it, and what Execute should do before it runs (#115 seam 5).
+    /// </summary>
+    public ServerCredentialViewModel Credential { get; }
 
     #region Observable Properties
 
@@ -55,32 +73,12 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _targetDatabaseName = string.Empty;
 
-    // Restore points (replaces continuous slider)
-    [ObservableProperty]
-    private ObservableCollection<RestorePoint> _restorePoints = [];
-
-    [ObservableProperty]
-    private RestorePoint? _selectedRestorePoint;
-
-    [ObservableProperty]
-    private bool _hasRestorePoints;
-
-    [ObservableProperty]
-    private string _restoreWindowText = string.Empty;
-
     /// <summary>
-    /// Left-hand label under the timeline. A plain property rather than the old
-    /// {Binding RestorePoints[0].Timestamp}, which threw an index error into WPF's binding trace
-    /// on every layout while the collection was empty.
+    /// The restore-point timeline: the points, the filters over them, the layout and the
+    /// selection (#115 seam 2). Its selection is the one everything downstream hangs off, so this
+    /// class watches it in the constructor.
     /// </summary>
-    [ObservableProperty]
-    private string _timelineStartText = string.Empty;
-
-    [ObservableProperty]
-    private ObservableCollection<TimelineTick> _timelineTicks = [];
-
-    [ObservableProperty]
-    private int _timelineHeight = 60;
+    public RestoreTimelineViewModel Timeline { get; } = new();
 
     // Restore chain
     [ObservableProperty]
@@ -101,19 +99,12 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private ObservableCollection<BackupSet> _chainSets = [];
 
-    // Options
-    [ObservableProperty]
-    private bool _withReplace = true;
-
-    [ObservableProperty]
-    private RecoveryMode _recoveryMode = RecoveryMode.Recovery;
-
-    public bool IsStandbyMode => RecoveryMode == RecoveryMode.Standby;
-
-    // OnRecoveryModeChanged is defined later to also update restore summary
-
-    [ObservableProperty]
-    private string _standbyFilePath = string.Empty;
+    /// <summary>
+    /// The RESTORE options, and the one place they become a <see cref="RestoreOptions"/>
+    /// (#115 seam 7). One subscription in the constructor keeps the script in step with all of
+    /// them, whatever gets added later.
+    /// </summary>
+    public RestoreOptionsViewModel Options { get; } = new();
 
     // ── Point-in-time (STOPAT) ───────────────────────────────────────────────────
     // Only meaningful for a transaction-log restore point. Without this the granularity of a
@@ -122,34 +113,11 @@ public partial class RestoreViewModel : ViewModelBase
     // 14:30. The target is bounded to within the selected log's window; to stop earlier the
     // user picks an earlier restore point, which keeps the generated chain correct.
 
-    /// <summary>True when the selected restore point is a log, so STOPAT applies.</summary>
-    [ObservableProperty]
-    private bool _canUsePointInTime;
-
-    [ObservableProperty]
-    private bool _usePointInTime;
-
-    /// <summary>User-entered target time, parsed into <see cref="StopAtDateTime"/>.</summary>
-    [ObservableProperty]
-    private string _stopAtText = string.Empty;
-
-    /// <summary>Parsed and validated target, or null when unusable.</summary>
-    [ObservableProperty]
-    private DateTime? _stopAtDateTime;
-
-    /// <summary>Exclusive lower bound: the end of the previous set in the chain.</summary>
-    [ObservableProperty]
-    private DateTime? _stopAtEarliest;
-
-    /// <summary>Inclusive upper bound: the end of the selected log backup.</summary>
-    [ObservableProperty]
-    private DateTime? _stopAtLatest;
-
-    [ObservableProperty]
-    private string _pointInTimeMessage = string.Empty;
-
-    [ObservableProperty]
-    private bool _hasPointInTimeError;
+    /// <summary>
+    /// The STOPAT target and the window it has to fall inside (#115 seam 3). The window itself is
+    /// chain reasoning, so this class works it out and hands it down.
+    /// </summary>
+    public PointInTimeViewModel PointInTime { get; } = new();
 
     // ── Chain gap detection ──────────────────────────────────────────────────────
     // Structural validation of the selected chain, run at selection time. The app otherwise
@@ -205,6 +173,10 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _canCancelExecute;
 
+    /// <summary>True while a server query is running and has not been asked to stop (#111).</summary>
+    [ObservableProperty]
+    private bool _canCancelQuery;
+
     /// <summary>True between asking to stop and the operation actually unwinding.</summary>
     [ObservableProperty]
     private bool _isCancelling;
@@ -217,16 +189,6 @@ public partial class RestoreViewModel : ViewModelBase
     private string _loadProgressText = string.Empty;
 
     // ── Execution console ───────────────────────────────────────────────────────
-
-    /// <summary>
-    /// The console, one line per entry. A collection rather than one growing string so appending
-    /// costs the same on the thousandth line as on the first.
-    /// </summary>
-    [ObservableProperty]
-    private ObservableCollection<ConsoleLine> _consoleLines = [];
-
-    [ObservableProperty]
-    private bool _hasConsoleOutput;
 
     /// <summary>
     /// True while the console is showing in its own window.
@@ -243,7 +205,10 @@ public partial class RestoreViewModel : ViewModelBase
     {
         CanCancelLoad = _loadCancellation.CanCancel;
         CanCancelExecute = _executeCancellation.CanCancel;
-        IsCancelling = _loadCancellation.IsCancelling || _executeCancellation.IsCancelling;
+        CanCancelQuery = _queryCancellation.CanCancel;
+        IsCancelling = _loadCancellation.IsCancelling
+            || _executeCancellation.IsCancelling
+            || _queryCancellation.IsCancelling;
     }
 
     /// <summary>True once the chain has been checked against RESTORE HEADERONLY metadata.</summary>
@@ -254,26 +219,82 @@ public partial class RestoreViewModel : ViewModelBase
     private bool _isValidatingChain;
 
     [ObservableProperty]
-    private bool _disconnectSessions = true;
+    private bool _isVerifyingChain;
+
+    partial void OnIsVerifyingChainChanged(bool value) => RefreshCheckState();
+    partial void OnIsValidatingChainChanged(bool value) => RefreshCheckState();
+    partial void OnChainLsnVerifiedChanged(bool value) => RefreshCheckState();
+    partial void OnHasChainIssuesChanged(bool value) => RefreshCheckState();
+    partial void OnHasVerifyResultsChanged(bool value) => RefreshCheckState();
+    partial void OnHasVerifyFailuresChanged(bool value) => RefreshCheckState();
+    partial void OnHasTargetPathProblemChanged(bool value) => RefreshCheckState();
+
+    /// <summary>
+    /// Republishes the two "already passed" flags and re-queries the buttons that depend on them.
+    /// Everything they are computed from is a separate observable property, so without this the
+    /// tick appears and the button stays enabled - or worse, the other way round.
+    /// </summary>
+    private void RefreshCheckState()
+    {
+        OnPropertyChanged(nameof(ChainCheckPassed));
+        OnPropertyChanged(nameof(VerifyPassed));
+        OnPropertyChanged(nameof(BusyDescription));
+        OnPropertyChanged(nameof(IsBusyWithAnything));
+        ValidateChainCommand.NotifyCanExecuteChanged();
+        VerifyChainCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// What this screen is doing, for the strip at the top of the window - empty when idle (#128).
+    /// </summary>
+    public string BusyDescription
+    {
+        get
+        {
+            if (IsExecuting) return $"Restoring {TargetDatabaseName}...";
+            if (IsVerifyingChain) return "Verifying backups...";
+            if (IsValidatingChain) return "Checking the chain...";
+            if (IsBusy) return "Loading backups...";
+            return string.Empty;
+        }
+    }
+
+    public bool IsBusyWithAnything => BusyDescription.Length > 0;
+
+    /// <summary>Per-set RESTORE VERIFYONLY results for the selected chain.</summary>
+    public ObservableCollection<ChainVerifyResult> ChainVerifyResults { get; } = [];
 
     [ObservableProperty]
-    private int _statsPercent = 10;
+    private bool _hasVerifyResults;
 
     [ObservableProperty]
-    private bool _keepReplication;
+    private bool _hasVerifyFailures;
 
-    [ObservableProperty]
-    private bool _enableBroker;
-
-    [ObservableProperty]
-    private bool _newBroker;
 
     [ObservableProperty]
     private bool _useWithMove;
 
     public bool ShowMoveOptions => UseWithMove;
 
-    public ServerConnection? ConnectedServer { get; set; }
+    private ServerConnection? _connectedServer;
+
+    /// <summary>
+    /// The instance every server call on this screen runs against.
+    ///
+    /// Setting it re-checks the credential, rather than leaving the caller to remember: forgetting
+    /// left the panel describing the credential on the server someone had just disconnected from,
+    /// and that panel is what they read before deciding whether to create one (#115 seam 5).
+    /// </summary>
+    public ServerConnection? ConnectedServer
+    {
+        get => _connectedServer;
+        set
+        {
+            _connectedServer = value;
+            Credential.Server = value;
+            _ = Credential.RefreshAsync();
+        }
+    }
 
     /// <summary>
     /// Tags of the connected server, shown on the execute confirmation. Chips rather than plain
@@ -312,68 +333,43 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _restoreSummaryText = string.Empty;
 
-    [ObservableProperty]
-    private string _sqlCredentialName = string.Empty;
-
-    // Blob credential status on connected server (credential must exist for RESTORE FROM URL)
-    [ObservableProperty]
-    private bool? _credentialExistsOnServer; // null = not checked
-
-    [ObservableProperty]
-    private bool _credentialIsValidSas; // true when exists and identity is SHARED ACCESS SIGNATURE
-
-    [ObservableProperty]
-    private string _credentialStatusMessage = string.Empty;
-
-    [ObservableProperty]
-    private bool _isCheckingCredential;
-
-    [ObservableProperty]
-    private bool _credentialSectionVisible;
-
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
     {
-        if (value != null)
-            SqlCredentialName = value.ContainerUrl;
-        CredentialSectionVisible = value != null;
-        _ = RefreshCredentialStatusAsync();
+        // Everything on screen below this point came from the PREVIOUS container. Leaving it there
+        // meant the credential panel and Create credential targeted the new container while the
+        // script still restored from the old one's URLs - so Execute stayed armed and enabled, and
+        // failed with Msg 3201 after WITH REPLACE had already dropped the target.
+        ClearLoadedBackups();
+
+        _ = Credential.PointAtAsync(value);
     }
 
-    /// <summary>Call when ConnectedServer or SelectedContainer changes so credential status is updated.</summary>
-    public async Task RefreshCredentialStatusAsync()
+    /// <summary>
+    /// Drops everything derived from a container's contents. Called when the container changes and
+    /// when a load is abandoned, so what is on screen always belongs to the container named above
+    /// it.
+    /// </summary>
+    private void ClearLoadedBackups()
     {
-        CredentialSectionVisible = SelectedContainer != null;
-        if (ConnectedServer == null || SelectedContainer == null)
-        {
-            CredentialExistsOnServer = null;
-            CredentialStatusMessage = string.Empty;
-            CredentialIsValidSas = false;
-            return;
-        }
+        _allBackups = [];
+        _allSets = [];
+        _dbSets = [];
 
-        IsCheckingCredential = true;
-        CredentialStatusMessage = "Checking...";
-        var server = ConnectedServer!;
-        try
-        {
-            var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
-            CredentialExistsOnServer = exists;
-            CredentialIsValidSas = exists && isSas;
-            CredentialStatusMessage = exists
-                ? (isSas ? "Credential is present and valid (SHARED ACCESS SIGNATURE)." : "Credential exists but is not a SAS credential; restore may fail.")
-                : "Credential is not present on this server. Restore will fail unless you create it.";
-        }
-        catch (Exception ex)
-        {
-            CredentialExistsOnServer = null;
-            CredentialIsValidSas = false;
-            CredentialStatusMessage = $"Could not check credential: {ex.Message}";
-        }
-        finally
-        {
-            IsCheckingCredential = false;
-            CreateCredentialOnServerCommand.NotifyCanExecuteChanged();
-        }
+        BackupsLoaded = false;
+        DiscoveredServers = [];
+        DiscoveredDatabases = [];
+        SelectedServerName = null;
+        SelectedDatabaseName = null;
+
+        // Clearing the timeline drops its selection, which runs the selection handler below and
+        // clears the chain, the script, the verification results and the inventory findings.
+        Timeline.Clear();
+
+        // Disarm. An armed Execute that survives a container change is an armed Execute aimed at
+        // something the user is no longer looking at.
+        IsExecuteArmed = false;
+        ExecuteButtonText = "Execute on Server";
+        _armTimeoutCts?.Cancel();
     }
 
     [ObservableProperty]
@@ -385,6 +381,24 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>Logical files from RESTORE FILELISTONLY for accurate WITH MOVE.</summary>
     [ObservableProperty]
     private ObservableCollection<FileMoveOption> _fetchedFileMoves = [];
+
+    /// <summary>
+    /// Each row is edited in place in the grid, so the script has to follow the ROW, not just the
+    /// collection. Without this, retyping a target path changed what was on screen and nothing
+    /// else - and the script is what gets executed.
+    /// </summary>
+    partial void OnFetchedFileMovesChanged(
+        ObservableCollection<FileMoveOption>? oldValue,
+        ObservableCollection<FileMoveOption> newValue)
+    {
+        if (oldValue != null)
+            foreach (var move in oldValue) move.PropertyChanged -= OnFileMoveChanged;
+
+        foreach (var move in newValue) move.PropertyChanged += OnFileMoveChanged;
+    }
+
+    private void OnFileMoveChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        => UpdateRestoreSummary();
 
     [ObservableProperty]
     private bool _hasFetchedFileMoves;
@@ -443,19 +457,73 @@ public partial class RestoreViewModel : ViewModelBase
     #endregion
 
     public RestoreViewModel(
-        BlobStorageService blobService,
-        SqlServerService sqlService,
+        IBlobStorageService blobService,
+        ISqlServerService sqlService,
         BackupChainBuilder chainBuilder,
         RestoreScriptGenerator scriptGenerator,
-        CredentialStore credentialStore)
+        ICredentialStore credentialStore,
+        OperationLog? log = null,
+        IRestoreHistoryStore? history = null)
     {
+        _history = history ?? new RestoreHistoryStore();
+
         _blobService = blobService;
         _sqlService = sqlService;
         _chainBuilder = chainBuilder;
         _scriptGenerator = scriptGenerator;
         _credentialStore = credentialStore;
+
+        // Defaults to the app's one log. Optional so a test can point it at a temp directory -
+        // without it, running the execute path in a test appends real restore lines to the user's
+        // actual log file, which is the same class of side effect this whole change is about.
+        _log = log ?? App.Log;
+
+        // Every console message is written to the log file as it arrives, so the file cannot drift
+        // from what was on screen.
+        Console = new ConsoleBuffer(message => _log.Info($"[execute] {message.Trim()}"));
+
+        // Shares _queryCancellation so the Stop button stops a credential write too (#111), and
+        // reports through the same status line as everything else on this screen (#115 seam 5).
+        Credential = new ServerCredentialViewModel(sqlService, credentialStore, _log, _queryCancellation);
+        Credential.Reported += (message, isError) =>
+        {
+            if (isError) SetError(message); else SetStatus(message);
+        };
+
+        // IsBusy and TargetDatabaseName live on the base class, so they cannot have a generated
+        // partial hook - but the busy strip is computed from them.
+        PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(IsBusy) or nameof(TargetDatabaseName))
+                RefreshCheckState();
+        };
+
+        // The selection now lives on the timeline (#115 seam 2), which is a different object, so
+        // this is a subscription rather than a generated partial hook.
+        Timeline.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RestoreTimelineViewModel.SelectedPoint))
+                OnSelectedRestorePointChanged(Timeline.SelectedPoint);
+        };
+
+        // The STOPAT target feeds the generated script, so any change to it has to reach the
+        // script (#115 seam 3). Skipped while SetWindow is rewriting several properties at once -
+        // the caller updates once at the end rather than four times through a half-built state.
+        PointInTime.PropertyChanged += (_, _) =>
+        {
+            if (!PointInTime.IsUpdating) UpdateRestoreSummary();
+        };
+
+        // One subscription in place of a one-line change handler per option (#115 seam 7). An
+        // option added later is kept in step with the script by existing, rather than by whoever
+        // adds it remembering to write a handler - which is what #110 was.
+        Options.PropertyChanged += (_, _) => UpdateRestoreSummary();
+
         RefreshContainers();
     }
+
+    private readonly OperationLog _log;
+    private readonly IRestoreHistoryStore _history;
 
     public void RefreshContainers()
     {
@@ -494,7 +562,17 @@ public partial class RestoreViewModel : ViewModelBase
             SelectedDatabaseName = DiscoveredDatabases[0];
     }
 
-    partial void OnSelectedDatabaseNameChanged(string? value)
+    partial void OnSelectedDatabaseNameChanged(string? value) => RefreshSelectedDatabase(value);
+
+    /// <summary>
+    /// Rebuilds the working set and the restore points for the chosen database.
+    ///
+    /// Called on selection change AND at the end of every load. Relying on the change alone meant
+    /// a reload with the same server and database still selected - the natural thing to do after
+    /// taking a fresh backup - raised no property change at all, so the sets and the timeline kept
+    /// the PREVIOUS scan's contents and the new backup never appeared.
+    /// </summary>
+    private void RefreshSelectedDatabase(string? value)
     {
         if (value == null || _allSets.Count == 0) return;
 
@@ -520,21 +598,28 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void SelectRestorePoint(RestorePoint? point)
-    {
-        if (point != null)
-            SelectedRestorePoint = point;
-    }
-
-    [RelayCommand]
     private void ToggleChainDetails()
     {
         ShowChainDetails = !ShowChainDetails;
     }
 
-    partial void OnSelectedRestorePointChanged(RestorePoint? value)
+    /// <summary>
+    /// Everything downstream of the timeline: the chain, the script, the point-in-time window and
+    /// the verification results all belong to the selected point, and are rebuilt or thrown away
+    /// when it moves.
+    ///
+    /// A plain PropertyChanged subscription rather than a partial hook - the property now lives on
+    /// <see cref="Timeline"/>, and a partial hook can only be written for a property the same class
+    /// declares.
+    /// </summary>
+    private void OnSelectedRestorePointChanged(RestorePoint? value)
     {
         ShowChainDetails = false;
+
+        // Verification belongs to the chain that was verified. Leaving the results on screen
+        // after the selection moves would show a green tick against backups nothing has read.
+        ClearVerifyResults();
+
         if (value == null)
         {
             RestoreChain = null;
@@ -551,6 +636,11 @@ public partial class RestoreViewModel : ViewModelBase
             InspectBackupMetadataCommand.NotifyCanExecuteChanged();
             CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
             CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
+
+            // No selected point means no script. Clearing the chain and leaving the script behind
+            // left a complete, authoritative-looking RESTORE on screen with nothing selected above
+            // it - which is the stale-script problem in its purest form.
+            UpdateRestoreSummary();
             return;
         }
 
@@ -566,6 +656,7 @@ public partial class RestoreViewModel : ViewModelBase
         ChainLsnVerified = false;
         UpdateChainIssues(chain);
         ValidateChainCommand.NotifyCanExecuteChanged();
+        VerifyChainCommand.NotifyCanExecuteChanged();
         UpdateRestoreSummary();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
@@ -600,7 +691,8 @@ public partial class RestoreViewModel : ViewModelBase
             var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
 
             _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer, scope, progress, ct);
-            _allSets = _blobService.GroupIntoBackupSets(_allBackups);
+            _allSets = _blobService.GroupIntoBackupSets(
+                _allBackups, SelectedContainer?.BackupServerTimeZoneId);
 
             var servers = _blobService.GetDiscoveredServers(_allBackups);
             DiscoveredServers = new ObservableCollection<string>(servers);
@@ -627,7 +719,16 @@ public partial class RestoreViewModel : ViewModelBase
                 ComputeAndDisplayRestorePoints();
             }
 
-            SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
+
+            // Unconditionally, not just when the selection changed - see RefreshSelectedDatabase.
+            RefreshSelectedDatabase(SelectedDatabaseName);
+
+            // Only when nothing above went wrong. Selecting the first server or database runs the
+            // whole filter-and-compute cascade, which can end in "no valid restore points found" -
+            // and painting a success line over that left an empty timeline with the status bar
+            // cheerfully reporting how many files had loaded. Found by the first ViewModel test.
+            if (!HasError)
+                SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
         }
         catch (OperationCanceledException)
         {
@@ -670,6 +771,20 @@ public partial class RestoreViewModel : ViewModelBase
         return new BlobListingScope(pathServer, SelectedDatabaseName);
     }
 
+    /// <summary>
+    /// Stops whichever server query is running - verify, validate, a metadata read, or a recovery
+    /// action. They share one source because they are mutually exclusive buttons (#111).
+    /// </summary>
+    [RelayCommand]
+    private void CancelQuery()
+    {
+        if (!_queryCancellation.CanCancel) return;
+
+        _queryCancellation.Cancel();
+        RefreshCancelState();
+        SetStatus("Stopping...");
+    }
+
     /// <summary>Stops an in-progress backup listing.</summary>
     [RelayCommand]
     private void CancelLoad()
@@ -679,6 +794,9 @@ public partial class RestoreViewModel : ViewModelBase
         SetStatus("Cancelling...");
     }
 
+    /// <summary>
+    /// Works out which points this database can be restored to, and hands them to the timeline.
+    /// </summary>
     private void ComputeAndDisplayRestorePoints()
     {
         var points = _chainBuilder.ComputeRestorePoints(_dbSets);
@@ -694,141 +812,15 @@ public partial class RestoreViewModel : ViewModelBase
                 .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
         HasInventoryIssues = InventoryIssues.Count > 0;
 
-        // Compute timeline positions (0-1)
-        if (points.Count > 1)
+        Timeline.Load(points);
+
+        if (points.Count == 0)
         {
-            var minTicks = points.First().Timestamp.Ticks;
-            var maxTicks = points.Last().Timestamp.Ticks;
-            var range = (double)(maxTicks - minTicks);
-            foreach (var p in points)
-                p.TimelinePosition = range > 0 ? (p.Timestamp.Ticks - minTicks) / range : 0.5;
-        }
-        else if (points.Count == 1)
-        {
-            points[0].TimelinePosition = 0.5;
-        }
-
-        // Compute vertical stacking rows to avoid horizontal overlap
-        ComputeRows(points);
-
-        RestorePoints = new ObservableCollection<RestorePoint>(points);
-        HasRestorePoints = points.Count > 0;
-
-        if (points.Count > 0)
-        {
-            var first = points.First().Timestamp;
-            var last = points.Last().Timestamp;
-            RestoreWindowText = $"{first:yyyy-MM-dd HH:mm} to {last:yyyy-MM-dd HH:mm}";
-            TimelineStartText = $"{first:yyyy-MM-dd HH:mm}";
-
-            // Compute time-interval tick marks
-            TimelineTicks = new ObservableCollection<TimelineTick>(ComputeTicks(first, last));
-
-            // Timeline height based on max row
-            int maxRow = points.Max(p => p.Row);
-            TimelineHeight = Math.Max(50, 30 + (maxRow + 1) * 18);
-
-            SelectedRestorePoint = points.Last();
-            ClearStatus();
-        }
-        else
-        {
-            RestoreWindowText = string.Empty;
-            TimelineTicks.Clear();
-            TimelineHeight = 50;
             SetError("No valid restore points found. Ensure there is at least one full backup.");
-        }
-    }
-
-    private static void ComputeRows(List<RestorePoint> points)
-    {
-        const double minSeparation = 0.025;
-        var rows = new List<List<double>>();
-
-        foreach (var p in points)
-        {
-            bool placed = false;
-            for (int row = 0; row < rows.Count; row++)
-            {
-                bool overlaps = rows[row].Any(pos => Math.Abs(pos - p.TimelinePosition) < minSeparation);
-                if (!overlaps)
-                {
-                    p.Row = row;
-                    rows[row].Add(p.TimelinePosition);
-                    placed = true;
-                    break;
-                }
-            }
-            if (!placed)
-            {
-                p.Row = rows.Count;
-                rows.Add([p.TimelinePosition]);
-            }
-        }
-    }
-
-    private static List<TimelineTick> ComputeTicks(DateTime first, DateTime last)
-    {
-        var ticks = new List<TimelineTick>();
-        var range = last - first;
-        var totalTicks = (double)(last.Ticks - first.Ticks);
-        if (totalTicks <= 0) return ticks;
-
-        // Choose interval based on range
-        TimeSpan interval;
-        string format;
-        if (range.TotalDays > 60)
-        {
-            interval = TimeSpan.FromDays(14);
-            format = "MMM dd";
-        }
-        else if (range.TotalDays > 14)
-        {
-            interval = TimeSpan.FromDays(7);
-            format = "MMM dd";
-        }
-        else if (range.TotalDays > 3)
-        {
-            interval = TimeSpan.FromDays(1);
-            format = "MMM dd";
-        }
-        else if (range.TotalHours > 12)
-        {
-            interval = TimeSpan.FromHours(6);
-            format = "HH:mm";
-        }
-        else
-        {
-            interval = TimeSpan.FromHours(1);
-            format = "HH:mm";
+            return;
         }
 
-        // Round start to the next clean interval boundary
-        var cursor = RoundUp(first, interval);
-
-        while (cursor < last)
-        {
-            double pos = (cursor.Ticks - first.Ticks) / totalTicks;
-            if (pos >= 0.02 && pos <= 0.98)
-            {
-                ticks.Add(new TimelineTick { Position = pos, Label = cursor.ToString(format) });
-            }
-            cursor += interval;
-        }
-
-        return ticks;
-    }
-
-    private static DateTime RoundUp(DateTime dt, TimeSpan interval)
-    {
-        if (interval.TotalDays >= 1)
-        {
-            var next = dt.Date.AddDays(1);
-            while (next <= dt) next = next.AddDays((int)interval.TotalDays);
-            return next;
-        }
-        var ticks = (dt.Ticks + interval.Ticks - 1) / interval.Ticks * interval.Ticks;
-        return new DateTime(ticks);
+        ClearStatus();
     }
 
     private void AutoPopulateMoveDefaults()
@@ -862,7 +854,8 @@ public partial class RestoreViewModel : ViewModelBase
         PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
         try
         {
-            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(ConnectedServer);
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(
+                ConnectedServer, _queryCancellation.Begin());
             var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
 
             if (!string.IsNullOrEmpty(dataPath))
@@ -909,21 +902,21 @@ public partial class RestoreViewModel : ViewModelBase
         parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
         parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
 
-        if (EffectiveStopAt is DateTime stopAt)
+        if (PointInTime.Effective is DateTime stopAt)
             parts.Add($"Stop at {stopAt:yyyy-MM-dd HH:mm:ss} (point-in-time recovery).");
-        else if (SelectedRestorePoint != null && SelectedRestorePoint.Type == BackupType.TransactionLog)
-            parts.Add($"Restore to end of log backup at {SelectedRestorePoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
+        else if (Timeline.SelectedPoint is { Type: BackupType.TransactionLog } logPoint)
+            parts.Add($"Restore to end of log backup at {logPoint.Timestamp:yyyy-MM-dd HH:mm:ss}.");
 
         var optionsList = new List<string>();
 
-        if (WithReplace)
+        if (Options.WithReplace)
             optionsList.Add("overwrite existing database (WITH REPLACE)");
-        if (DisconnectSessions)
+        if (Options.DisconnectSessions)
             optionsList.Add("disconnect active sessions");
         if (UseWithMove)
             optionsList.Add($"relocate data files (WITH MOVE)");
 
-        var recoveryDesc = RecoveryMode switch
+        var recoveryDesc = Options.RecoveryMode switch
         {
             RecoveryMode.Recovery => "brought online for use (RECOVERY)",
             RecoveryMode.NoRecovery => "left in restoring state (NORECOVERY)",
@@ -932,9 +925,9 @@ public partial class RestoreViewModel : ViewModelBase
         };
         optionsList.Add($"database will be {recoveryDesc}");
 
-        if (KeepReplication) optionsList.Add("preserve replication settings");
-        if (EnableBroker) optionsList.Add("enable Service Broker");
-        if (NewBroker) optionsList.Add("create new Service Broker ID");
+        if (Options.KeepReplication) optionsList.Add("preserve replication settings");
+        if (Options.EnableBroker) optionsList.Add("enable Service Broker");
+        if (Options.NewBroker) optionsList.Add("create new Service Broker ID");
 
         if (optionsList.Count > 0)
             parts.Add("Options: " + string.Join("; ", optionsList) + ".");
@@ -943,35 +936,15 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Recomputes the STOPAT window for the selected restore point. The window itself is
-    /// <see cref="BackupChain.StopAtWindow"/>; this only projects it onto the UI state.
+    /// Points the STOPAT box at the selected restore point's window, or turns it off.
+    ///
+    /// STOPAT only applies to a log restore, and only inside the LAST log's window - which is what
+    /// <see cref="BackupChain.StopAtWindow"/> works out. Deciding whether there is a window is
+    /// chain reasoning and stays here; validating against it does not.
     /// </summary>
     private void UpdatePointInTimeWindow(RestorePoint? point)
-    {
-        var window = point?.Type == BackupType.TransactionLog
-            ? RestoreChain?.StopAtWindow
-            : null;
-
-        if (window == null)
-        {
-            CanUsePointInTime = false;
-            UsePointInTime = false;
-            StopAtEarliest = null;
-            StopAtLatest = null;
-            StopAtText = string.Empty;
-            StopAtDateTime = null;
-            PointInTimeMessage = string.Empty;
-            HasPointInTimeError = false;
-            return;
-        }
-
-        CanUsePointInTime = true;
-        StopAtEarliest = window.Value.Earliest;
-        StopAtLatest = window.Value.Latest;
-        UsePointInTime = false;
-        StopAtText = window.Value.Latest.ToString(StopAtFormat);
-        ValidatePointInTime();
-    }
+        => PointInTime.SetWindow(
+            point?.Type == BackupType.TransactionLog ? RestoreChain?.StopAtWindow : null);
 
     /// <summary>
     /// Reads RESTORE HEADERONLY for every member of the selected chain and validates the LSN
@@ -983,18 +956,28 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsValidatingChain = true;
+        RefreshCancelState();
         ClearStatus();
         try
         {
             var headers = new List<ChainHeader>();
             foreach (var set in RestoreChain.AllSets)
             {
+                ct.ThrowIfCancellationRequested();
+
                 var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 try
                 {
-                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
+                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
                     headers.Add(new ChainHeader(set, header));
+                }
+                catch (OperationCanceledException)
+                {
+                    // Asked for. Must not be swallowed by the per-member catch below, which exists
+                    // so ONE unreadable backup does not abort the rest.
+                    throw;
                 }
                 catch (Exception)
                 {
@@ -1008,21 +991,157 @@ public partial class RestoreViewModel : ViewModelBase
             ChainLsnVerified = true;
 
             SetStatus(HasChainIssues
-                ? $"Chain validation found problems - see the panel above."
-                : $"Chain validated: {headers.Count} backup(s) read, LSN chain is intact.");
+                ? $"Chain check found problems - see the panel above."
+                : $"Chain checked: {headers.Count} header(s) read, the LSN chain is unbroken.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Chain check cancelled.");
         }
         catch (Exception ex)
         {
-            SetError($"Chain validation failed: {ex.Message}");
+            SetError($"Chain check failed: {ex.Message}");
         }
         finally
         {
+            _queryCancellation.End();
             IsValidatingChain = false;
+            RefreshCancelState();
         }
     }
 
+    /// <summary>
+    /// True once the chain has been checked and came back clean. The result belongs to the chain
+    /// that was checked, so it clears with the selection (#128).
+    /// </summary>
+    public bool ChainCheckPassed => ChainLsnVerified && !HasChainIssues;
+
     private bool CanValidateChain() =>
-        IsConnectedToServer && RestoreChain != null && !IsValidatingChain;
+        IsConnectedToServer && RestoreChain != null && !IsValidatingChain && !ChainCheckPassed;
+
+    /// <summary>
+    /// Runs RESTORE VERIFYONLY over every set in the chain: does each backup actually read back,
+    /// before an hour is spent finding out that it does not.
+    ///
+    /// This asks a different question from Validate chain. That one reads headers and checks the
+    /// LSNs line up - whether these backups belong together. This one reads the whole backup and
+    /// checks it is intact - whether they are usable at all. A truncated or half-uploaded blob
+    /// passes the first and fails this.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanVerifyChain))]
+    private async Task VerifyChainAsync()
+    {
+        if (RestoreChain == null || ConnectedServer == null) return;
+
+        var ct = _queryCancellation.Begin();
+        IsVerifyingChain = true;
+        RefreshCancelState();
+        ClearStatus();
+        ChainVerifyResults.Clear();
+        HasVerifyResults = false;
+
+        // The same MOVE clauses the restore would use. Without them VERIFYONLY checks the paths
+        // recorded inside the backup - the SOURCE server's - and reports directory-lookup failures
+        // for a restore that was never going to touch them (#129).
+        var fileMoves = BuildFileMoves();
+        VerifiedWithMove = fileMoves.Count > 0;
+
+        try
+        {
+            var sets = RestoreChain.AllSets;
+            for (int i = 0; i < sets.Count; i++)
+            {
+                var set = sets[i];
+                SetStatus($"Verifying {i + 1} of {sets.Count}: {set.TypeDisplay} {set.SetId}...");
+
+                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+                var result = await _sqlService.RestoreVerifyOnlyAsync(
+                    ConnectedServer, urls, Options.WithChecksum, fileMoves, ct);
+
+                ChainVerifyResults.Add(new ChainVerifyResult { Set = set, Result = result });
+                HasVerifyResults = true;
+            }
+
+            var failed = ChainVerifyResults.Count(r => !r.IsValid);
+            HasVerifyFailures = failed > 0;
+
+            UpdateTargetPathWarning();
+
+            SetStatus(failed > 0
+                ? $"{failed} of {ChainVerifyResults.Count} backup(s) failed verification - see below. Do not rely on this chain."
+                : HasTargetPathProblem
+                    ? $"All {ChainVerifyResults.Count} backup(s) read back intact, but the restore will fail - see below."
+                    : $"All {ChainVerifyResults.Count} backup(s) in the chain verified.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Verification cancelled.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Verification could not run: {ex.Message}");
+        }
+        finally
+        {
+            _queryCancellation.End();
+            IsVerifyingChain = false;
+            RefreshCancelState();
+        }
+    }
+
+    /// <summary>
+    /// True once every backup in the chain read back intact AND the restore has somewhere to
+    /// write. Re-running VERIFYONLY on a large chain by accident is expensive, so once it has
+    /// passed for this selection the button is done.
+    /// </summary>
+    public bool VerifyPassed => HasVerifyResults && !HasVerifyFailures && !HasTargetPathProblem;
+
+    private bool CanVerifyChain() =>
+        IsConnectedToServer && RestoreChain != null && !IsVerifyingChain && !IsExecuting
+        && !VerifyPassed;
+
+    /// <summary>
+    /// Turns SQL Server's directory-lookup complaint into something that says what to do about it.
+    ///
+    /// Backups can read back perfectly and still be certain to fail on restore, because the
+    /// directories they would be written to do not exist on this server. VERIFYONLY reports that
+    /// as an informational message next to "the backup set is valid", which is four lines of grey
+    /// text under a green tick - so it gets said properly here instead (#129).
+    /// </summary>
+    private void UpdateTargetPathWarning()
+    {
+        HasTargetPathProblem = ChainVerifyResults.Any(r => r.Result.TargetPathsMissing);
+
+        TargetPathProblemMessage = !HasTargetPathProblem
+            ? string.Empty
+            : VerifiedWithMove
+                ? "The target directories do not exist on this server. Create them, or change the "
+                  + "file paths above - as it stands the restore will fail once it has already "
+                  + "dropped the target database."
+                : "The file paths recorded inside these backups do not exist on this server, and "
+                  + "no WITH MOVE is set - so the restore will fail once it has already dropped "
+                  + "the target database. Tick WITH MOVE and give it paths that exist here.";
+    }
+
+    /// <summary>True when the last verification found directories a restore could not write to.</summary>
+    [ObservableProperty]
+    private bool _hasTargetPathProblem;
+
+    [ObservableProperty]
+    private string _targetPathProblemMessage = string.Empty;
+
+    /// <summary>Whether the last verification was given MOVE clauses, which changes what to say.</summary>
+    [ObservableProperty]
+    private bool _verifiedWithMove;
+
+    private void ClearVerifyResults()
+    {
+        ChainVerifyResults.Clear();
+        HasVerifyResults = false;
+        HasVerifyFailures = false;
+        HasTargetPathProblem = false;
+        TargetPathProblemMessage = string.Empty;
+    }
 
     private void UpdateChainIssues(BackupChain? chain, IReadOnlyList<ChainHeader>? headers = null)
     {
@@ -1050,95 +1169,64 @@ public partial class RestoreViewModel : ViewModelBase
                 : $"{warnings} warning(s) about this chain";
     }
 
-    private const string StopAtFormat = "yyyy-MM-dd HH:mm:ss";
+    // The WITH MOVE paths are typed into text boxes rather than ticked, and both were missing
+    // their handler - so the script on screen did not change when they did. That is the exact
+    // failure RegenerateScript exists to prevent: typing a new data-file path, watching the box
+    // update, and running a script that still had the old one - or no MOVE clause at all, sending
+    // the restore to the file paths baked into the backup. The rest of that class of bug is gone
+    // structurally with #115 seam 7; these two are still here because the moves are worked out from
+    // the chain and the server rather than being options.
+    partial void OnMoveDataFilePathChanged(string value) => UpdateRestoreSummary();
+    partial void OnMoveLogFilePathChanged(string value) => UpdateRestoreSummary();
 
-    private static readonly string[] StopAtAcceptedFormats =
-    [
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-ddTHH:mm:ss",
-        "yyyy-MM-dd HH:mm",
-        "yyyy-MM-ddTHH:mm"
-    ];
-
-    private void ValidatePointInTime()
+    // Verification opens its own connection and reads whole backups. Letting it start while a
+    // restore is running would put a second heavy reader on the same server at the worst moment.
+    partial void OnIsExecutingChanged(bool value)
     {
-        if (!CanUsePointInTime)
-        {
-            StopAtDateTime = null;
-            PointInTimeMessage = string.Empty;
-            HasPointInTimeError = false;
-            return;
-        }
-
-        if (!DateTime.TryParseExact(
-                StopAtText?.Trim(), StopAtAcceptedFormats,
-                CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-        {
-            StopAtDateTime = null;
-            HasPointInTimeError = UsePointInTime;
-            PointInTimeMessage = $"Enter a time as {StopAtFormat}.";
-            UpdateRestoreSummary();
-            return;
-        }
-
-        // Exclusive lower bound: at exactly the previous set's time nothing from this log has
-        // been applied yet, which is the earlier restore point, not this one.
-        if (parsed <= StopAtEarliest)
-        {
-            StopAtDateTime = null;
-            HasPointInTimeError = UsePointInTime;
-            PointInTimeMessage =
-                $"Must be after {StopAtEarliest:yyyy-MM-dd HH:mm:ss} — to stop earlier, " +
-                "select an earlier restore point on the timeline.";
-            UpdateRestoreSummary();
-            return;
-        }
-
-        if (parsed > StopAtLatest)
-        {
-            StopAtDateTime = null;
-            HasPointInTimeError = UsePointInTime;
-            PointInTimeMessage =
-                $"Must be at or before {StopAtLatest:yyyy-MM-dd HH:mm:ss} — to stop later, " +
-                "select a later restore point on the timeline.";
-            UpdateRestoreSummary();
-            return;
-        }
-
-        StopAtDateTime = parsed;
-        HasPointInTimeError = false;
-        PointInTimeMessage = UsePointInTime
-            ? $"Recovery will stop at {parsed:yyyy-MM-dd HH:mm:ss}; later transactions in this log are discarded."
-            : $"Valid range: after {StopAtEarliest:yyyy-MM-dd HH:mm:ss} up to {StopAtLatest:yyyy-MM-dd HH:mm:ss}.";
-        UpdateRestoreSummary();
+        VerifyChainCommand.NotifyCanExecuteChanged();
+        RefreshExecuteBlockedReason();
+        RefreshCheckState();
     }
 
-    /// <summary>The STOPAT value to generate, or null to restore the whole log chain.</summary>
-    private DateTime? EffectiveStopAt =>
-        CanUsePointInTime && UsePointInTime && !HasPointInTimeError ? StopAtDateTime : null;
-
-    partial void OnStopAtTextChanged(string value) => ValidatePointInTime();
-
-    partial void OnUsePointInTimeChanged(bool value)
+    /// <summary>
+    /// Why Execute cannot be pressed, or empty when it can.
+    ///
+    /// The button was disabled identically whether the user was not connected, had no script, or
+    /// had a chain the app already knows will not restore. Three different problems, one greyed-out
+    /// button, and the information was all sitting in properties nobody showed.
+    /// </summary>
+    public string ExecuteBlockedReason
     {
-        ValidatePointInTime();
-        UpdateRestoreSummary();
+        get
+        {
+            if (IsExecuting) return string.Empty;
+            if (!IsConnectedToServer) return "Connect to a SQL Server to execute this restore.";
+            if (!HasScript) return "No script yet - pick a restore point and a target database name.";
+            if (HasChainErrors) return "This chain cannot restore. See the problems listed above.";
+            return string.Empty;
+        }
     }
 
-    partial void OnWithReplaceChanged(bool value) => UpdateRestoreSummary();
-    partial void OnDisconnectSessionsChanged(bool value) => UpdateRestoreSummary();
-    partial void OnRecoveryModeChanged(RecoveryMode oldValue, RecoveryMode newValue)
+    public bool IsExecuteBlocked => ExecuteBlockedReason.Length > 0;
+
+    /// <summary>The button's own IsEnabled, so the reason and the enabled state cannot disagree.</summary>
+    public bool CanPressExecute => !IsExecuteBlocked;
+
+    private void RefreshExecuteBlockedReason()
     {
-        OnPropertyChanged(nameof(IsStandbyMode));
-        UpdateRestoreSummary();
+        OnPropertyChanged(nameof(ExecuteBlockedReason));
+        OnPropertyChanged(nameof(IsExecuteBlocked));
+        OnPropertyChanged(nameof(CanPressExecute));
     }
-    partial void OnKeepReplicationChanged(bool value) => UpdateRestoreSummary();
-    partial void OnEnableBrokerChanged(bool value) => UpdateRestoreSummary();
-    partial void OnNewBrokerChanged(bool value) => UpdateRestoreSummary();
+
+    partial void OnHasScriptChanged(bool value) => RefreshExecuteBlockedReason();
+
+    partial void OnHasChainErrorsChanged(bool value) => RefreshExecuteBlockedReason();
     partial void OnTargetDatabaseNameChanged(string value) => UpdateRestoreSummary();
 
     partial void OnIsConnectedToServerChanged(bool value)
     {
+        RefreshExecuteBlockedReason();
         var chips = value && ConnectedServer != null
             ? ConnectedServer.TagChips
             : [];
@@ -1146,6 +1234,7 @@ public partial class RestoreViewModel : ViewModelBase
         HasConnectedServerTags = ConnectedServerTags.Count > 0;
 
         ValidateChainCommand.NotifyCanExecuteChanged();
+        VerifyChainCommand.NotifyCanExecuteChanged();
         FetchLogicalNamesCommand.NotifyCanExecuteChanged();
         InspectBackupMetadataCommand.NotifyCanExecuteChanged();
         CopyFileListOnlyCommandCommand.NotifyCanExecuteChanged();
@@ -1173,14 +1262,73 @@ public partial class RestoreViewModel : ViewModelBase
 
         // Refuse to silently fall back to a full-chain restore when the user asked to stop at a
         // time we could not use - that would replay exactly the transactions they meant to skip.
-        if (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null)
+        if (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
         {
-            SetError($"Point-in-time target is not valid. {PointInTimeMessage}");
+            SetError($"Point-in-time target is not valid. {PointInTime.Message}");
+            return;
+        }
+
+        if (!Options.HasStandbyFileIfNeeded)
+        {
+            SetError("STANDBY needs an undo file path. Without one the script would end in " +
+                     "STANDBY = '', which fails after the database has already been overwritten.");
             return;
         }
 
         RegenerateScript();
         if (HasScript) SetStatus("Script generated successfully.");
+    }
+
+    /// <summary>
+    /// The WITH MOVE clauses the restore would use, or an empty list when it is not moving files.
+    ///
+    /// Shared with the verification, which passes the same list to RESTORE VERIFYONLY - otherwise
+    /// VERIFYONLY checks the paths recorded inside the backup, which belong to the SOURCE server,
+    /// and reports directory-lookup failures for a restore that was never going to use them (#129).
+    /// </summary>
+    private List<FileMoveOption> BuildFileMoves()
+    {
+        var fileMoves = new List<FileMoveOption>();
+        if (!UseWithMove) return fileMoves;
+
+        if (HasFetchedFileMoves && FetchedFileMoves.Count > 0)
+        {
+            foreach (var m in FetchedFileMoves)
+            {
+                if (!string.IsNullOrWhiteSpace(m.NewPhysicalName))
+                {
+                    fileMoves.Add(new FileMoveOption
+                    {
+                        LogicalName = m.LogicalName,
+                        PhysicalName = m.PhysicalName,
+                        NewPhysicalName = m.NewPhysicalName,
+                        Type = m.Type
+                    });
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(MoveDataFilePath))
+        {
+            // Guessed logical names. Wrong for a renamed database or one with secondary files,
+            // which is what Get file names exists to fix.
+            var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
+            fileMoves.Add(new FileMoveOption
+            {
+                LogicalName = sourceDbName,
+                PhysicalName = string.Empty,
+                NewPhysicalName = MoveDataFilePath,
+                Type = "ROWS"
+            });
+            fileMoves.Add(new FileMoveOption
+            {
+                LogicalName = sourceDbName + "_log",
+                PhysicalName = string.Empty,
+                NewPhysicalName = MoveLogFilePath,
+                Type = "LOG"
+            });
+        }
+
+        return fileMoves;
     }
 
     /// <summary>
@@ -1201,92 +1349,22 @@ public partial class RestoreViewModel : ViewModelBase
 
         if (RestoreChain == null
             || string.IsNullOrWhiteSpace(TargetDatabaseName)
-            || (UsePointInTime && CanUsePointInTime && EffectiveStopAt == null))
+            || (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
+            || !Options.HasStandbyFileIfNeeded)
         {
             GeneratedScript = string.Empty;
             HasScript = false;
             return;
         }
 
-        var sasToken = SelectedContainer != null
-            ? _credentialStore.GetSasToken(SelectedContainer)
-            : null;
-
-        var fileMoves = new List<FileMoveOption>();
-        if (UseWithMove)
-        {
-            if (HasFetchedFileMoves && FetchedFileMoves.Count > 0)
-            {
-                foreach (var m in FetchedFileMoves)
-                {
-                    if (!string.IsNullOrWhiteSpace(m.NewPhysicalName))
-                        fileMoves.Add(new FileMoveOption { LogicalName = m.LogicalName, PhysicalName = m.PhysicalName, NewPhysicalName = m.NewPhysicalName, Type = m.Type });
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(MoveDataFilePath))
-            {
-                var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
-                fileMoves.Add(new FileMoveOption { LogicalName = sourceDbName, PhysicalName = string.Empty, NewPhysicalName = MoveDataFilePath, Type = "ROWS" });
-                fileMoves.Add(new FileMoveOption { LogicalName = sourceDbName + "_log", PhysicalName = string.Empty, NewPhysicalName = MoveLogFilePath, Type = "LOG" });
-            }
-        }
-
-        var options = new RestoreOptions
-        {
-            TargetDatabaseName = TargetDatabaseName,
-            WithReplace = WithReplace,
-            RecoveryMode = RecoveryMode,
-            StandbyFilePath = string.IsNullOrWhiteSpace(StandbyFilePath) ? null : StandbyFilePath,
-            DisconnectSessions = DisconnectSessions,
-            StatsPercent = StatsPercent,
-            StopAt = EffectiveStopAt,
-            KeepReplication = KeepReplication,
-            EnableBroker = EnableBroker,
-            NewBroker = NewBroker,
-            SqlCredentialName = SqlCredentialName,
-            SasToken = sasToken,
-            StorageAccountUrl = SelectedContainer?.ContainerUrl,
-            FileMoves = fileMoves
-        };
+        // The three things that are not options: which database, where the point-in-time target
+        // ended up, and where the files land - each worked out somewhere that knows about the
+        // chain or the server.
+        var options = Options.Build(TargetDatabaseName, PointInTime.Effective, BuildFileMoves());
 
         GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
         HasScript = true;
     }
-
-    /// <summary>Create or update the blob credential on the connected server (optional; not included in generated script).</summary>
-    [RelayCommand(CanExecute = nameof(CanCreateCredential))]
-    private async Task CreateCredentialOnServerAsync()
-    {
-        if (ConnectedServer == null || SelectedContainer == null) return;
-
-        var sasToken = _credentialStore.GetSasToken(SelectedContainer);
-        if (string.IsNullOrEmpty(sasToken))
-        {
-            SetError("No SAS token stored for this container. Add or refresh the token in Blob Storage config.");
-            return;
-        }
-
-        try
-        {
-            var change = await _sqlService.EnsureCredentialExistsAsync(
-                ConnectedServer, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
-            await RefreshCredentialStatusAsync();
-            SetStatus(change == CredentialChange.Created
-                ? "Credential created on server."
-                : "Credential updated on server with the stored SAS token.");
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to create credential: {ex.Message}");
-        }
-    }
-
-    // Deliberately available even when the credential is present and valid. SQL Server will not
-    // hand back a credential's secret, so "present and SAS" says nothing about whether the token
-    // inside it still works - a SAS that was rotated or has expired looks identical from here.
-    // Since Execute no longer rewrites the credential on every run, this button is the only way
-    // to push a fresh token, and hiding it left users with no route at all.
-    private bool CanCreateCredential() => IsConnectedToServer && SelectedContainer != null;
 
     [RelayCommand]
     private void CopyScript()
@@ -1314,13 +1392,20 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsBusy = true;
+        RefreshCancelState();
         BackupMetadataSummary = null;
+        // Captured BEFORE the await. Selecting a different restore point sets RestoreChain to null
+        // on the UI thread, and it can do that while this call is in flight - in which case the
+        // catch below would itself throw, replacing the error explaining why FILELISTONLY failed
+        // with a bare "Nine Lives hit an unexpected error".
+        // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
+        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+
         try
         {
-            // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-            var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls);
+            var list = await _sqlService.RestoreFileListOnlyAsync(ConnectedServer, urls, ct);
 
             var dataDir = Path.GetDirectoryName(MoveDataFilePath) ?? @"C:\SQL\Data";
             var logDir = Path.GetDirectoryName(MoveLogFilePath) ?? dataDir;
@@ -1338,20 +1423,21 @@ public partial class RestoreViewModel : ViewModelBase
 
             FetchedFileMoves = new ObservableCollection<FileMoveOption>(list);
             HasFetchedFileMoves = FetchedFileMoves.Count > 0;
-            SetStatus($"RESTORE FILELISTONLY: {FetchedFileMoves.Count} logical file(s). Edit paths above and use WITH MOVE for correct restore.");
+            SetStatus($"Read {FetchedFileMoves.Count} logical file name(s) from the backup. Edit the target paths above, and tick WITH MOVE to use them.");
         }
         catch (Exception ex)
         {
-            var urlList = RestoreChain!.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var urlPreview = urlList.Count > 0 ? urlList[0] : "(no URL)";
-            if (urlList.Count > 1) urlPreview += $" (+{urlList.Count - 1} more)";
+            var urlPreview = urls.Count > 0 ? urls[0] : "(no URL)";
+            if (urls.Count > 1) urlPreview += $" (+{urls.Count - 1} more)";
             SetError($"RESTORE FILELISTONLY failed: {ex.Message}. URL used: {urlPreview}. Run the same RESTORE FILELISTONLY in SSMS to confirm credential/network.");
             FetchedFileMoves = [];
             HasFetchedFileMoves = false;
         }
         finally
         {
+            _queryCancellation.End();
             IsBusy = false;
+            RefreshCancelState();
         }
     }
 
@@ -1363,12 +1449,16 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
 
+        var ct = _queryCancellation.Begin();
         IsBusy = true;
+        RefreshCancelState();
+        // Captured before the await - see the note on FetchLogicalNamesAsync.
+        // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
+        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+
         try
         {
-            // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-            var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls);
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
 
             if (header == null)
             {
@@ -1385,19 +1475,20 @@ public partial class RestoreViewModel : ViewModelBase
             sb.AppendLine($"Last LSN: {header.LastLsn?.ToString() ?? "(null)"}");
             sb.AppendLine($"Database backup LSN: {header.DatabaseBackupLsn?.ToString() ?? "(null)"}");
             BackupMetadataSummary = sb.ToString();
-            SetStatus("RESTORE HEADERONLY completed. See metadata summary below.");
+            SetStatus("Header read. See the metadata below.");
         }
         catch (Exception ex)
         {
-            var urlList = RestoreChain!.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-            var urlPreview = urlList.Count > 0 ? urlList[0] : "(no URL)";
-            if (urlList.Count > 1) urlPreview += $" (+{urlList.Count - 1} more)";
+            var urlPreview = urls.Count > 0 ? urls[0] : "(no URL)";
+            if (urls.Count > 1) urlPreview += $" (+{urls.Count - 1} more)";
             SetError($"RESTORE HEADERONLY failed: {ex.Message}. URL used: {urlPreview}. Run the same RESTORE HEADERONLY in SSMS to confirm credential/network.");
             BackupMetadataSummary = null;
         }
         finally
         {
+            _queryCancellation.End();
             IsBusy = false;
+            RefreshCancelState();
         }
     }
 
@@ -1459,14 +1550,32 @@ public partial class RestoreViewModel : ViewModelBase
         if (string.IsNullOrEmpty(GeneratedScript) || !IsConnectedToServer)
             return;
 
-        // Refuse to arm when the chain cannot possibly restore. This is the last safe moment:
+        // Rebuild before arming, so what runs is what the options currently say - not whatever the
+        // last change handler happened to leave behind. Every option is supposed to keep the script
+        // in step on its own; this is the backstop that makes forgetting one a stale display rather
+        // than a restore that does something different from what it shows.
+        RegenerateScript();
+        if (string.IsNullOrEmpty(GeneratedScript))
+        {
+            SetError("The current options do not produce a script. Check the settings above.");
+            IsExecuteArmed = false;
+            ExecuteButtonText = "Execute on Server";
+            return;
+        }
+
+        // Refuse to run when the chain cannot possibly restore. This is the last safe moment:
         // once execution starts, WITH REPLACE drops the target database, and a chain that fails
         // partway leaves nothing usable behind. Failing here costs the user a few seconds;
         // failing mid-restore costs them the database they were restoring over.
-        if (HasChainErrors && !IsExecuteArmed)
+        //
+        // Checked on the confirm press as well as when arming: validation can finish during the
+        // five-second countdown and find an error that was not known when the button was armed.
+        if (HasChainErrors)
         {
             var first = ChainIssues.First(i => i.IsError);
             SetError($"Cannot execute: {first.Title}. {first.Detail}");
+            IsExecuteArmed = false;
+            ExecuteButtonText = "Execute on Server";
             return;
         }
 
@@ -1487,11 +1596,23 @@ public partial class RestoreViewModel : ViewModelBase
         IsExecuteArmed = false;
         ExecuteButtonText = "Execute on Server";
 
+        var startedAt = DateTime.Now;
+        var outcome = RestoreOutcome.Failed;
+        string? failure = null;
+
+        // Set false when the run is abandoned before anything was attempted, so history records
+        // executions rather than button presses.
+        var attempted = true;
+
         var executeToken = _executeCancellation.Begin();
         IsExecuting = true;
+        Console.IsRunning = true;
+        // Reset alongside ExecutionComplete. Left over from a previous run it could combine with an
+        // early bail-out to show the success banner - and write "Outcome: Succeeded" into a saved
+        // log - for a restore that never ran.
+        ExecutionSuccess = false;
         ExecutionComplete = false;
-        ConsoleLines.Clear();
-        HasConsoleOutput = false;
+        Console.Clear();
         RecoveryActions = [];
         HasRecoveryActions = false;
         RefreshCancelState();
@@ -1507,63 +1628,26 @@ public partial class RestoreViewModel : ViewModelBase
             var server = ConnectedServer;
             if (server == null)
             {
+                attempted = false;
                 SetError("Not connected to a server.");
                 return;
             }
 
-            if (SelectedContainer != null)
+            // Everything about the server-side credential lives on the child (#115 seam 5),
+            // including the decision not to touch one. A refusal has written nothing, so there is
+            // nothing to unwind - and nothing to file in the history either.
+            var preflight = await Credential.PrepareForRestoreAsync(server, AppendLog);
+            if (!preflight.CanProceed)
             {
-                var sasToken = _credentialStore.GetSasToken(SelectedContainer);
-                if (!string.IsNullOrEmpty(sasToken))
-                {
-                    // Only write to the server when the credential is genuinely missing or is not
-                    // a SAS credential. This used to drop and recreate on every single execute,
-                    // regardless of the status the panel above was displaying, which contradicted
-                    // the UI's own "creating it is optional" wording and briefly removed a
-                    // credential that other sessions may have been using.
-                    //
-                    // A credential that exists and is SAS is left alone. Its secret could still be
-                    // a rotated SAS that no longer works - that is unknowable from here, since the
-                    // secret cannot be read back - so the fix for that case is the explicit
-                    // refresh button, not silently rewriting server state on every run.
-                    var (exists, isSas) = await _sqlService.CredentialExistsAsync(server, SqlCredentialName);
-                    if (exists && isSas)
-                    {
-                        AppendLog($"Using the existing SQL credential [{SqlCredentialName}]. Server state not modified.");
-                    }
-                    else
-                    {
-                        AppendLog(exists
-                            ? $"Credential [{SqlCredentialName}] exists but is not a SAS credential - updating it..."
-                            : $"Credential [{SqlCredentialName}] is missing - creating it...");
-
-                        // This statement carries the SAS token to the server. It is the one moment
-                        // in a restore where a secret crosses the wire, so if the connection is
-                        // encrypted but unverified, say so here rather than only in settings (#17).
-                        if (server.TrustServerCertificate)
-                            AppendLog(
-                                "  Note: this connection trusts the server certificate without validating it, " +
-                                "and the SAS token is sent over it.");
-
-                        var change = await _sqlService.EnsureCredentialExistsAsync(
-                            server, SqlCredentialName, SelectedContainer.ContainerUrl, sasToken);
-
-                        AppendLog(change == CredentialChange.Created
-                            ? "Credential created on the server."
-                            : "Credential updated on the server.");
-
-                        // Changing a credential is a change to shared state on someone's instance.
-                        // It belongs in the file, not only in a console that closes with the app.
-                        App.Log.ServerChange(server.ServerName,
-                            $"credential [{SqlCredentialName}] {change.ToString().ToLowerInvariant()}");
-                    }
-                }
+                attempted = false;
+                SetError(preflight.Refusal!);
+                return;
             }
 
-            App.Log.ServerChange(server.ServerName,
+            _log.ServerChange(server.ServerName,
                 $"restore starting: target [{TargetDatabaseName}], " +
-                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={WithReplace}, " +
-                $"recovery={RecoveryMode}, stopAt={EffectiveStopAt?.ToString("s") ?? "none"}");
+                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={Options.WithReplace}, " +
+                $"recovery={Options.RecoveryMode}, stopAt={PointInTime.Effective?.ToString("s") ?? "none"}");
 
             AppendLog("Beginning restore execution...\n");
 
@@ -1579,11 +1663,14 @@ public partial class RestoreViewModel : ViewModelBase
                 executeToken);
 
             ExecutionSuccess = true;
+            outcome = RestoreOutcome.Succeeded;
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
         }
         catch (OperationCanceledException)
         {
+            outcome = RestoreOutcome.Cancelled;
+            failure = "Cancelled by the user part-way through the chain.";
             // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
             // the client waiting and SQL Server rolls back the statement that was in flight, but
             // the target stays mid-restore - so this must be as loud as a failure, and it goes
@@ -1592,7 +1679,7 @@ public partial class RestoreViewModel : ViewModelBase
             AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
                       "restore stopped part-way through the chain.");
 
-            App.Log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
+            _log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
                 $"restore CANCELLED by user, target [{TargetDatabaseName}]");
 
             SetError("Restore cancelled. The target database has been left mid-restore - see below.");
@@ -1603,6 +1690,8 @@ public partial class RestoreViewModel : ViewModelBase
         catch (Exception ex)
         {
             ExecutionSuccess = false;
+            outcome = RestoreOutcome.Failed;
+            failure = ex.Message;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
 
@@ -1615,10 +1704,39 @@ public partial class RestoreViewModel : ViewModelBase
         {
             _executeCancellation.End();
             IsExecuting = false;
+            Console.IsRunning = false;
             ExecutionComplete = true;
-            FlushConsole();   // nothing buffered may outlive the run
+            Console.Flush();   // nothing buffered may outlive the run
             RefreshCancelState();
+
+            // After the flush, so the recorded log is the whole console rather than whatever had
+            // made it out of the batching buffer. Recorded for every outcome including cancelled -
+            // "I stopped it" is exactly the kind of thing a change ticket needs to say.
+            if (attempted) RecordHistory(startedAt, outcome, failure);
         }
+    }
+
+    /// <summary>
+    /// Files this execution in the history (#31). Never throws: the store swallows its own
+    /// failures, and a restore must not be reported as failed because a record could not be kept.
+    /// </summary>
+    private void RecordHistory(DateTime startedAt, RestoreOutcome outcome, string? failure)
+    {
+        _history.Append(new RestoreHistoryEntry
+        {
+            StartedAt = startedAt,
+            CompletedAt = DateTime.Now,
+            ServerName = ConnectedServer?.ServerName ?? "unknown",
+            TargetDatabase = TargetDatabaseName,
+            ContainerName = SelectedContainer?.Name,
+            SourceDatabase = SelectedDatabaseName,
+            RestorePointTimestamp = Timeline.SelectedPoint?.Timestamp,
+            ChainSummary = RestoreChain?.Summary ?? "no chain",
+            Outcome = outcome,
+            ErrorMessage = failure,
+            Script = GeneratedScript,
+            Log = Console.Text
+        });
     }
 
     /// <summary>
@@ -1686,20 +1804,39 @@ public partial class RestoreViewModel : ViewModelBase
     {
         if (action == null || ConnectedServer == null) return;
 
+        // Cancellable, and it needs it more than most: this runs when a restore has already
+        // failed, RESTORE ... WITH RECOVERY can take a long time on a large database, and it goes
+        // out at CommandTimeout = 0. Without a Stop the only way out was killing the process - at
+        // the exact moment the user is trying to get their database back.
+        var ct = _queryCancellation.Begin();
+        RefreshCancelState();
+
         try
         {
             AppendLog($"\nRunning: {action.Sql}");
-            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql);
+            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql, ct);
             AppendLog("Completed.");
             await ReportRecoveryStateAsync(ConnectedServer);
 
             if (!HasRecoveryActions)
                 SetStatus($"[{TargetDatabaseName}] is back to a usable state.");
         }
+        catch (OperationCanceledException)
+        {
+            // SQL Server rolls back the statement that was in flight, so the database is where it
+            // was before this step - which is still whatever the failed restore left behind.
+            AppendLog("\nCancelled. The database is in the same state as before this step.");
+            SetStatus("Recovery step cancelled.");
+        }
         catch (Exception ex)
         {
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Recovery step failed: {ex.Message}");
+        }
+        finally
+        {
+            _queryCancellation.End();
+            RefreshCancelState();
         }
     }
 
@@ -1718,85 +1855,81 @@ public partial class RestoreViewModel : ViewModelBase
     /// Redaction happens inside the log, not here (#40).
     /// </summary>
     /// <summary>
-    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
-    /// drift from what the user was shown.
-    ///
-    /// Writes to a COLLECTION rather than concatenating a bound string. Appending to a bound string
-    /// rebuilds it and re-renders the whole TextBox on every message - O(n^2) - which was a large
-    /// part of why a restore reporting progress every few percent looked like it arrived in bursts
-    /// rather than live.
+    /// The execution console. Its batching and line handling live in ConsoleBuffer (#115) - this
+    /// screen only feeds it and shows it.
     /// </summary>
-    private void AppendLog(string message)
-    {
-        foreach (var raw in message.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-
-            // Messages routinely arrive with a leading or trailing newline for spacing, and SQL
-            // Server's own output has its own blank lines. Left alone that produced a gap between
-            // almost every line. One blank line is allowed as a separator; runs of them are not.
-            if (line.Trim().Length == 0)
-            {
-                if (_pending.Count > 0 && _pending[^1].Text.Length == 0) continue;
-                if (_pending.Count == 0 && (ConsoleLines.Count == 0 || ConsoleLines[^1].Text.Length == 0)) continue;
-                _pending.Add(new ConsoleLine(string.Empty));
-                continue;
-            }
-
-            _pending.Add(ConsoleLine.From(line));
-        }
-
-        App.Log.Info($"[execute] {message.Trim()}");
-        ScheduleConsoleFlush();
-    }
+    public ConsoleBuffer Console { get; }
 
     /// <summary>
-    /// Moves buffered lines onto the bound collection on a timer rather than as they arrive.
-    ///
-    /// SQL Server emits progress in clusters - several messages within a millisecond, then nothing
-    /// for a second. Adding each one individually meant a layout pass and a scroll per message, in
-    /// bursts, which is what made the console judder. Flushing on a fixed tick turns any arrival
-    /// pattern into a steady redraw, and a whole cluster costs one layout pass instead of ten.
+    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
+    /// drift from what the user was shown.
     /// </summary>
-    private void ScheduleConsoleFlush()
-    {
-        if (_consoleFlushTimer != null) return;
+    private void AppendLog(string message) => Console.Append(message);
 
-        _consoleFlushTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(60)
-        };
-        _consoleFlushTimer.Tick += (_, _) => FlushConsole();
-        _consoleFlushTimer.Start();
-    }
 
-    private void FlushConsole()
-    {
-        if (_pending.Count == 0)
-        {
-            // Nothing arriving and nothing running - stop ticking rather than spin forever.
-            if (!IsExecuting)
-            {
-                _consoleFlushTimer?.Stop();
-                _consoleFlushTimer = null;
-            }
-            return;
-        }
-
-        foreach (var line in _pending) ConsoleLines.Add(line);
-        _pending.Clear();
-        HasConsoleOutput = true;
-    }
-
-    private readonly List<ConsoleLine> _pending = [];
-    private DispatcherTimer? _consoleFlushTimer;
-
-    /// <summary>The console as plain text, for copying into a bug report.</summary>
-    public string ConsoleText => string.Join(Environment.NewLine, ConsoleLines.Select(l => l.Text));
 
     [RelayCommand]
     private void CopyConsole()
-        => TryCopyToClipboard(ConsoleText, "Execution log copied to clipboard.");
+        => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
+
+    /// <summary>
+    /// Writes the console to a file, with a header saying what it was (#31). The clipboard is fine
+    /// for pasting into a chat window; a change ticket or an incident write-up wants a file, and
+    /// wants it to say which server and which database on its own.
+    /// </summary>
+    [RelayCommand]
+    private void SaveConsole()
+    {
+        if (string.IsNullOrEmpty(Console.Text))
+        {
+            SetError("There is no execution log to save yet.");
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Text Files (*.txt)|*.txt|Log Files (*.log)|*.log|All Files (*.*)|*.*",
+            DefaultExt = ".txt",
+            FileName = $"ninelives_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, BuildSavedLog());
+            SetStatus($"Execution log saved to {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            // Read-only location, full disk, or a path the database name made invalid. Any of
+            // those used to take the whole app down from inside a synchronous command (#13).
+            SetError($"Could not save the execution log: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The console plus the context needed to read it a week later. Redacted on the way out for
+    /// the same reason the operation log is - this file gets attached to tickets.
+    /// </summary>
+    private string BuildSavedLog()
+    {
+        var header = new StringBuilder();
+        header.AppendLine("Nine Lives - restore execution log");
+        header.AppendLine($"Saved:      {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        header.AppendLine($"Server:     {ConnectedServer?.ServerName ?? "not connected"}");
+        header.AppendLine($"Target:     {TargetDatabaseName}");
+        if (SelectedContainer != null)
+            header.AppendLine($"Container:  {SelectedContainer.Name}");
+        if (Timeline.SelectedPoint != null)
+            header.AppendLine($"Point:      {Timeline.SelectedPoint.TimestampDisplay}");
+        header.AppendLine($"Chain:      {RestoreChain?.Summary ?? "none"}");
+        header.AppendLine($"Outcome:    {(ExecutionComplete ? (ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
+        header.AppendLine(new string('-', 60));
+        header.AppendLine();
+
+        return LogRedactor.Redact(header + Console.Text);
+    }
 
     private async Task RunArmCountdownAsync(CancellationToken ct)
     {

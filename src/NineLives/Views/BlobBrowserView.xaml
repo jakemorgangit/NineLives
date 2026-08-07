@@ -1,4 +1,4 @@
-<UserControl x:Class="Blackcat.NineLives.Views.BlobBrowserView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.BlobBrowserView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
@@ -111,7 +111,7 @@
                     <StackPanel Grid.Column="0" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.TotalSets}"
                                    FontSize="20" FontWeight="Bold"
-                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Total Sets" Style="{StaticResource SecondaryText}"
                                    HorizontalAlignment="Center" />
@@ -119,7 +119,7 @@
                     <StackPanel Grid.Column="1" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.FullBackups}"
                                    FontSize="20" FontWeight="Bold"
-                                   Foreground="{StaticResource AccentBrush}"
+                                   Foreground="{DynamicResource AccentBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Full" Style="{StaticResource SecondaryText}"
                                    HorizontalAlignment="Center" />
@@ -127,7 +127,7 @@
                     <StackPanel Grid.Column="2" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.DiffBackups}"
                                    FontSize="20" FontWeight="Bold"
-                                   Foreground="{StaticResource WarningBrush}"
+                                   Foreground="{DynamicResource WarningBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Diff" Style="{StaticResource SecondaryText}"
                                    HorizontalAlignment="Center" />
@@ -135,7 +135,7 @@
                     <StackPanel Grid.Column="3" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.LogBackups}"
                                    FontSize="20" FontWeight="Bold"
-                                   Foreground="{StaticResource SuccessBrush}"
+                                   Foreground="{DynamicResource SuccessBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Log" Style="{StaticResource SecondaryText}"
                                    HorizontalAlignment="Center" />
@@ -143,7 +143,7 @@
                     <StackPanel Grid.Column="4" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding Summary.TotalSizeDisplay}"
                                    FontSize="14" FontWeight="Bold"
-                                   Foreground="{StaticResource PrimaryTextBrush}"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
                                    HorizontalAlignment="Center" />
                         <TextBlock Text="Size" Style="{StaticResource SecondaryText}"
                                    HorizontalAlignment="Center" />
@@ -184,7 +184,7 @@
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
                             Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                     <TextBlock Text="&#x1F4C2;" FontSize="48" HorizontalAlignment="Center"
-                               Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,12" />
+                               Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,12" />
                     <TextBlock Text="No backup files loaded"
                                Style="{StaticResource BodyText}"
                                HorizontalAlignment="Center" />
@@ -219,7 +219,7 @@
                                             HorizontalAlignment="Left"
                                             Opacity="0.85">
                                         <TextBlock Text="{Binding TypeDisplay}"
-                                                   Foreground="White"
+                                                   Foreground="{StaticResource BadgeTextBrush}"
                                                    FontSize="11"
                                                    FontWeight="SemiBold" />
                                     </Border>
@@ -236,7 +236,7 @@
                 </DataGrid>
 
                 <!-- Loading -->
-                <Border Background="#80000000"
+                <Border Background="{DynamicResource OverlayBrush}"
                         CornerRadius="6"
                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">

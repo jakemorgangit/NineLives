@@ -11,7 +11,7 @@ namespace Blackcat.NineLives.Services;
 /// Manages credentials via Windows Credential Manager and persists
 /// non-secret configuration (server names, container URLs) to a local JSON file.
 /// </summary>
-public class CredentialStore
+public class CredentialStore : ICredentialStore
 {
     private const string AppPrefix = "NineLives";
     private static readonly string DefaultConfigDir = Path.Combine(
@@ -303,6 +303,13 @@ public class AppConfig
 
     /// <summary>Last release tag the user was told about, so the banner does not nag.</summary>
     public string? LastNotifiedReleaseTag { get; set; }
+
+    /// <summary>
+    /// Colour scheme. Stored by name so the file stays readable and an unknown value degrades to
+    /// Dark rather than throwing - someone hand-editing this should not be able to stop the app
+    /// starting.
+    /// </summary>
+    public AppTheme Theme { get; set; } = AppTheme.Dark;
 
     /// <summary>
     /// Set when config.json existed but could not be read or parsed. Not persisted - it describes

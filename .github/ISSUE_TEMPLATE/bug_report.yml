@@ -1,0 +1,88 @@
+name: Bug report
+description: Something Nine Lives did wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this.
+
+        **Before you paste anything:** Nine Lives talks to real servers and real storage
+        accounts. Please replace server names, database names, storage account names and
+        container names with placeholders (`SRV01`, `MyDb`, `mystorageaccount`) — and never
+        paste a SAS token, a connection string or a password. The app strips secrets from its
+        own log, but it cannot strip them from a screenshot.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the app do, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Select container ...
+        2. Load backups
+        3. Pick the restore point at ...
+        4. Press Execute
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Nine Lives version
+      description: Shown at the bottom right of the window, and on the About screen.
+      placeholder: v1.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 Pro 23H2
+    validations:
+      required: true
+
+  - type: input
+    id: sql
+    attributes:
+      label: SQL Server version
+      description: Only if the problem involves a server. The app shows this once connected.
+      placeholder: SQL Server 2022
+
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Backup layout
+      description: How the backups are arranged in the container.
+      options:
+        - Standalone (BackupType/Server/Database/File)
+        - Availability Group (flat Ola Hallengren naming)
+        - Mixed
+        - Something else / not sure
+
+  - type: textarea
+    id: script
+    attributes:
+      label: Generated script
+      description: >
+        If the problem is with the restore itself, the generated T-SQL is the most useful thing
+        you can attach. It contains no credentials — but it does contain URLs, so sanitise the
+        storage account and database names first.
+      render: sql
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >
+        **Open log folder** on the About screen. Secrets are already stripped, but names are not,
+        so have a read before pasting.
+      render: text

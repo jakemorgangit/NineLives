@@ -1,4 +1,4 @@
-<UserControl x:Class="Blackcat.NineLives.Views.BlobConfigView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.BlobConfigView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
@@ -9,6 +9,9 @@
         <converters:HexToBrushConverter x:Key="HexToBrush" />
         <converters:BoolToEyeIconConverter x:Key="BoolToEyeIcon" />
         <converters:BackupSourceTypeToDisplayConverter x:Key="BackupSourceTypeDisplay" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
+        <converters:BlobAuthModeToDisplayConverter x:Key="BlobAuthModeDisplay" />
+        <converters:BlobAuthModeIsSasConverter x:Key="BlobAuthModeIsSas" />
     </UserControl.Resources>
 
     <Grid>
@@ -51,7 +54,7 @@
                              SelectedItem="{Binding SelectedContainer}"
                              Background="Transparent"
                              BorderThickness="0"
-                             Foreground="{StaticResource PrimaryTextBrush}"
+                             Foreground="{DynamicResource PrimaryTextBrush}"
                              HorizontalContentAlignment="Stretch"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -61,12 +64,12 @@
                                 <StackPanel Margin="4,6">
                                     <StackPanel Orientation="Horizontal">
                                         <Ellipse Width="8" Height="8"
-                                                 Fill="{StaticResource SuccessBrush}"
+                                                 Fill="{DynamicResource SuccessBrush}"
                                                  VerticalAlignment="Center"
                                                  Margin="0,0,8,0" />
                                         <TextBlock Text="{Binding Name}"
                                                    FontWeight="SemiBold"
-                                                   Foreground="{StaticResource PrimaryTextBrush}" />
+                                                   Foreground="{DynamicResource PrimaryTextBrush}" />
                                     </StackPanel>
                                     <TextBlock Text="{Binding ContainerUrl}"
                                                Style="{StaticResource SecondaryText}"
@@ -96,11 +99,11 @@
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter TargetName="border" Property="Background"
-                                                            Value="{StaticResource SidebarItemHoverBrush}" />
+                                                            Value="{DynamicResource SidebarItemHoverBrush}" />
                                                 </Trigger>
                                                 <Trigger Property="IsSelected" Value="True">
                                                     <Setter TargetName="border" Property="Background"
-                                                            Value="{StaticResource SidebarItemActiveBrush}" />
+                                                            Value="{DynamicResource SidebarItemActiveBrush}" />
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -116,18 +119,18 @@
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
                     <!-- SAS Expiry Warning -->
-                    <Border Background="{StaticResource DangerBackgroundBrush}"
+                    <Border Background="{DynamicResource DangerBackgroundBrush}"
                             CornerRadius="6"
                             Padding="16,12"
                             Margin="0,0,0,16"
                             Visibility="{Binding IsSasExpired, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#x26A0;" FontSize="16" Foreground="{StaticResource ErrorBrush}"
+                                <TextBlock Text="&#x26A0;" FontSize="16" Foreground="{DynamicResource ErrorBrush}"
                                            VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <TextBlock Text="SAS Token Expired"
                                            FontWeight="SemiBold"
-                                           Foreground="{StaticResource ErrorBrush}" />
+                                           Foreground="{DynamicResource ErrorBrush}" />
                             </StackPanel>
                             <TextBlock Text="{Binding SasExpiryText}"
                                        Style="{StaticResource SecondaryText}"
@@ -172,10 +175,19 @@
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
 
-                                <TextBlock Text="SAS TOKEN STATUS" Style="{StaticResource LabelText}" />
-                                <TextBlock Text="{Binding SasExpiryText}"
+                                <TextBlock Text="AUTHENTICATION" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="{Binding SelectedContainer.AuthMode, Converter={StaticResource BlobAuthModeDisplay}}"
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
+
+                                <!-- Only under SAS. An expiry line against a container that has no
+                                     token of ours would send someone hunting for the wrong thing. -->
+                                <StackPanel Visibility="{Binding SelectedContainer.AuthMode, Converter={StaticResource BlobAuthModeIsSas}}">
+                                    <TextBlock Text="SAS TOKEN STATUS" Style="{StaticResource LabelText}" />
+                                    <TextBlock Text="{Binding SasExpiryText}"
+                                               Style="{StaticResource BodyText}"
+                                               Margin="0,0,0,12" />
+                                </StackPanel>
 
                                 <TextBlock Text="BACKUPS AT THIS LOCATION" Style="{StaticResource LabelText}" />
                                 <TextBlock Margin="0,0,0,12">
@@ -217,7 +229,7 @@
                                 </StackPanel>
 
                                 <!-- Test Result -->
-                                <Border Background="{StaticResource InputBackgroundBrush}"
+                                <Border Background="{DynamicResource InputBackgroundBrush}"
                                         CornerRadius="4"
                                         Padding="12,8"
                                         Margin="0,16,0,0"
@@ -241,7 +253,7 @@
                                         <StackPanel Grid.Column="0" HorizontalAlignment="Center">
                                             <TextBlock Text="{Binding ContainerSummary.FullBackups}"
                                                        FontSize="24" FontWeight="Bold"
-                                                       Foreground="{StaticResource AccentBrush}"
+                                                       Foreground="{DynamicResource AccentBrush}"
                                                        HorizontalAlignment="Center" />
                                             <TextBlock Text="Full" Style="{StaticResource SecondaryText}"
                                                        HorizontalAlignment="Center" />
@@ -249,7 +261,7 @@
                                         <StackPanel Grid.Column="1" HorizontalAlignment="Center">
                                             <TextBlock Text="{Binding ContainerSummary.DiffBackups}"
                                                        FontSize="24" FontWeight="Bold"
-                                                       Foreground="{StaticResource WarningBrush}"
+                                                       Foreground="{DynamicResource WarningBrush}"
                                                        HorizontalAlignment="Center" />
                                             <TextBlock Text="Diff" Style="{StaticResource SecondaryText}"
                                                        HorizontalAlignment="Center" />
@@ -257,7 +269,7 @@
                                         <StackPanel Grid.Column="2" HorizontalAlignment="Center">
                                             <TextBlock Text="{Binding ContainerSummary.LogBackups}"
                                                        FontSize="24" FontWeight="Bold"
-                                                       Foreground="{StaticResource SuccessBrush}"
+                                                       Foreground="{DynamicResource SuccessBrush}"
                                                        HorizontalAlignment="Center" />
                                             <TextBlock Text="Log" Style="{StaticResource SecondaryText}"
                                                        HorizontalAlignment="Center" />
@@ -265,7 +277,7 @@
                                         <StackPanel Grid.Column="3" HorizontalAlignment="Center">
                                             <TextBlock Text="{Binding ContainerSummary.TotalSizeDisplay}"
                                                        FontSize="18" FontWeight="Bold"
-                                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
                                                        HorizontalAlignment="Center" />
                                             <TextBlock Text="Total" Style="{StaticResource SecondaryText}"
                                                        HorizontalAlignment="Center" />
@@ -317,6 +329,44 @@
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,16" />
 
+                            <TextBlock Text="AUTHENTICATION" Style="{StaticResource LabelText}" />
+                            <StackPanel Margin="0,4,0,16">
+                                <RadioButton Content="SAS token"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditAuthMode, Converter={StaticResource EnumToBool}, ConverterParameter=SasToken}"
+                                             Margin="0,0,0,8"
+                                             GroupName="BlobAuthMode"
+                                             ToolTip="A shared access signature stored in Windows Credential Manager." />
+                                <RadioButton Content="Entra ID - interactive (MFA)"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditAuthMode, Converter={StaticResource EnumToBool}, ConverterParameter=EntraInteractive}"
+                                             Margin="0,0,0,8"
+                                             GroupName="BlobAuthMode"
+                                             ToolTip="Opens a browser to sign in. Nothing is stored - the sign-in lasts for as long as the app is running." />
+                                <RadioButton Content="Entra ID - default"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditAuthMode, Converter={StaticResource EnumToBool}, ConverterParameter=EntraDefault}"
+                                             GroupName="BlobAuthMode"
+                                             ToolTip="Environment, then managed identity, then the Azure CLI or Visual Studio sign-in, then a prompt. The one to pick when this app runs on an Azure VM." />
+                            </StackPanel>
+
+                            <!-- Untested against a real tenant - see the note in the README. Said
+                                 here rather than only in the docs, because the person who finds out
+                                 is the one standing in front of this screen. -->
+                            <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                    BorderThickness="1" CornerRadius="4" Padding="10"
+                                    Margin="0,0,0,16"
+                                    Visibility="{Binding IsEntraAuth, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap"
+                                               Text="Your account needs the Storage Blob Data Reader role on this container. Owner or Contributor is NOT enough - blob data access is a separate set of roles from the ones that administer the account, which is the usual reason a permission error appears against an account that can plainly see the container in the portal." />
+                                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                               Text="This covers browsing only: the RESTORE itself runs on SQL Server, which needs its own credential for the container URL. Test Connection names the account it signed in as, which is worth checking first if the permission looks right." />
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Visibility="{Binding IsSasAuth, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="SAS TOKEN" Style="{StaticResource LabelText}" />
                             <TextBlock Text="Token is stored securely and cannot be displayed. Enter a new token below to replace it."
                                        Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
@@ -338,13 +388,13 @@
                                              TextWrapping="Wrap" AcceptsReturn="False" MaxHeight="80"
                                              VerticalScrollBarVisibility="Auto"
                                              Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}}" />
-                                    <Border Background="{StaticResource InputBackgroundBrush}"
+                                    <Border Background="{DynamicResource InputBackgroundBrush}"
                                             CornerRadius="4" Padding="10,8"
-                                            BorderBrush="{StaticResource CardBorderBrush}"
+                                            BorderBrush="{DynamicResource CardBorderBrush}"
                                             BorderThickness="1" MinHeight="36"
                                             Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                                         <TextBlock Text="••••••••••••••••••••••••••••••••••••••••••••••••"
-                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                                    VerticalAlignment="Center" FontSize="14" />
                                     </Border>
                                     <Button Content="{Binding ShowSasToken, Converter={StaticResource BoolToEyeIcon}}"
@@ -352,10 +402,11 @@
                                             HorizontalAlignment="Right" VerticalAlignment="Top"
                                             Margin="0,4,4,0" Padding="6,2" FontSize="14"
                                             Background="Transparent" BorderThickness="0"
-                                            Foreground="{StaticResource SecondaryTextBrush}"
+                                            Foreground="{DynamicResource SecondaryTextBrush}"
                                             Cursor="Hand" ToolTip="Show/hide SAS token" />
                                 </Grid>
                             </Grid>
+                            </StackPanel>
 
                             <TextBlock Text="BACKUPS AT THIS LOCATION" Style="{StaticResource LabelText}" />
                             <TextBlock Text="Choose whether this container holds standalone instance backups, Availability Group backups (Ola default naming), or both."
@@ -371,6 +422,20 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+
+                            <!-- The only thing that genuinely reconciles the two clocks a backup
+                                 time can come from: a filename is the backup server's local time,
+                                 a blob's LastModified is UTC. Optional, and "not known" behaves
+                                 exactly as the app did before it existed (#102). -->
+                            <TextBlock Text="BACKUP SERVER TIME ZONE" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="Only needed when some backups here have no timestamp in their filename. Setting it lets those be sorted correctly against the rest instead of being marked approximate."
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                            <ComboBox ItemsSource="{Binding TimeZones}"
+                                      SelectedItem="{Binding EditBackupServerTimeZone}"
+                                      DisplayMemberPath="Name"
+                                      Style="{StaticResource DarkComboBox}"
+                                      Margin="0,0,0,16" />
 
                             <TextBlock>
                                 <TextBlock.Style>
@@ -389,7 +454,7 @@
                                        FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
 
                             <!-- Draggable active path elements -->
-                            <Border Background="{StaticResource InputBackgroundBrush}"
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
                                     CornerRadius="4" Padding="8,6" Margin="0,0,0,6"
                                     MinHeight="40" AllowDrop="True"
                                     DragOver="PathDragOver" Drop="PathDrop">
@@ -424,10 +489,10 @@
                                                     <Border CornerRadius="4" Padding="10,5" Cursor="Hand"
                                                             Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                            <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                        FontSize="12" FontWeight="SemiBold"
                                                                        VerticalAlignment="Center" />
-                                                            <Button Content="  x" Foreground="#CCFFFFFF" FontSize="11"
+                                                            <Button Content="  x" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11"
                                                                     FontWeight="Bold" Cursor="Hand"
                                                                     Background="Transparent" BorderThickness="0"
                                                                     VerticalAlignment="Center" Padding="0"
@@ -437,7 +502,7 @@
                                                                     ToolTip="Remove this element" />
                                                         </StackPanel>
                                                     </Border>
-                                                    <TextBlock Text="/" Foreground="{StaticResource SecondaryTextBrush}"
+                                                    <TextBlock Text="/" Foreground="{DynamicResource SecondaryTextBrush}"
                                                                FontSize="14" VerticalAlignment="Center" Margin="4,0,0,0" />
                                                 </StackPanel>
                                             </DataTemplate>
@@ -464,12 +529,12 @@
                                                 <ControlTemplate TargetType="Button">
                                                     <Border x:Name="bd" CornerRadius="4" Padding="10,5"
                                                             Opacity="0.5" BorderThickness="1"
-                                                            BorderBrush="{StaticResource CardBorderBrush}"
+                                                            BorderBrush="{DynamicResource CardBorderBrush}"
                                                             Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="+" Foreground="White" FontWeight="Bold"
+                                                            <TextBlock Text="+" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}" FontWeight="Bold"
                                                                        FontSize="12" Margin="0,0,4,0" />
-                                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                            <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                        FontSize="12" />
                                                         </StackPanel>
                                                     </Border>
@@ -492,14 +557,14 @@
 
                             <!-- AG path structure (when AG or Mixed) - drag/drop same as standalone -->
                             <Border Visibility="{Binding IsAgPathSectionVisible, Converter={StaticResource BoolToVis}}"
-                                    Background="{StaticResource InputBackgroundBrush}"
+                                    Background="{DynamicResource InputBackgroundBrush}"
                                     CornerRadius="4" Padding="12" Margin="0,0,0,16">
                                 <StackPanel>
                                     <TextBlock Text="AG PATH STRUCTURE" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
                                     <TextBlock Text="Drag the coloured elements to define how AG backup paths are structured (e.g. BackupType/ClusterName$AGName/DatabaseName/FileName). Leave default to also support Ola flat filenames."
                                                Style="{StaticResource SecondaryText}"
                                                FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
-                                    <Border Background="{StaticResource CardBorderBrush}"
+                                    <Border Background="{DynamicResource CardBorderBrush}"
                                             CornerRadius="4" Padding="8,6" Margin="0,0,0,6"
                                             MinHeight="40" AllowDrop="True"
                                             BorderThickness="1"
@@ -535,10 +600,10 @@
                                                             <Border CornerRadius="4" Padding="10,5" Cursor="Hand"
                                                                     Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                                 <StackPanel Orientation="Horizontal">
-                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                                FontSize="12" FontWeight="SemiBold"
                                                                                VerticalAlignment="Center" />
-                                                                    <Button Content="  x" Foreground="#CCFFFFFF" FontSize="11"
+                                                                    <Button Content="  x" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11"
                                                                             FontWeight="Bold" Cursor="Hand"
                                                                             Background="Transparent" BorderThickness="0"
                                                                             VerticalAlignment="Center" Padding="0"
@@ -548,7 +613,7 @@
                                                                             ToolTip="Remove this element" />
                                                                 </StackPanel>
                                                             </Border>
-                                                            <TextBlock Text="/" Foreground="{StaticResource SecondaryTextBrush}"
+                                                            <TextBlock Text="/" Foreground="{DynamicResource SecondaryTextBrush}"
                                                                        FontSize="14" VerticalAlignment="Center" Margin="4,0,0,0" />
                                                         </StackPanel>
                                                     </DataTemplate>
@@ -573,12 +638,12 @@
                                                         <ControlTemplate TargetType="Button">
                                                             <Border x:Name="bd" CornerRadius="4" Padding="10,5"
                                                                     Opacity="0.5" BorderThickness="1"
-                                                                    BorderBrush="{StaticResource CardBorderBrush}"
+                                                                    BorderBrush="{DynamicResource CardBorderBrush}"
                                                                     Background="{Binding HexColor, Converter={StaticResource HexToBrush}}">
                                                                 <StackPanel Orientation="Horizontal">
-                                                                    <TextBlock Text="+" Foreground="White" FontWeight="Bold"
+                                                                    <TextBlock Text="+" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}" FontWeight="Bold"
                                                                                FontSize="12" Margin="0,0,4,0" />
-                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"
+                                                                    <TextBlock Text="{Binding DisplayName}" Foreground="{Binding HexColor, Converter={StaticResource ContrastingText}}"
                                                                                FontSize="12" />
                                                                 </StackPanel>
                                                             </Border>
@@ -600,7 +665,7 @@
 
                             <!-- Error display -->
                             <TextBlock Text="{Binding ErrorMessage}"
-                                       Foreground="{StaticResource ErrorBrush}"
+                                       Foreground="{DynamicResource ErrorBrush}"
                                        Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
                                        Margin="0,0,0,12"
                                        TextWrapping="Wrap" />
@@ -624,14 +689,14 @@
                                         Command="{Binding CancelEditCommand}"
                                         Margin="0,0,12,0" />
                                 <TextBlock Text="You have unsaved changes"
-                                           Foreground="{StaticResource WarningBrush}"
+                                           Foreground="{DynamicResource WarningBrush}"
                                            FontSize="12" FontStyle="Italic"
                                            VerticalAlignment="Center"
                                            Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Test Result in Edit Mode -->
-                            <Border Background="{StaticResource InputBackgroundBrush}"
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
                                     CornerRadius="4"
                                     Padding="12,8"
                                     Margin="0,16,0,0"
@@ -644,7 +709,7 @@
                     </Border>
 
                     <!-- Loading Overlay -->
-                    <Border Background="#80000000"
+                    <Border Background="{DynamicResource OverlayBrush}"
                             CornerRadius="6"
                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
                             Margin="0,16,0,0">

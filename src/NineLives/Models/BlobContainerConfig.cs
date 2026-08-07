@@ -22,6 +22,52 @@ public enum BackupSourceType
 }
 
 /// <summary>
+/// How the app authenticates to the container when listing backups (#29).
+///
+/// Many organisations now prohibit long-lived SAS tokens outright, which made the tool unusable for
+/// them regardless of its merits. The Entra modes hold no secret at all - the token is acquired and
+/// refreshed by Azure.Identity and never touches the credential store.
+///
+/// The numbers are pinned. These are serialised into config.json, so reordering would silently
+/// repoint every saved container at a different authentication mode.
+/// </summary>
+public enum BlobAuthMode
+{
+    /// <summary>A stored SAS token. The original mode, and still the default.</summary>
+    SasToken = 0,
+
+    /// <summary>
+    /// Entra ID with a browser sign-in, which is the mode that satisfies MFA. The sign-in is
+    /// remembered for the life of the process and written nowhere.
+    /// </summary>
+    EntraInteractive = 1,
+
+    /// <summary>
+    /// Entra ID letting Azure.Identity choose - environment variables, then a managed identity,
+    /// then the Azure CLI or Visual Studio sign-in, then a browser prompt. The mode to pick when
+    /// the app runs on an Azure VM with a managed identity assigned.
+    /// </summary>
+    EntraDefault = 2
+}
+
+/// <summary>Things every blob authentication mode has to answer.</summary>
+public static class BlobAuthModes
+{
+    /// <summary>Whether the app has to hold a SAS token for this mode.</summary>
+    public static bool NeedsSasToken(this BlobAuthMode mode) => mode == BlobAuthMode.SasToken;
+
+    public static bool IsEntra(this BlobAuthMode mode) => mode != BlobAuthMode.SasToken;
+
+    public static string Describe(this BlobAuthMode mode) => mode switch
+    {
+        BlobAuthMode.SasToken => "SAS token",
+        BlobAuthMode.EntraInteractive => "Entra ID (interactive)",
+        BlobAuthMode.EntraDefault => "Entra ID (default)",
+        _ => "Unknown"
+    };
+}
+
+/// <summary>
 /// A saved blob container. Implements INotifyPropertyChanged so the derived TagChips member
 /// notifies when Tags changes - see the note on Tags.
 /// </summary>
@@ -47,6 +93,13 @@ public class BlobContainerConfig : INotifyPropertyChanged
     public string ContainerUrl { get; set; } = string.Empty;
 
     /// <summary>
+    /// How the app signs in to this container (#29). Absent from config files written before this
+    /// existed, which deserialise to <see cref="BlobAuthMode.SasToken"/> - the behaviour they
+    /// already had, so no migration is needed.
+    /// </summary>
+    public BlobAuthMode AuthMode { get; set; } = BlobAuthMode.SasToken;
+
+    /// <summary>
     /// Whether backups are from standalone instances, AG (Ola default naming), or both.
     /// </summary>
     public BackupSourceType BackupSourceType { get; set; } = BackupSourceType.Standalone;
@@ -63,6 +116,21 @@ public class BlobContainerConfig : INotifyPropertyChanged
     /// If null/empty, AG backups are assumed to use Ola default flat naming and are parsed from the filename.
     /// </summary>
     public string? AgPathPattern { get; set; }
+
+    /// <summary>
+    /// The time zone the backup SERVER runs in, if known (#102).
+    ///
+    /// A backup's time comes from either its filename - which the backup job wrote in the server's
+    /// local time - or the blob's LastModified, which is UTC. Without this they cannot be put on
+    /// one clock, only labelled; with it, the UTC readings convert and sort correctly against the
+    /// rest.
+    ///
+    /// Stored as a system id (Windows or IANA - .NET accepts both since 6.0). Null means unknown,
+    /// which is the default and behaves exactly as before. An id this machine does not recognise
+    /// is treated as unknown rather than as an error: someone browsing a container should not be
+    /// stopped by a setting that only affects how a few timestamps are displayed.
+    /// </summary>
+    public string? BackupServerTimeZoneId { get; set; }
 
     private ObservableCollection<string> _tags = [];
 
@@ -141,7 +209,11 @@ public class BlobContainerConfig : INotifyPropertyChanged
     [JsonIgnore]
     public string? UnsavedSasToken { get; set; }
 
-    public bool IsExpired => ReadSasExpiry().IsExpired;
+    /// <summary>
+    /// Whether the stored SAS token has passed its expiry. Always false under Entra, which has no
+    /// token of ours to expire - the whole reason an organisation switches to it.
+    /// </summary>
+    public bool IsExpired => AuthMode.NeedsSasToken() && ReadSasExpiry().IsExpired;
 
     public DateTime? SasExpiry => GetSasExpiry();
 

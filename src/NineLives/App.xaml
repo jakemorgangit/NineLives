@@ -5,7 +5,10 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/DarkTheme.xaml" />
+                <!-- The palette MUST be first: ThemeManager swaps whatever is at index 0, and it
+                     identifies it by position rather than by guessing at the source Uri. -->
+                <ResourceDictionary Source="Themes/Palette.Dark.xaml" />
+                <ResourceDictionary Source="Themes/Controls.xaml" />
                 <ResourceDictionary Source="Themes/Logo.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

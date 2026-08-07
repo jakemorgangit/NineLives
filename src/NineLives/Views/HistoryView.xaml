@@ -1,0 +1,205 @@
+﻿<UserControl x:Class="Blackcat.NineLives.Views.HistoryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="Restore History" Style="{StaticResource HeaderText}" />
+            <TextBlock Text="Every restore this app has run, kept so it can go in a change ticket or an incident write-up."
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,4,0,0" />
+        </StackPanel>
+
+        <!-- Filter + refresh -->
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox Grid.Column="0"
+                     Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
+                     Style="{StaticResource DarkTextBox}"
+                     ToolTip="Filter by database, server, container or outcome." />
+
+            <Button Grid.Column="1" Content="Refresh"
+                    Command="{Binding RefreshCommand}"
+                    Style="{StaticResource SecondaryButton}"
+                    Padding="12,6" Margin="8,0,0,0" />
+        </Grid>
+
+        <!-- List + detail -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource CardBorder}" Margin="0,0,12,0">
+                <ListBox ItemsSource="{Binding Entries}"
+                         SelectedItem="{Binding SelectedEntry}"
+                         Style="{StaticResource CardListBox}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding StartedDisplay}"
+                                           Style="{StaticResource SecondaryText}"
+                                           FontSize="11" />
+                                <TextBlock TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,2,0,0">
+                                    <Run Text="{Binding TargetDatabase, Mode=OneWay}" />
+                                    <Run Text=" on " Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <Run Text="{Binding ServerName, Mode=OneWay}"
+                                         Foreground="{DynamicResource SecondaryTextBrush}" />
+                                </TextBlock>
+                                <TextBlock Margin="0,2,0,0" FontSize="11">
+                                    <Run Text="{Binding OutcomeDisplay, Mode=OneWay}">
+                                        <Run.Style>
+                                            <Style TargetType="Run">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Outcome}" Value="Failed">
+                                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Outcome}" Value="Cancelled">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Run.Style>
+                                    </Run>
+                                    <Run Text="  " />
+                                    <Run Text="{Binding DurationDisplay, Mode=OneWay}"
+                                         Foreground="{DynamicResource SecondaryTextBrush}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <Border Grid.Column="1" Style="{StaticResource CardBorder}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="Select a restore to see what it did."
+                                   Style="{StaticResource SecondaryText}"
+                                   Visibility="{Binding SelectedEntry, Converter={StaticResource NullToVis}, ConverterParameter=Invert}" />
+
+                        <StackPanel Visibility="{Binding SelectedEntry, Converter={StaticResource NullToVis}}">
+                            <TextBlock Text="{Binding SelectedEntry.Summary}"
+                                       Style="{StaticResource HeaderText}"
+                                       FontSize="18"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding SelectedEntry.Detail}"
+                                       Style="{StaticResource SecondaryText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,12" />
+
+                            <TextBlock Text="{Binding SelectedEntry.ErrorMessage}"
+                                       Foreground="{DynamicResource ErrorBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,12"
+                                       Visibility="{Binding SelectedEntry.ErrorMessage, Converter={StaticResource NullToVis}}" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Button Content="Copy script"
+                                        Command="{Binding CopyScriptCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5" Margin="0,0,8,0" />
+                                <Button Content="Copy log"
+                                        Command="{Binding CopyLogCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5" Margin="0,0,8,0" />
+                                <Button Content="Save as file"
+                                        Command="{Binding SaveEntryCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5"
+                                        ToolTip="Writes the whole record - details, script and execution log - to a text file." />
+                            </StackPanel>
+
+                            <TextBlock Text="SCRIPT" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="10" Margin="0,0,0,12">
+                                <TextBox Text="{Binding SelectedEntry.Script, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{DynamicResource PrimaryTextBrush}"
+                                         FontFamily="Cascadia Code, Consolas, Courier New"
+                                         FontSize="11"
+                                         MaxHeight="220"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto" />
+                            </Border>
+
+                            <TextBlock Text="EXECUTION LOG" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="10">
+                                <TextBox Text="{Binding SelectedEntry.Log, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{DynamicResource PrimaryTextBrush}"
+                                         FontFamily="Cascadia Code, Consolas, Courier New"
+                                         FontSize="11"
+                                         MaxHeight="260"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto" />
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- Status + clear -->
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="{Binding StatusMessage}"
+                       Style="{StaticResource SecondaryText}"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center" />
+
+            <Button Grid.Column="1" Content="Keep it"
+                    Command="{Binding CancelClearCommand}"
+                    Style="{StaticResource SecondaryButton}"
+                    Padding="12,6" Margin="0,0,8,0"
+                    Visibility="{Binding IsClearArmed, Converter={StaticResource BoolToVis}}" />
+
+            <Button Grid.Column="2"
+                    Command="{Binding ClearHistoryCommand}"
+                    Style="{StaticResource SecondaryButton}"
+                    Padding="12,6"
+                    ToolTip="Deletes every recorded restore. Takes two presses.">
+                <Button.Content>
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="Clear history" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsClearArmed}" Value="True">
+                                        <Setter Property="Text" Value="Confirm clear" />
+                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Button.Content>
+            </Button>
+        </Grid>
+    </Grid>
+</UserControl>

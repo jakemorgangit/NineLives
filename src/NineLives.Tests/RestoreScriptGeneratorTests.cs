@@ -382,6 +382,43 @@ public class RestoreScriptGeneratorTests
     }
 
     [Fact]
+    public void Generate_ChecksumAndContinueAfterError_OffByDefault()
+    {
+        // CONTINUE_AFTER_ERROR produces a database SQL Server has already reported as damaged, and
+        // CHECKSUM fails outright against a backup that was taken without checksums. Neither is a
+        // safe default for a restore that runs unattended.
+        var script = _generator.Generate(FullOnlyChain(), Options());
+
+        Assert.DoesNotContain("CHECKSUM", script);
+        Assert.DoesNotContain("CONTINUE_AFTER_ERROR", script);
+    }
+
+    [Fact]
+    public void Generate_ChecksumAndContinueAfterError_EmittedOnEveryStatementWhenSet()
+    {
+        var script = _generator.Generate(FullDiffLogChain(), Options(o =>
+        {
+            o.WithChecksum = true;
+            o.ContinueAfterError = true;
+        }));
+
+        // Full + diff + two logs. An option applied to only the first statement would leave the
+        // rest of the chain restoring under different rules from the one the user chose.
+        Assert.Equal(4, CountOccurrences(script, "         CHECKSUM,"));
+        Assert.Equal(4, CountOccurrences(script, "         CONTINUE_AFTER_ERROR,"));
+    }
+
+    [Fact]
+    public void Generate_ContinueAfterError_WarnsInTheScriptItself()
+    {
+        // The script gets pasted into SSMS and run by someone who never saw the checkbox.
+        var script = _generator.Generate(FullOnlyChain(), Options(o => o.ContinueAfterError = true));
+
+        Assert.Contains("WARNING: CONTINUE_AFTER_ERROR", script);
+        Assert.Contains("DBCC CHECKDB", script);
+    }
+
+    [Fact]
     public void Generate_HeaderAndFooter_DescribeTheRestore()
     {
         var script = _generator.Generate(FullDiffLogChain(), Options());
@@ -406,15 +443,15 @@ public class RestoreScriptGeneratorTests
     [Fact]
     public void Generate_NeverEmbedsCredentials()
     {
-        var script = _generator.Generate(FullDiffLogChain(), Options(o =>
-        {
-            o.SasToken = "sv=2026&sig=SECRET";
-            o.CredentialName = "MyCred";
-        }));
+        // The options object no longer carries a SAS token or a credential name at all (#42), so
+        // the strongest thing left to assert is the contract itself: nothing that could carry a
+        // secret reaches the script. WITH CREDENTIAL is separately wrong for a SAS credential -
+        // SQL Server rejects it with Msg 3225 and matches by URL instead (#60).
+        var script = _generator.Generate(FullDiffLogChain(), Options());
 
-        // The generator's contract: no credential or SAS material in the script, ever.
-        Assert.DoesNotContain("SECRET", script);
         Assert.DoesNotContain("CREDENTIAL", script);
+        Assert.DoesNotContain("sig=", script);
+        Assert.DoesNotContain("sv=", script);
     }
 
     private static int CountOccurrences(string haystack, string needle)

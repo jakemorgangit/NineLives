@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +9,8 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class ServerManagerViewModel : ViewModelBase
 {
-    private readonly CredentialStore _credentialStore;
-    private readonly SqlServerService _sqlService;
+    private readonly ICredentialStore _credentialStore;
+    private readonly ISqlServerService _sqlService;
 
     public event EventHandler<ServerConnectionChangedEventArgs>? ConnectionChanged;
 
@@ -33,9 +33,25 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private AuthMode _editAuthMode = AuthMode.WindowsAuth;
 
+    /// <summary>Whether to show the password box. Only SQL auth has a password to hold (#30).</summary>
     public bool IsSqlAuth => EditAuthMode == AuthMode.SqlAuth;
 
-    partial void OnEditAuthModeChanged(AuthMode value) => OnPropertyChanged(nameof(IsSqlAuth));
+    /// <summary>
+    /// Whether to show the username box. Interactive Entra takes one as an optional hint that
+    /// pre-selects the account, which is worth having on a machine signed in to several.
+    /// </summary>
+    public bool ShowsUsername => EditAuthMode.AcceptsUsername();
+
+    public string UsernameLabel => EditAuthMode == AuthMode.EntraInteractive
+        ? "USERNAME (OPTIONAL - PRE-SELECTS THE ACCOUNT)"
+        : "USERNAME";
+
+    partial void OnEditAuthModeChanged(AuthMode value)
+    {
+        OnPropertyChanged(nameof(IsSqlAuth));
+        OnPropertyChanged(nameof(ShowsUsername));
+        OnPropertyChanged(nameof(UsernameLabel));
+    }
 
     [ObservableProperty]
     private string _editUsername = string.Empty;
@@ -73,7 +89,7 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerDisplay = string.Empty;
 
-    public ServerManagerViewModel(CredentialStore credentialStore, SqlServerService sqlService)
+    public ServerManagerViewModel(ICredentialStore credentialStore, ISqlServerService sqlService)
     {
         _credentialStore = credentialStore;
         _sqlService = sqlService;
@@ -84,6 +100,34 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         var config = _credentialStore.LoadConfig();
         Servers = new ObservableCollection<ServerConnection>(config.Servers);
+    }
+
+    /// <summary>
+    /// Captures a server's persisted fields and returns the action that puts them back. Used to
+    /// undo an in-place edit when the config write is refused.
+    /// </summary>
+    private static Action Snapshot(ServerConnection server)
+    {
+        var name = server.Name;
+        var serverName = server.ServerName;
+        var authMode = server.AuthMode;
+        var username = server.Username;
+        var timeout = server.ConnectionTimeoutSeconds;
+        var trust = server.TrustServerCertificate;
+        var encrypt = server.Encrypt;
+        var tags = server.Tags.ToList();
+
+        return () =>
+        {
+            server.Name = name;
+            server.ServerName = serverName;
+            server.AuthMode = authMode;
+            server.Username = username;
+            server.ConnectionTimeoutSeconds = timeout;
+            server.TrustServerCertificate = trust;
+            server.Encrypt = encrypt;
+            ReplaceTags(server.Tags, tags);
+        };
     }
 
     /// <summary>
@@ -197,13 +241,17 @@ public partial class ServerManagerViewModel : ViewModelBase
             return;
         }
 
-        if (EditAuthMode == AuthMode.SqlAuth && string.IsNullOrWhiteSpace(EditUsername))
+        if (EditAuthMode.RequiresUsername() && string.IsNullOrWhiteSpace(EditUsername))
         {
             SetError("Username is required for SQL Authentication.");
             return;
         }
 
         ServerConnection server;
+
+        // Undoes the edit if the save is refused. Null for a new server, which is removed instead.
+        Action? restore = null;
+
         if (IsNew)
         {
             if (Servers.Any(s => s.Name.Equals(EditName, StringComparison.OrdinalIgnoreCase)))
@@ -218,6 +266,10 @@ public partial class ServerManagerViewModel : ViewModelBase
         else
         {
             server = SelectedServer!;
+
+            // Snapshot before mutating, so a refused save can put the model back rather than
+            // leaving it showing values that were never persisted.
+            restore = Snapshot(server);
         }
 
         server.Name = EditName;
@@ -226,22 +278,54 @@ public partial class ServerManagerViewModel : ViewModelBase
         ReplaceTags(server.Tags, TagPalette.ParseTags(EditTags));
         server.ServerName = EditServerName;
         server.AuthMode = EditAuthMode;
-        server.Username = EditAuthMode == AuthMode.SqlAuth ? EditUsername : null;
+        server.Username = EditAuthMode.AcceptsUsername() && !string.IsNullOrWhiteSpace(EditUsername)
+            ? EditUsername
+            : null;
         server.ConnectionTimeoutSeconds = EditTimeout;
         server.TrustServerCertificate = EditTrustServerCert;
         server.Encrypt = EditEncrypt;
 
-        if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
-        {
-            _credentialStore.SaveSqlPassword(server, EditPassword);
-        }
-
+        // Config FIRST, password second.
+        //
+        // The other order wrote the password to Credential Manager and then found the config could
+        // not be saved. Change a login's username and password together with config.json briefly
+        // locked, and the vault holds the NEW password while the file still has the OLD username -
+        // so every connection fails auth, and the form never shows a stored password, so nothing
+        // on screen says why. Delete already follows this rule.
         if (!SaveServers())
         {
             // Nothing reached the disk, so do not leave the list showing a server that is not
             // really there. Stay in the edit form so the save can be retried.
             if (IsNew) Servers.Remove(server);
+            else restore?.Invoke();
             return;
+        }
+
+        if (EditAuthMode.NeedsStoredPassword())
+        {
+            if (!string.IsNullOrWhiteSpace(EditPassword))
+            {
+                try
+                {
+                    _credentialStore.SaveSqlPassword(server, EditPassword);
+                }
+                catch (Exception ex)
+                {
+                    SetError($"The server was saved, but the password could not be stored: {ex.Message}");
+                    return;
+                }
+            }
+        }
+        else
+        {
+            // Switching away from SQL auth used to leave the password in Credential Manager - a
+            // live secret for a login nothing uses any more, outliving the only reason it was
+            // stored. Moving to Entra is usually done precisely to stop tools holding passwords,
+            // so leaving one behind defeats the point of the switch.
+            //
+            // After the config write, for the same reason Delete does it in that order: the
+            // password is only redundant once the mode change has actually landed on disk.
+            _credentialStore.DeleteSecret(server.CredentialKey);
         }
 
         SelectedServer = server;
@@ -256,7 +340,7 @@ public partial class ServerManagerViewModel : ViewModelBase
 
         // Same reasoning as deleting a container: a stored SQL password is removed from Credential
         // Manager and the app never displays it, so a single click should not be enough (#42).
-        var secretNote = SelectedServer.AuthMode == AuthMode.SqlAuth
+        var secretNote = SelectedServer.AuthMode.NeedsStoredPassword()
             ? "\n\nIts stored SQL password will be deleted from Windows Credential Manager."
             : string.Empty;
 
@@ -280,12 +364,13 @@ public partial class ServerManagerViewModel : ViewModelBase
             return;
         }
 
-        if (removed.AuthMode == AuthMode.SqlAuth)
+        if (removed.AuthMode.NeedsStoredPassword())
             _credentialStore.DeleteSecret(removed.CredentialKey);
 
         if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
         {
             IsConnected = false;
+            MarkConnected(null);
             ConnectedServerDisplay = string.Empty;
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
             {
@@ -375,6 +460,7 @@ public partial class ServerManagerViewModel : ViewModelBase
 
             IsConnected = true;
             ConnectedServerDisplay = SelectedServer.DisplayText;
+            MarkConnected(SelectedServer);
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
             {
                 IsConnected = true,
@@ -393,11 +479,21 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Exactly one server carries the connected marker, so the list can never show two.
+    /// </summary>
+    private void MarkConnected(ServerConnection? connected)
+    {
+        foreach (var server in Servers)
+            server.IsConnectedServer = ReferenceEquals(server, connected);
+    }
+
     [RelayCommand]
     private void Disconnect()
     {
         IsConnected = false;
         ConnectedServerDisplay = string.Empty;
+        MarkConnected(null);
         ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
         {
             IsConnected = false,
@@ -423,9 +519,9 @@ public partial class ServerManagerViewModel : ViewModelBase
             // In memory only. This used to call SaveSqlPassword, which is a durable write to
             // Credential Manager - so testing a mistyped password overwrote the working one
             // before the user had agreed to anything, and Cancel could not undo it (#12).
-            if (EditAuthMode == AuthMode.SqlAuth && !string.IsNullOrWhiteSpace(EditPassword))
+            if (EditAuthMode.NeedsStoredPassword() && !string.IsNullOrWhiteSpace(EditPassword))
                 server.UnsavedPassword = EditPassword;
-            else if (EditAuthMode == AuthMode.SqlAuth && !IsNew)
+            else if (EditAuthMode.NeedsStoredPassword() && !IsNew)
                 // No new password typed: test against the one already saved for this entry.
                 server.Id = SelectedServer?.Id;
 

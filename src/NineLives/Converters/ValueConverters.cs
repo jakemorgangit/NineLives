@@ -1,7 +1,8 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Converters;
 
@@ -145,6 +146,73 @@ public class BackupTypeToColorConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+/// <summary>
+/// Picks black or white text for whatever colour it is given, by measured contrast (#126).
+///
+/// Used where the fill is DATA rather than theme - the path-element pills take their colour from
+/// the element, so no single hardcoded foreground can be right for all of them. White on the
+/// orange one scored 2.19:1 and on the green one 2.87:1, both well under the 4.5:1 minimum, while
+/// the blue and purple ones were fine. This asks the colour rather than assuming.
+/// </summary>
+public class ContrastingTextConverter : IValueConverter
+{
+    private static readonly SolidColorBrush Dark = new(Color.FromRgb(0x0F, 0x13, 0x1E));
+    private static readonly SolidColorBrush Light = new(Colors.White);
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var colour = value switch
+        {
+            Color c => c,
+            SolidColorBrush b => b.Color,
+            string hex when TryParse(hex, out var parsed) => parsed,
+            _ => Colors.Gray
+        };
+
+        // Compare both candidates and take the better, rather than thresholding on luminance. The
+        // usual 0.179 crossover assumes PURE black and white; this app's dark is #0F131E, which
+        // moves the crossover - and picking by the textbook threshold chose dark text at 4.12:1
+        // for an orange where white would have given 4.50:1.
+        return Contrast(Dark.Color, colour) >= Contrast(Light.Color, colour) ? Dark : Light;
+    }
+
+    private static bool TryParse(string hex, out Color colour)
+    {
+        try
+        {
+            colour = (Color)ColorConverter.ConvertFromString(hex);
+            return true;
+        }
+        catch
+        {
+            colour = Colors.Gray;
+            return false;
+        }
+    }
+
+    private static double Contrast(Color a, Color b)
+    {
+        var la = Luminance(a);
+        var lb = Luminance(b);
+        var (hi, lo) = la > lb ? (la, lb) : (lb, la);
+        return (hi + 0.05) / (lo + 0.05);
+    }
+
+    private static double Luminance(Color c)
+    {
+        static double Channel(byte v)
+        {
+            var s = v / 255.0;
+            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        }
+
+        return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 public class DateTimeToStringConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
@@ -247,6 +315,29 @@ public class BackupSourceTypeToDisplayConverter : IValueConverter
             _ => value?.ToString() ?? ""
         };
     }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>How a container's authentication mode reads on the detail panel (#29).</summary>
+public class BlobAuthModeToDisplayConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is BlobAuthMode mode ? mode.Describe() : string.Empty;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Shows the SAS-only parts of the detail panel. An expiry line against an Entra container would
+/// send someone hunting for a token that does not exist.
+/// </summary>
+public class BlobAuthModeIsSasConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is BlobAuthMode mode && mode.NeedsSasToken() ? Visibility.Visible : Visibility.Collapsed;
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => throw new NotSupportedException();

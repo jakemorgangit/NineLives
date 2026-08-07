@@ -194,8 +194,24 @@ public class BlobStorageServiceTests
         Assert.Equal(1, summary.FullBackups);
         Assert.Equal(1, summary.LogBackups);
         Assert.Equal(210, summary.TotalSizeBytes);
-        Assert.Equal(new DateTime(2026, 1, 10, 22, 0, 0), summary.EarliestBackup!.Value.DateTime);
-        Assert.Equal(new DateTime(2026, 1, 10, 23, 0, 0), summary.LatestBackup!.Value.DateTime);
+        Assert.Equal(new DateTime(2026, 1, 10, 22, 0, 0), summary.EarliestSetTimestamp);
+        Assert.Equal(new DateTime(2026, 1, 10, 23, 0, 0), summary.LatestSetTimestamp);
+        Assert.Equal(0, summary.ApproximateSets);
+    }
+
+    [Fact]
+    public void GetSetBasedSummary_DoesNotPopulateTheFileLevelRange()
+    {
+        // The set range and the file range are different kinds of value - wall clocks against
+        // instants - and were previously served through the same two properties, which is what
+        // let a wall clock get stamped with the workstation's offset.
+        var sets = _service.GroupIntoBackupSets(
+            [File("FULL/SRV01/Db/20260110_220000.bak", db: "Db")]);
+
+        var summary = _service.GetSetBasedSummary(sets);
+
+        Assert.Null(summary.EarliestBackup);
+        Assert.Null(summary.LatestBackup);
     }
 
     [Fact]

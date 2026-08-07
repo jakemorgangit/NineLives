@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -8,11 +8,12 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
-    private readonly CredentialStore _credentialStore;
-    private readonly BlobStorageService _blobService;
-    private readonly SqlServerService _sqlService;
+    private readonly ICredentialStore _credentialStore;
+    private readonly IBlobStorageService _blobService;
+    private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
+    private readonly IRestoreHistoryStore _historyStore;
 
     [ObservableProperty]
     private ViewModelBase? _currentView;
@@ -48,11 +49,29 @@ public partial class MainViewModel : ViewModelBase
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
     public RestoreViewModel Restore { get; }
+    public HistoryViewModel History { get; }
     public AboutViewModel About { get; }
 
-    public MainViewModel()
+    /// <summary>
+    /// The app's one composition point: builds the real services against the real credential
+    /// store. Deliberately not a DI container - three services and one place that wires them does
+    /// not need one (#41).
+    /// </summary>
+    public MainViewModel() : this(new CredentialStore()) { }
+
+    /// <summary>
+    /// Takes the store so a test can point the whole object graph at a temp directory instead of
+    /// the user's actual profile. Constructing this type used to migrate and read the real
+    /// %LOCALAPPDATA% config as a side effect of a XAML load test.
+    /// </summary>
+    public MainViewModel(ICredentialStore credentialStore)
     {
-        _credentialStore = new CredentialStore();
+        _credentialStore = credentialStore;
+
+        // Before the child viewmodels build any views: applying a palette afterwards works, since
+        // every colour is a DynamicResource, but doing it first means the first frame drawn is
+        // already the right colour rather than a flash of dark on the way to light.
+        ApplySavedTheme();
 
         // Before anything reads the config: move secrets from name-derived keys onto stable ids
         // (#8). Must happen ahead of the child viewmodels, which load containers and servers in
@@ -67,15 +86,81 @@ public partial class MainViewModel : ViewModelBase
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
         BlobBrowser = new BlobBrowserViewModel(_blobService, _credentialStore);
-        Restore = new RestoreViewModel(_blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore);
-        About = new AboutViewModel();
+        // One store, shared: the Restore screen writes to it and the History screen reads it back,
+        // and two instances pointed at the same file would be a way to lose an entry.
+        _historyStore = new RestoreHistoryStore();
+
+        Restore = new RestoreViewModel(
+            _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
+            log: null, history: _historyStore);
+        History = new HistoryViewModel(_historyStore);
+        About = new AboutViewModel(_credentialStore);
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
+
+        // One place that answers "is it doing something?". Every screen already tracks its own
+        // work; without this the answer depended on which part of a long page was scrolled into
+        // view, and the Restore screen's own status line is below the fold most of the time (#128).
+        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Restore);
 
         CurrentView = BlobConfig;
 
         // Fire and forget - startup must not wait on the network.
         _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>What the app is currently doing, or empty when it is idle.</summary>
+    [ObservableProperty]
+    private string _busyText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isBusy;
+
+    private readonly List<ViewModelBase> _watched = [];
+
+    private void WatchForBusy(params ViewModelBase[] children)
+    {
+        foreach (var child in children)
+        {
+            _watched.Add(child);
+            child.PropertyChanged += (_, _) => RefreshBusy();
+        }
+    }
+
+    /// <summary>
+    /// The Restore screen names what it is doing; the others only say they are busy, and what that
+    /// means is obvious from the screen. Restore wins when more than one is going, because it is
+    /// the one that can be running a RESTORE.
+    /// </summary>
+    private void RefreshBusy()
+    {
+        var text =
+            Restore.IsBusyWithAnything ? Restore.BusyDescription
+            : BlobConfig.IsBusy ? "Testing the container connection..."
+            : BlobBrowser.IsBusy ? "Listing the container..."
+            : ServerManager.IsBusy ? "Connecting to SQL Server..."
+            : string.Empty;
+
+        if (text == BusyText) return;
+
+        BusyText = text;
+        IsBusy = text.Length > 0;
+    }
+
+    /// <summary>
+    /// Puts the remembered colour scheme back. Never fatal: a theme that will not load leaves the
+    /// default in place, which is a cosmetic problem rather than one worth refusing to start over.
+    /// </summary>
+    private void ApplySavedTheme()
+    {
+        try
+        {
+            ThemeManager.Apply(_credentialStore.LoadConfig().Theme);
+        }
+        catch
+        {
+            // Dark it is.
+        }
     }
 
     /// <summary>
@@ -166,9 +251,9 @@ public partial class MainViewModel : ViewModelBase
         ConnectedServerName = e.IsConnected ? e.ServerName : "Not connected";
         Restore.IsConnectedToServer = e.IsConnected;
         Restore.ConnectedServerName = e.ServerName;
+        // Setting ConnectedServer re-checks the credential itself (#115 seam 5).
         Restore.ConnectedServer = e.ConnectedServer;
         GlobalStatus = e.IsConnected ? $"Connected to {e.ServerName}" : "Ready";
-        _ = Restore.RefreshCredentialStatusAsync();
     }
 
     [RelayCommand]
@@ -177,25 +262,51 @@ public partial class MainViewModel : ViewModelBase
         ServerManager.DisconnectCommand.Execute(null);
     }
 
+    /// <summary>
+    /// The sidebar's view names. Constants rather than literals scattered across the switch,
+    /// because an unrecognised name here silently lands on Blob Storage rather than failing -
+    /// so a typo looks like a button that goes to the wrong place (#42).
+    ///
+    /// The XAML still passes them as strings; <see cref="Views"/> is what a test can check the
+    /// switch against.
+    /// </summary>
+    public static class Nav
+    {
+        public const string BlobStorage = "Blob Storage";
+        public const string SqlServers = "SQL Servers";
+        public const string BrowseBackups = "Browse Backups";
+        public const string Restore = "Restore";
+        public const string History = "History";
+        public const string About = "About";
+
+        public static IReadOnlyList<string> Views =>
+            [BlobStorage, SqlServers, BrowseBackups, Restore, History, About];
+    }
+
     [RelayCommand]
     private void NavigateTo(string viewName)
     {
         CurrentViewName = viewName;
         CurrentView = viewName switch
         {
-            "Blob Storage" => BlobConfig,
-            "SQL Servers" => ServerManager,
-            "Browse Backups" => BlobBrowser,
-            "Restore" => Restore,
-            "About" => About,
+            Nav.BlobStorage => BlobConfig,
+            Nav.SqlServers => ServerManager,
+            Nav.BrowseBackups => BlobBrowser,
+            Nav.Restore => Restore,
+            Nav.History => History,
+            Nav.About => About,
             _ => BlobConfig
         };
 
         // Refresh container lists when navigating to views that depend on them
-        if (viewName is "Browse Backups")
+        if (viewName is Nav.BrowseBackups)
             BlobBrowser.RefreshContainers();
-        else if (viewName is "Restore")
+        else if (viewName is Nav.Restore)
             Restore.RefreshContainers();
+        else if (viewName is Nav.History)
+            // Re-read on every visit: a restore run since the last look must be here, and the
+            // history is written by the Restore screen rather than by this one.
+            History.Refresh();
     }
 }
 

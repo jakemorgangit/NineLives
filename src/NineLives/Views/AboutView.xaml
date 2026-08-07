@@ -1,4 +1,4 @@
-<UserControl x:Class="Blackcat.NineLives.Views.AboutView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.AboutView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
@@ -14,18 +14,18 @@
                 <TextBlock Style="{StaticResource LogoWordmark}"
                            FontSize="26"
                            Margin="0,0,0,12">
-                    <Run Text="N I N E" Foreground="{StaticResource PrimaryTextBrush}" />
+                    <Run Text="N I N E" Foreground="{DynamicResource PrimaryTextBrush}" />
                     <Run Text="  " />
-                    <Run Text="L I V E S" Foreground="#3B83E9" />
+                    <Run Text="L I V E S" Foreground="{DynamicResource AccentBrush}" />
                 </TextBlock>
 
                 <TextBlock Text="{Binding Version}"
                            FontSize="14"
-                           Foreground="{StaticResource SecondaryTextBrush}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,20" />
 
-                <Border Height="1" Background="{StaticResource CardBorderBrush}" Margin="0,0,0,20" />
+                <Border Height="1" Background="{DynamicResource CardBorderBrush}" Margin="0,0,0,20" />
 
                 <TextBlock Text="{Binding Description}"
                            Style="{StaticResource BodyText}"
@@ -33,12 +33,12 @@
                            TextAlignment="Center"
                            Margin="0,0,0,24" />
 
-                <Border Height="1" Background="{StaticResource CardBorderBrush}" Margin="0,0,0,20" />
+                <Border Height="1" Background="{DynamicResource CardBorderBrush}" Margin="0,0,0,20" />
 
                 <TextBlock Text="AUTHOR" Style="{StaticResource LabelText}" HorizontalAlignment="Center" />
                 <TextBlock Text="{Binding Author}"
                            FontSize="15" FontWeight="SemiBold"
-                           Foreground="{StaticResource PrimaryTextBrush}"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,4" />
                 <TextBlock Text="{Binding Company}"
@@ -48,11 +48,29 @@
                 <TextBlock HorizontalAlignment="Center" Margin="0,0,0,20">
                     <Hyperlink NavigateUri="{Binding Website}"
                                RequestNavigate="Hyperlink_RequestNavigate"
-                               Foreground="{StaticResource AccentBrush}"
+                               Foreground="{DynamicResource AccentBrush}"
                                TextDecorations="None">
                         <Run Text="{Binding Website, Mode=OneWay}" />
                     </Hyperlink>
                 </TextBlock>
+
+                <Border Height="1" Background="{DynamicResource CardBorderBrush}" Margin="0,0,0,20" />
+
+                <TextBlock Text="APPEARANCE" Style="{StaticResource LabelText}" HorizontalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding Themes}"
+                          DisplayMemberPath="Name"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding SelectedTheme}"
+                          Style="{StaticResource DarkComboBox}"
+                          Width="200"
+                          HorizontalAlignment="Center"
+                          Margin="0,0,0,6"
+                          ToolTip="Dark is the default. High contrast is pure black and white with saturated status colours, for anyone who needs it." />
+                <TextBlock Text="Applies straight away, and is remembered."
+                           Style="{StaticResource SecondaryText}"
+                           FontSize="11"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,20" />
 
                 <!-- The logs are what someone attaches to a bug report, so there has to be a way
                      to find them that is not "know where LocalAppData lives" (#40). -->

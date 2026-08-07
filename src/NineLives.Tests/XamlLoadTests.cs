@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,22 +22,22 @@ namespace Blackcat.NineLives.Tests;
 /// What this deliberately does not check is whether the result LOOKS right - colours, spacing,
 /// whether a panel is where you expect. That still needs eyes on the running app.
 /// </summary>
-public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposable
+[Collection(WpfCollection.Name)]
+public class XamlLoadTests(WpfFixture wpf)
 {
-    private readonly string _dir = Path.Combine(
-        Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"));
-
-    public void Dispose()
-    {
-        try { Directory.Delete(_dir, recursive: true); } catch { }
-        GC.SuppressFinalize(this);
-    }
-
-    private CredentialStore Store() => new(_dir);
+    /// <summary>
+    /// In-memory throughout. These tests are about markup, so nothing here should be reading the
+    /// machine's credential vault or writing a config file anywhere (#41).
+    /// </summary>
+    private static ICredentialStore Store() => new FakeCredentialStore();
 
     /// <summary>Realises the visual tree. Bindings are not evaluated until something lays out.</summary>
     private static void Realise(FrameworkElement element)
     {
+        // A Window builds nothing under itself until its template is applied - measuring alone
+        // leaves the content unrealised, so nothing inside it can be found or asserted on.
+        element.ApplyTemplate();
+
         element.Measure(new Size(1600, 1200));
         element.Arrange(new Rect(0, 0, 1600, 1200));
         element.UpdateLayout();
@@ -71,6 +71,62 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         => Check("BlobConfigView", () =>
             new BlobConfigView { DataContext = new BlobConfigViewModel(Store(), new BlobStorageService(Store())) });
 
+    /// <summary>
+    /// The container form under Entra: no SAS box, and the caveat panel on screen (#29).
+    ///
+    /// Worth its own case because the whole Entra section is collapsed in the default state the
+    /// plain load test exercises, so none of its bindings are ever evaluated there.
+    /// </summary>
+    [Theory]
+    [InlineData(BlobAuthMode.EntraInteractive)]
+    [InlineData(BlobAuthMode.EntraDefault)]
+    public void TheContainerFormHidesTheSasBoxUnderEntra(BlobAuthMode mode)
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = new BlobConfigViewModel(Store(), new BlobStorageService(Store()));
+            vm.AddNewCommand.Execute(null);
+            vm.EditName = "backups";
+            vm.EditContainerUrl = "https://mystorageaccount.blob.core.windows.net/backups";
+            vm.EditAuthMode = mode;
+
+            var view = new BlobConfigView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var labels = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+                Assert.DoesNotContain("SAS TOKEN", labels);
+                Assert.Contains(labels, t => t.Contains("Owner or Contributor is NOT enough", StringComparison.Ordinal));
+                Assert.Contains(labels, t => t.Contains("Storage Blob Data Reader", StringComparison.Ordinal));
+
+                listener.AssertNone("BlobConfigView Entra");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    [Fact]
+    public void TheContainerFormShowsTheSasBoxUnderSasAuth()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = new BlobConfigViewModel(Store(), new BlobStorageService(Store()));
+            vm.AddNewCommand.Execute(null);
+
+            var view = new BlobConfigView { DataContext = vm };
+            Realise(view);
+
+            var labels = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+            Assert.Contains("SAS TOKEN", labels);
+            Assert.DoesNotContain(labels, t => t.Contains("Owner or Contributor is NOT enough", StringComparison.Ordinal));
+        });
+    }
+
     [Fact]
     public void ServerManagerViewLoads()
         => Check("ServerManagerView", () =>
@@ -102,10 +158,37 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
     {
         wpf.Invoke(() =>
         {
-            var window = new MainWindow();
-            Realise(window);
+            // Against a fake store, not the real one. This used to construct a MainViewModel over
+            // the actual %LOCALAPPDATA% config and run the secret-key migration across it - a test
+            // reaching into the user's own data (#41).
+            var vm = new MainViewModel(new FakeCredentialStore());
+
+            // Busy, so the strip that says what the app is doing is actually built and bound - it
+            // is collapsed the rest of the time, and a mistyped path there would be silent (#128).
+            vm.BlobBrowser.IsBusy = true;
+
+            var window = new MainWindow(vm);
+
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(window);
+                listener.AssertNone("MainWindow");
+            }
+            finally
+            {
+                listener.Detach();
+            }
         });
     }
+
+    // The update banner is not asserted on beyond MainWindowLoads above, which does cover what
+    // can break silently: it parses the banner's markup, its storyboard and its drop shadow, and
+    // resolves every {StaticResource} it uses - a missing key would throw there.
+    //
+    // Whether it is VISIBLE cannot be checked this way. A Window builds nothing under itself until
+    // it is shown, and showing one would flash a real window and run the actual startup path. Not
+    // worth contorting the harness for a banner whose appearance needs eyes anyway.
 
     // ── the panels that only appear in a particular state ───────────────────────
 
@@ -175,20 +258,54 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
                 ContainerUrl = "https://acct.blob.core.windows.net/backups"
             };
             vm.IsConnectedToServer = true;
-            vm.CredentialSectionVisible = true;
+            vm.Credential.SectionVisible = true;
 
             var view = new RestoreView { DataContext = vm };
 
-            vm.CredentialExistsOnServer = false;
-            vm.CredentialIsValidSas = false;
+            vm.Credential.ExistsOnServer = false;
+            vm.Credential.IdentityKind = BlobCredentialIdentity.Missing;
             Realise(view);
             Assert.Contains(FindAll<Button>(view), b => (b.Content as string) == "Create credential on server");
 
-            vm.CredentialExistsOnServer = true;
-            vm.CredentialIsValidSas = true;
+            vm.Credential.ExistsOnServer = true;
+            vm.Credential.IdentityKind = BlobCredentialIdentity.SharedAccessSignature;
             Realise(view);
             Assert.Contains(FindAll<Button>(view),
                 b => (b.Content as string) == "Refresh credential with stored SAS token");
+        });
+    }
+
+    /// <summary>
+    /// The same button under a managed identity. "Refresh credential with stored SAS token" reads
+    /// as a harmless top-up, and the press would convert the instance's managed identity into a
+    /// SAS credential - so the label has to say that before it is pressed, not after (#145).
+    /// </summary>
+    [Fact]
+    public void TheCredentialButtonSaysItWouldReplaceAManagedIdentity()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.SelectedContainer = new BlobContainerConfig
+            {
+                Id = BlobContainerConfig.NewId(),
+                Name = "prod",
+                ContainerUrl = "https://acct.blob.core.windows.net/backups"
+            };
+            vm.IsConnectedToServer = true;
+            vm.Credential.SectionVisible = true;
+
+            var view = new RestoreView { DataContext = vm };
+
+            vm.Credential.ExistsOnServer = true;
+            vm.Credential.IdentityKind = BlobCredentialIdentity.ManagedIdentity;
+            Realise(view);
+
+            // Present, not shown: the panel lives inside a section that needs a loaded backup
+            // set, which this fixture deliberately does not stand up. That the panel's own
+            // visibility binding resolves at all is covered by RestoreViewLoads.
+            Assert.Contains(FindAll<Button>(view),
+                b => (b.Content as string) == "Replace Managed Identity with stored SAS token");
         });
     }
 
@@ -277,13 +394,13 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
             vm.BackupsLoaded = true;
             vm.HasScript = true;
             vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
-            vm.ConsoleLines =
+            vm.Console.Lines =
             [
                 new ConsoleLine("Beginning restore execution...", ConsoleLineKind.Step),
                 new ConsoleLine("50 percent processed."),
                 new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
             ];
-            vm.HasConsoleOutput = true;
+            vm.Console.HasOutput = true;
             vm.IsExecuting = false;
             vm.ExecutionComplete = true;
 
@@ -327,8 +444,8 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         {
             var vm = NewRestoreViewModel();
             vm.BackupsLoaded = true;
-            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
-            vm.HasConsoleOutput = true;
+            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Console.HasOutput = true;
 
             var view = new RestoreView { DataContext = vm };
 
@@ -355,8 +472,8 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         {
             var vm = NewRestoreViewModel();
             vm.BackupsLoaded = true;
-            vm.ConsoleLines = [new ConsoleLine("Beginning restore execution...")];
-            vm.HasConsoleOutput = true;
+            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Console.HasOutput = true;
             vm.IsConsoleDetached = false;   // as if the wiring failed
             vm.IsExecuting = true;
 
@@ -365,6 +482,49 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
 
             Assert.False(FindAll<ListBox>(view).Any(IsShown),
                 "Two consoles would be on screen at once during a restore.");
+        });
+    }
+
+    /// <summary>
+    /// The point-in-time panel, and the fact that a rejected target reads as a rejection.
+    ///
+    /// "Must be after 22:00" was drawn in the same muted grey as "Valid range: ...". Execute is
+    /// already blocked at that point, so that message is the only thing on screen saying why
+    /// (#115 seam 3).
+    /// </summary>
+    [Fact]
+    public void ARejectedPointInTimeTargetIsShownAsAnError()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.PointInTime.SetWindow((new DateTime(2026, 1, 10, 22, 0, 0), new DateTime(2026, 1, 10, 22, 15, 0)));
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var message = FindAll<TextBlock>(view)
+                    .Single(t => t.Text.StartsWith("Valid range", StringComparison.Ordinal));
+                var informational = message.Foreground;
+
+                // Ticked, over a target past the end of the log.
+                vm.PointInTime.Use = true;
+                vm.PointInTime.StopAtText = "2026-01-10 23:59:59";
+                Realise(view);
+
+                Assert.True(vm.PointInTime.HasError);
+                Assert.StartsWith("Must be at or before", message.Text);
+                Assert.NotEqual(informational.ToString(), message.Foreground.ToString());
+
+                listener.AssertNone("RestoreView point-in-time panel");
+            }
+            finally
+            {
+                listener.Detach();
+            }
         });
     }
 
@@ -394,6 +554,63 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
                     string.Join(" | ", texts.Where(t => !string.IsNullOrWhiteSpace(t))));
 
                 listener.AssertNone("RestoreView inventory panel");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    /// <summary>
+    /// The VERIFYONLY results panel (#26). Its rows colour the status through a Style on a Run,
+    /// which is only ever built when the template is realised - so an empty collection would leave
+    /// that markup completely unexercised.
+    /// </summary>
+    [Fact]
+    public void TheVerifyPanelShowsWhatSqlServerSaidAboutEachBackup()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var good = new BackupSet { SetId = "20260110_220000", Type = BackupType.Full };
+            var bad = new BackupSet { SetId = "20260110_230000", Type = BackupType.TransactionLog };
+
+            vm.ChainVerifyResults.Add(new ChainVerifyResult
+            {
+                Set = good,
+                Result = new VerifyOnlyResult(true, "The backup set on file 1 is valid.")
+            });
+            vm.ChainVerifyResults.Add(new ChainVerifyResult
+            {
+                Set = bad,
+                Result = new VerifyOnlyResult(false, "Cannot open backup device.")
+            });
+            vm.HasVerifyResults = true;
+            vm.HasVerifyFailures = true;
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.True(
+                    texts.Any(t => t.Contains("Cannot open backup device.", StringComparison.Ordinal)),
+                    "The verify panel did not render its results. TextBlocks found: " +
+                    string.Join(" | ", texts.Where(t => !string.IsNullOrWhiteSpace(t))));
+                // The status sits in its own Run so it can be coloured, so look at the inlines
+                // rather than the TextBlock's flattened text.
+                var runs = FindAll<TextBlock>(view)
+                    .SelectMany(t => t.Inlines.OfType<System.Windows.Documents.Run>())
+                    .Select(r => r.Text)
+                    .ToList();
+
+                Assert.True(runs.Contains("FAILED"), "A failed backup did not read as failed.");
+                Assert.True(runs.Contains("Valid"), "A good backup did not read as valid.");
+
+                listener.AssertNone("RestoreView verify panel");
             }
             finally
             {
@@ -441,6 +658,120 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         });
     }
 
+    /// <summary>
+    /// The restore point list and its narrowing controls (#27). The list is the only way to pick
+    /// one point out of hundreds, so a binding that silently failed would leave the timeline as
+    /// the only selector again - which is the problem being fixed.
+    /// </summary>
+    [Fact]
+    public void TheRestorePointListRendersAndBindsItsSelection()
+    {
+        wpf.Invoke(() =>
+        {
+            var full = new BackupSet
+            {
+                SetId = "20260110_220000",
+                Type = BackupType.Full,
+                Timestamp = new DateTime(2026, 1, 10, 22, 0, 0),
+                Files = [new BackupFileInfo { BlobName = "FULL/SRV01/MyDb/20260110_220000.bak", SizeBytes = 1000 }]
+            };
+
+            var vm = NewRestoreViewModel();
+            vm.Timeline.HasPoints = true;
+            vm.Timeline.HasVisiblePoints = true;
+            vm.Timeline.CountText = "Showing 1 of 4 restore point(s)";
+            vm.Timeline.Points =
+            [
+                new RestorePoint
+                {
+                    Timestamp = full.Timestamp,
+                    Type = BackupType.Full,
+                    PrimarySet = full,
+                    RequiredFullSet = full
+                }
+            ];
+
+            var view = new RestoreView { DataContext = vm };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.True(
+                    texts.Any(t => t.Contains("2026-01-10 22:00:00", StringComparison.Ordinal)),
+                    "The restore point list did not render its rows.");
+                Assert.Contains(texts, t => t.Contains("Showing 1 of 4", StringComparison.Ordinal));
+
+                listener.AssertNone("RestoreView point list");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    /// <summary>
+    /// The restore history view (#31). Populated, because its rows colour the outcome through a
+    /// Style on a Run and the detail pane only exists once something is selected - none of which
+    /// is built when the list is empty.
+    /// </summary>
+    [Fact]
+    public void TheHistoryViewShowsWhatEachRestoreDid()
+    {
+        wpf.Invoke(() =>
+        {
+            var history = new FakeRestoreHistoryStore();
+            history.Append(new RestoreHistoryEntry
+            {
+                StartedAt = new DateTime(2026, 1, 10, 22, 0, 0),
+                CompletedAt = new DateTime(2026, 1, 10, 22, 4, 30),
+                ServerName = "SRV01",
+                TargetDatabase = "MyDb_Restored",
+                ChainSummary = "1 Full + 2 Log(s)",
+                Outcome = RestoreOutcome.Failed,
+                ErrorMessage = "RESTORE terminating abnormally.",
+                Script = "RESTORE DATABASE [MyDb_Restored] FROM URL = N'https://mystorageaccount.blob.core.windows.net/backups/x.bak'",
+                Log = "Beginning restore execution..."
+            });
+
+            var view = new HistoryView { DataContext = new HistoryViewModel(history) };
+            var listener = BindingErrorListener.Attach();
+            try
+            {
+                Realise(view);
+
+                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
+                Assert.True(
+                    texts.Any(t => t.Contains("RESTORE terminating abnormally.", StringComparison.Ordinal)),
+                    "The detail pane did not render. TextBlocks found: " +
+                    string.Join(" | ", texts.Where(t => !string.IsNullOrWhiteSpace(t))));
+
+                var runs = FindAll<TextBlock>(view)
+                    .SelectMany(t => t.Inlines.OfType<System.Windows.Documents.Run>())
+                    .Select(r => r.Text)
+                    .ToList();
+                Assert.Contains("Failed", runs);
+
+                // The script and the log are what someone came here for.
+                var boxes = FindAll<System.Windows.Controls.TextBox>(view).Select(b => b.Text).ToList();
+                Assert.Contains(boxes, t => t.Contains("RESTORE DATABASE", StringComparison.Ordinal));
+
+                listener.AssertNone("HistoryView");
+            }
+            finally
+            {
+                listener.Detach();
+            }
+        });
+    }
+
+    [Fact]
+    public void TheHistoryViewLoadsWithNothingRecorded()
+        => Check("HistoryView (empty)", () =>
+            new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
+
     // ── helpers ─────────────────────────────────────────────────────────────────
 
     private RestoreViewModel NewRestoreViewModel()
@@ -451,7 +782,9 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
             new SqlServerService(store),
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
-            store);
+            store,
+            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))),
+            new FakeRestoreHistoryStore());
     }
 
     /// <summary>
@@ -469,6 +802,10 @@ public class XamlLoadTests(WpfFixture wpf) : IClassFixture<WpfFixture>, IDisposa
         for (DependencyObject? node = element; node != null;
              node = System.Windows.Media.VisualTreeHelper.GetParent(node))
         {
+            // A Window that has never been shown reports itself as not visible, which would make
+            // every element inside it look hidden. What is being asked here is whether the content
+            // would be on screen, so the window itself is not part of the question.
+            if (node is Window) break;
             if (node is UIElement { Visibility: not Visibility.Visible }) return false;
         }
         return true;

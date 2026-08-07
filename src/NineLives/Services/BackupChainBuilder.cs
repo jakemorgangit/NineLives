@@ -139,15 +139,9 @@ public class BackupChainBuilder
         return (earliest, latest);
     }
 
-    // Keep backward compatibility for existing callers during migration
-    public (DateTime earliest, DateTime latest)? GetRestoreWindow(List<BackupFileInfo> allBackups)
-    {
-        var fulls = allBackups.Where(b => b.Type == BackupType.Full).ToList();
-        if (fulls.Count == 0) return null;
-
-        var earliest = fulls.Min(f => f.EffectiveDate);
-        var latest = allBackups.Max(b => b.EffectiveDate);
-
-        return (earliest, latest);
-    }
+    // The file-level overload that used to sit here is gone (#42). It was labelled "backward
+    // compatibility during migration", had no production caller, and mixed two time bases: it
+    // compared BackupStartDate (the backup server's local clock) against the blob's LastModified
+    // (UTC). Keeping it around was an invitation for a future caller to reintroduce the skew that
+    // #47 went to some trouble to make visible.
 }

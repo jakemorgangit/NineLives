@@ -1,21 +1,30 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
+using Azure.Core;
+using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
-public class BlobStorageService
+public class BlobStorageService : IBlobStorageService
 {
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
-    public BlobStorageService(CredentialStore credentialStore)
+    public BlobStorageService(ICredentialStore credentialStore)
     {
         _credentialStore = credentialStore;
     }
 
     private BlobContainerClient CreateClient(BlobContainerConfig config)
     {
+        var baseUrl = config.ContainerUrl.TrimEnd('/');
+
+        // Entra: no secret of ours at all. Azure.Identity acquires and refreshes the token, and
+        // nothing is written to the credential store (#29).
+        if (config.AuthMode.IsEntra())
+            return new BlobContainerClient(new Uri(baseUrl), CredentialFor(config.AuthMode));
+
         // An unsaved token wins, so Test Connection can try one without it having to be persisted
         // first (#12). Null for every ordinary operation, which falls through to the stored token.
         var sasToken = config.UnsavedSasToken ?? _credentialStore.GetSasToken(config);
@@ -23,15 +32,125 @@ public class BlobStorageService
             throw new InvalidOperationException(
                 "No SAS token found. Please configure the SAS token for this container.");
 
-        var baseUrl = config.ContainerUrl.TrimEnd('/');
         var cleanSas = sasToken.TrimStart('?');
         var separator = baseUrl.Contains('?') ? "&" : "?";
         var fullUri = new Uri($"{baseUrl}{separator}{cleanSas}");
         return new BlobContainerClient(fullUri);
     }
 
+    /// <summary>
+    /// One credential per mode for the life of the process.
+    ///
+    /// Deliberately shared rather than created per client. A credential holds the in-memory token
+    /// cache, so a fresh one per operation means a fresh sign-in per operation - which for
+    /// interactive mode is a browser window every time the container is listed, and for the rest is
+    /// a token request per call instead of one per hour.
+    ///
+    /// Static because the cache is genuinely process-wide: it belongs to the signed-in user, not to
+    /// whichever service instance happened to ask first.
+    /// </summary>
+    private static readonly Lock CredentialLock = new();
+    private static readonly Dictionary<BlobAuthMode, TokenCredential> Credentials = [];
+
+    /// <summary>
+    /// Test seam. A real credential cannot be exercised offline, and the thing worth pinning about
+    /// #152 - that a sign-in never runs on the UI thread - is otherwise unobservable.
+    /// </summary>
+    internal static Func<BlobAuthMode, TokenCredential>? CredentialFactoryForTests { get; set; }
+
+    private static TokenCredential CredentialFor(BlobAuthMode mode)
+    {
+        lock (CredentialLock)
+        {
+            // Checked before the cache, so a test is never handed a credential a previous test made.
+            if (CredentialFactoryForTests != null) return CredentialFactoryForTests(mode);
+
+            if (Credentials.TryGetValue(mode, out var existing)) return existing;
+
+            TokenCredential created = mode == BlobAuthMode.EntraInteractive
+                ? new InteractiveBrowserCredential()
+                : new DefaultAzureCredential();
+
+            Credentials[mode] = created;
+            return created;
+        }
+    }
+
+    /// <summary>
+    /// Test hooks. Building a client makes no network call and acquires no token - a credential is
+    /// only exercised on the first request - so which credential the mode resolves to, and that a
+    /// SAS container still refuses without one, are both checkable offline (#29).
+    /// </summary>
+    internal BlobContainerClient CreateClientForTests(BlobContainerConfig config) => CreateClient(config);
+
+    internal static TokenCredential CredentialForTests(BlobAuthMode mode) => CredentialFor(mode);
+
+    /// <summary>
+    /// Asks the credential for a token purely so the account behind it can be named.
+    ///
+    /// Only called after something has already failed, so the extra round trip costs nothing on the
+    /// happy path - and by then it is usually the single most useful fact available, because a 403
+    /// from Azure never says which identity it refused.
+    /// </summary>
+    public async Task<string?> DescribeSignedInIdentityAsync(
+        BlobContainerConfig config, CancellationToken ct = default)
+    {
+        if (!config.AuthMode.IsEntra()) return null;
+
+        try
+        {
+            // Off the UI thread for the same reason as the operations themselves (#152). Usually a
+            // cache read by the time this runs - it only happens after a failure - but "usually" is
+            // not a reason to block the window on a credential that might decide to prompt.
+            var token = await Task.Run(
+                () => CredentialFor(config.AuthMode)
+                    .GetTokenAsync(new TokenRequestContext([StorageScope]), ct).AsTask(),
+                ct);
+
+            return EntraIdentity.Describe(token.Token);
+        }
+        catch
+        {
+            // This exists to explain a failure. It must not create one.
+            return null;
+        }
+    }
+
+    /// <summary>What a token for blob data is asked for. The credential normally handles this
+    /// itself; it is only spelled out here because the diagnostic asks directly.</summary>
+    private const string StorageScope = "https://storage.azure.com/.default";
+
+    /// <summary>
+    /// Gets the Entra sign-in out of the way, on the thread pool, before anything touches the
+    /// container (#152).
+    ///
+    /// InteractiveBrowserCredential launches a browser and waits for the redirect to come back, and
+    /// it does that on whatever thread asked for the token. Every blob operation starts from a
+    /// command on the UI thread, so the window stopped painting for as long as the sign-in was open
+    /// - an application asking somebody to go and authenticate while looking, to them, like it had
+    /// crashed.
+    ///
+    /// Task.Run rather than ConfigureAwait: the blocking happens before the credential's first
+    /// await yields, so there is no continuation to redirect - the work has to start somewhere
+    /// other than the UI thread.
+    ///
+    /// Only the first operation pays for this. The credential caches the token, and it is shared
+    /// process-wide, so everything after is a cache read.
+    /// </summary>
+    private static async Task EnsureSignedInAsync(BlobContainerConfig config, CancellationToken ct)
+    {
+        if (!config.AuthMode.IsEntra()) return;
+
+        var credential = CredentialFor(config.AuthMode);
+
+        await Task.Run(
+            () => credential.GetTokenAsync(new TokenRequestContext([StorageScope]), ct).AsTask(),
+            ct);
+    }
+
     public async Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
+        await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         await foreach (var _ in client.GetBlobsAsync(
             BlobTraits.None, BlobStates.None, prefix: null, cancellationToken: ct)
@@ -46,6 +165,7 @@ public class BlobStorageService
     public async Task<List<string>> ListTopLevelFoldersAsync(
         BlobContainerConfig config, CancellationToken ct = default)
     {
+        await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         var folders = new List<string>();
 
@@ -78,6 +198,7 @@ public class BlobStorageService
         IProgress<int>? progress,
         CancellationToken ct = default)
     {
+        await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         var files = new List<BackupFileInfo>();
 
@@ -222,12 +343,14 @@ public class BlobStorageService
     {
         // Same formatter the filters match against, so the values offered in the dropdown and
         // the values compared against a set can never drift apart.
+        // OfType rather than Where(s => s != null) + a ! at the end: it drops the nulls AND tells
+        // the compiler so, instead of filtering in a way it cannot follow and then overruling it.
         return files
             .Select(f => f.ServerDisplay)
-            .Where(s => s != null)
+            .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList()!;
+            .ToList();
     }
 
     public ContainerSummary GetSetBasedSummary(List<BackupSet> sets)
@@ -241,15 +364,22 @@ public class BlobStorageService
             LogBackups = sets.Count(s => s.Type == BackupType.TransactionLog),
             UnknownFiles = sets.Count(s => s.Type == BackupType.Unknown),
             TotalSizeBytes = sets.Sum(s => s.TotalSizeBytes),
-            EarliestBackup = sets.Count > 0 ? sets.Min(s => new DateTimeOffset(s.Timestamp)) : null,
-            LatestBackup = sets.Count > 0 ? sets.Max(s => new DateTimeOffset(s.Timestamp)) : null
+
+            // Deliberately NOT EarliestBackup/LatestBackup. A set's Timestamp is a bare wall clock
+            // whose zone varies by set, and wrapping it in a DateTimeOffset stamped it with the
+            // WORKSTATION's offset - which is nobody's clock, and double-shifted the blob-derived
+            // ones. The set range keeps its own members so the two can never be confused.
+            EarliestSetTimestamp = sets.Count > 0 ? sets.Min(s => s.Timestamp) : null,
+            LatestSetTimestamp = sets.Count > 0 ? sets.Max(s => s.Timestamp) : null,
+            ApproximateSets = sets.Count(s => s.IsTimestampApproximate)
         };
     }
 
     /// <summary>
     /// Groups individual backup files into logical BackupSets, handling striped backups.
     /// </summary>
-    public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files)
+    public List<BackupSet> GroupIntoBackupSets(
+        List<BackupFileInfo> files, string? backupServerTimeZoneId = null)
     {
         var groups = new Dictionary<string, List<BackupFileInfo>>();
 
@@ -294,14 +424,27 @@ public class BlobStorageService
         {
             var first = groupFiles[0];
             var (setId, _) = BackupSet.ParseFileName(first.FileName);
-            var timestamp = BackupSet.ParseTimestamp(setId) ?? first.LastModified.DateTime;
+
+            // The filename is the backup server's local clock; the blob's LastModified is UTC.
+            //
+            // With the container's backup server time zone configured they can be put on ONE clock
+            // (#102). Without it they can only be labelled - so record which one this set got, and
+            // let the UI say so rather than presenting both as a single exact timeline (#47).
+            var parsed = BackupSet.ParseTimestamp(setId);
+            var converted = parsed == null
+                ? BackupTime.ToBackupServerTime(first.LastModified, backupServerTimeZoneId)
+                : null;
 
             sets.Add(new BackupSet
             {
                 SetId = setId,
                 Type = first.Type,
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
-                Timestamp = timestamp,
+                Timestamp = parsed ?? converted ?? BackupTime.WallClock(first.LastModified),
+                TimestampSource =
+                    parsed != null ? BackupTimestampSource.FileName
+                    : converted != null ? BackupTimestampSource.BlobLastModifiedConverted
+                    : BackupTimestampSource.BlobLastModified,
                 DatabaseName = first.InferredDatabaseName,
                 ServerName = first.InferredServerName,
                 InstanceName = first.InferredInstanceName,
@@ -551,8 +694,24 @@ public class ContainerSummary
     public int LogBackups { get; set; }
     public int UnknownFiles { get; set; }
     public long TotalSizeBytes { get; set; }
+
+    /// <summary>
+    /// File-level range, straight from blob metadata, so genuine UTC instants. Only populated by
+    /// the file-based summary.
+    /// </summary>
     public DateTimeOffset? EarliestBackup { get; set; }
     public DateTimeOffset? LatestBackup { get; set; }
+
+    /// <summary>
+    /// Set-level range. Bare wall clocks, not instants: most read the backup server's local clock
+    /// and any counted by <see cref="ApproximateSets"/> read UTC instead. Only populated by the
+    /// set-based summary.
+    /// </summary>
+    public DateTime? EarliestSetTimestamp { get; set; }
+    public DateTime? LatestSetTimestamp { get; set; }
+
+    /// <summary>How many sets had to fall back to the blob's LastModified for their time.</summary>
+    public int ApproximateSets { get; set; }
 
     public string TotalSizeDisplay => ByteSize.Format(TotalSizeBytes);
 }

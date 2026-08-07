@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -33,7 +33,7 @@ public partial class RestoreView : UserControl
         if (e.NewValue is RestoreViewModel vm)
         {
             _viewModel = vm;
-            _observedLines = vm.ConsoleLines;
+            _observedLines = vm.Console.Lines;
             _observedLines.CollectionChanged += OnConsoleLinesChanged;
             vm.PropertyChanged += OnViewModelPropertyChanged;
         }

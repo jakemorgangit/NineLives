@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Security;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
@@ -6,11 +6,11 @@ using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
-public class SqlServerService
+public class SqlServerService : ISqlServerService
 {
-    private readonly CredentialStore _credentialStore;
+    private readonly ICredentialStore _credentialStore;
 
-    public SqlServerService(CredentialStore credentialStore)
+    public SqlServerService(ICredentialStore credentialStore)
     {
         _credentialStore = credentialStore;
     }
@@ -34,7 +34,29 @@ public class SqlServerService
 
         builder.IntegratedSecurity = server.AuthMode == AuthMode.WindowsAuth;
 
-        // No UserID or Password here - SQL auth credentials go on the SqlConnection as a
+        // Entra is the driver's own token flow - Microsoft.Data.SqlClient acquires and refreshes
+        // the token through MSAL, and the app never sees or stores a secret for it (#30).
+        if (server.AuthMode.IsEntra())
+        {
+            // Before the connection string names a method, make sure the provider servicing it has
+            // a window to parent its prompt to - otherwise the sign-in fails with
+            // "a window handle must be configured" rather than showing anything.
+            EntraAuthentication.Register(EntraAuthentication.ActiveWindowHandle);
+
+            builder.Authentication = server.AuthMode switch
+            {
+                AuthMode.EntraInteractive => SqlAuthenticationMethod.ActiveDirectoryInteractive,
+                AuthMode.EntraIntegrated => SqlAuthenticationMethod.ActiveDirectoryIntegrated,
+                _ => SqlAuthenticationMethod.ActiveDirectoryDefault
+            };
+
+            // A hint for the account picker, not a credential. Safe in the connection string for
+            // the same reason the SQL auth username is not: there is no password to pair it with.
+            if (server.AuthMode == AuthMode.EntraInteractive && !string.IsNullOrWhiteSpace(server.Username))
+                builder.UserID = server.Username;
+        }
+
+        // No UserID or Password here for SQL auth - those credentials go on the SqlConnection as a
         // SqlCredential instead (#20). A connection string is a long-lived managed string that
         // cannot be zeroed and turns up in crash dumps and memory captures; SqlCredential holds
         // the password in a SecureString the driver disposes. It also means anything that logs or
@@ -53,7 +75,8 @@ public class SqlServerService
     {
         var conn = new SqlConnection(BuildConnectionString(server));
 
-        if (server.AuthMode != AuthMode.SqlAuth)
+        // Windows auth and the Entra modes carry no password of ours - the driver handles both.
+        if (!server.AuthMode.NeedsStoredPassword())
             return conn;
 
         // Unsaved wins, so Test Connection can try a password without persisting it first (#12).
@@ -191,7 +214,9 @@ public class SqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;
         cmd.CommandText = sql;
-        await cmd.ExecuteNonQueryAsync(ct);
+
+        await CancellableAsync(
+            () => cmd.ExecuteNonQueryAsync(ct), ct, "The recovery action");
     }
 
     public async Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
@@ -243,19 +268,22 @@ public class SqlServerService
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}";
 
-        var files = new List<FileMoveOption>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        return await CancellableAsync(async () =>
         {
-            files.Add(new FileMoveOption
+            var files = new List<FileMoveOption>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
             {
-                LogicalName = reader.GetString(reader.GetOrdinal("LogicalName")),
-                PhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
-                Type = reader.GetString(reader.GetOrdinal("Type")),
-                NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName"))
-            });
-        }
-        return files;
+                files.Add(new FileMoveOption
+                {
+                    LogicalName = reader.GetString(reader.GetOrdinal("LogicalName")),
+                    PhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
+                    Type = reader.GetString(reader.GetOrdinal("Type")),
+                    NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName"))
+                });
+            }
+            return files;
+        }, ct, "Reading the file list");
     }
 
     /// <summary>RESTORE HEADERONLY across the files of one backup set, striped or not.</summary>
@@ -272,6 +300,8 @@ public class SqlServerService
         var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}";
 
+        return await CancellableAsync<BackupFileInfo?>(async () =>
+        {
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
 
@@ -294,7 +324,149 @@ public class SqlServerService
             DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
             CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
         };
+        }, ct, "Reading the backup header");
     }
+
+    /// <summary>
+    /// RESTORE VERIFYONLY across the files of one backup set, striped or not.
+    ///
+    /// This is the check a DBA runs before committing to a long restore: it reads the backup and
+    /// reports whether it is complete and readable, in seconds rather than after an hour of
+    /// restoring. It does NOT check the data inside - that needs a restore and DBCC CHECKDB.
+    ///
+    /// A failure is returned rather than thrown, so one unreadable member of a chain does not
+    /// abort verification of the rest. Cancellation still propagates.
+    /// </summary>
+    /// <param name="withChecksum">
+    /// Adds WITH CHECKSUM. Left off, SQL Server applies its own default; a backup taken without
+    /// checksums FAILS this rather than skipping the check, so it is the caller's choice.
+    /// </param>
+    /// <param name="fileMoves">
+    /// The same MOVE clauses the restore will use. VERIFYONLY checks whether a restore could
+    /// proceed, which includes looking for the file paths it would write to - so without these it
+    /// checks the paths recorded INSIDE the backup, which belong to the source server. Confirmed
+    /// against SQL Server 2025: passing MOVE makes it check the move targets instead.
+    /// </param>
+    public async Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
+        ServerConnection server,
+        IReadOnlyList<string> blobUrls,
+        bool withChecksum = false,
+        IReadOnlyList<FileMoveOption>? fileMoves = null,
+        CancellationToken ct = default)
+    {
+        if (blobUrls.Count == 0)
+            return new VerifyOnlyResult(false, "No files to verify.");
+
+        var messages = new List<string>();
+
+        await using var conn = CreateConnection(server);
+
+        // VERIFYONLY says what it found through info messages - "The backup set on file 1 is
+        // valid." - and reports a bad backup by throwing. Both halves are wanted.
+        conn.InfoMessage += (_, e) => messages.Add(e.Message);
+
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 0;
+
+        cmd.CommandText = BuildVerifyOnlyStatement(blobUrls, withChecksum, fileMoves);
+
+        try
+        {
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (SqlException) when (ct.IsCancellationRequested)
+        {
+            // Same trap as the restore path: a cancelled command surfaces as SqlException, and
+            // reporting that as a verification failure would tell the user their backup is bad.
+            throw new OperationCanceledException("Verification was cancelled.", ct);
+        }
+        catch (SqlException ex)
+        {
+            return new VerifyOnlyResult(false, ex.Message);
+        }
+
+        var report = messages.Count > 0
+            ? string.Join(" ", messages.Select(m => m.Trim()))
+            : "The backup set is valid.";
+
+        return new VerifyOnlyResult(true, report, MentionsMissingDirectory(report));
+    }
+
+    /// <summary>
+    /// Runs something against SQL Server and translates a cancellation into the exception the
+    /// caller expects.
+    ///
+    /// SqlClient reports a command cancelled mid-flight as a SqlException - "A severe error
+    /// occurred on the current command" - not an OperationCanceledException. Every call site that
+    /// takes a token needs the same trap, and writing it out at each one is how three of them came
+    /// to be missing it. Only when the token was actually signalled, so a genuine severe error
+    /// still propagates as the failure it is.
+    /// </summary>
+    private static async Task<T> CancellableAsync<T>(
+        Func<Task<T>> work, CancellationToken ct, string what)
+    {
+        try
+        {
+            return await work();
+        }
+        catch (SqlException) when (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException($"{what} was cancelled.", ct);
+        }
+    }
+
+    private static async Task CancellableAsync(
+        Func<Task> work, CancellationToken ct, string what)
+        => await CancellableAsync<bool>(async () => { await work(); return true; }, ct, what);
+
+    /// <summary>
+    /// The exact T-SQL a verification runs. Every file of a striped set goes into one statement -
+    /// a stripe on its own is not a readable backup, so verifying them one at a time would report
+    /// failures that are not there.
+    ///
+    /// No WITH CREDENTIAL clause: SQL Server rejects that for SAS credentials with Msg 3225, and
+    /// it matches the credential by URL anyway (#60).
+    /// </summary>
+    public static string BuildVerifyOnlyStatement(
+        IReadOnlyList<string> blobUrls,
+        bool withChecksum,
+        IReadOnlyList<FileMoveOption>? fileMoves = null)
+    {
+        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
+
+        var options = new List<string>();
+
+        // Omitted rather than set to NO_CHECKSUM when off, so SQL Server's own default applies.
+        if (withChecksum) options.Add("CHECKSUM");
+
+        // The same MOVE clauses the restore will use. Both names are string literals, not
+        // identifiers - LogicalName comes from RESTORE FILELISTONLY (sysname, so an apostrophe is
+        // legal) and NewPhysicalName is a user-editable path.
+        if (fileMoves != null)
+        {
+            options.AddRange(fileMoves
+                .Where(m => !string.IsNullOrWhiteSpace(m.NewPhysicalName))
+                .Select(m => $"MOVE N'{TSql.EscapeLiteral(m.LogicalName)}' " +
+                             $"TO N'{TSql.EscapeLiteral(m.NewPhysicalName)}'"));
+        }
+
+        return options.Count == 0
+            ? $"RESTORE VERIFYONLY FROM {urlClauses}"
+            : $"RESTORE VERIFYONLY FROM {urlClauses} WITH {string.Join(", ", options)}";
+    }
+
+    /// <summary>
+    /// Did VERIFYONLY complain that it could not find the directories a restore would write to?
+    ///
+    /// Matched on SQL Server's own wording. It reports this as an informational message alongside
+    /// "the backup set is valid", so a chain can be perfectly readable and still be certain to
+    /// fail on restore - which is worth saying out loud rather than leaving in four lines of grey
+    /// text under a green tick (#129).
+    /// </summary>
+    private static bool MentionsMissingDirectory(string report)
+        => report.Contains("Directory lookup for the file", StringComparison.OrdinalIgnoreCase)
+        || report.Contains("may encounter storage space problems", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetStringFromReader(SqlDataReader reader, string columnName)
     {
@@ -452,12 +624,19 @@ public class SqlServerService
 
     private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
 
-    /// <summary>Checks if a credential with the given name exists on the server and has identity SHARED ACCESS SIGNATURE (for blob URL restores).</summary>
-    public async Task<(bool Exists, bool IsSharedAccessSignature)> CredentialExistsAsync(
+    /// <summary>
+    /// Which credential of that name is on the server, if any, and what it authenticates as.
+    ///
+    /// Reports the identity rather than "is it SAS" (#145). The two identities a restore from URL
+    /// can use are SHARED ACCESS SIGNATURE and, on SQL Server 2022+ or Azure SQL MI, Managed
+    /// Identity; collapsing them into one bool told the caller a working managed-identity
+    /// credential was broken, and the caller then overwrote it.
+    /// </summary>
+    public async Task<BlobCredentialStatus> CredentialExistsAsync(
         ServerConnection server, string credentialName, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(credentialName))
-            return (false, false);
+            return BlobCredentialStatus.Missing;
 
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
@@ -471,11 +650,24 @@ public class SqlServerService
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
-            return (false, false);
+            return BlobCredentialStatus.Missing;
 
-        var identity = reader["credential_identity"]?.ToString() ?? "";
-        var isSas = identity.Equals("SHARED ACCESS SIGNATURE", StringComparison.OrdinalIgnoreCase);
-        return (true, isSas);
+        var identity = (reader["credential_identity"]?.ToString() ?? "").Trim();
+        return new BlobCredentialStatus(ClassifyIdentity(identity), identity);
+    }
+
+    /// <summary>
+    /// The identity text as stored in sys.credentials, matched loosely. Case is not guaranteed -
+    /// the docs write 'Managed Identity' and 'MANAGED IDENTITY' in different places, and whoever
+    /// created the credential typed one of them.
+    /// </summary>
+    internal static BlobCredentialIdentity ClassifyIdentity(string identity)
+    {
+        if (identity.Equals("SHARED ACCESS SIGNATURE", StringComparison.OrdinalIgnoreCase))
+            return BlobCredentialIdentity.SharedAccessSignature;
+        if (identity.Equals("Managed Identity", StringComparison.OrdinalIgnoreCase))
+            return BlobCredentialIdentity.ManagedIdentity;
+        return BlobCredentialIdentity.Other;
     }
 
     // CREATE/DROP CREDENTIAL cannot take the name as a parameter - it is an identifier, not a
@@ -510,8 +702,14 @@ public class SqlServerService
         checkCmd.Parameters.AddWithValue("@name", credentialName);
         var exists = (int)(await checkCmd.ExecuteScalarAsync(ct))! > 0;
 
-        // ALTER also resets IDENTITY, so a credential that exists under some other identity is
-        // converted rather than left in place to fail the restore later.
+        // ALTER resets IDENTITY as well as the secret, so a credential sitting under some other
+        // identity is converted rather than left to fail the restore later.
+        //
+        // That conversion is destructive and this method cannot tell a mistake from a deliberate
+        // setup, so it must only ever be reached because somebody asked for it. The execute path
+        // no longer calls this to "fix" an identity it does not recognise - it stops and says what
+        // it found, because the identity it would have replaced could be a managed identity the
+        // instance genuinely restores with (#145).
         var cleanSas = sasToken.TrimStart('?');
         await using var writeCmd = conn.CreateCommand();
         writeCmd.CommandText = $@"

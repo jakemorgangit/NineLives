@@ -51,6 +51,17 @@ public class RestoreScriptGenerator
         if (options.StopAt.HasValue)
             sb.AppendLine($"-- Point-in-Time: {options.StopAt.Value:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine("-- ============================================================");
+
+        // Worth saying in the script itself, not just the checkbox tooltip - the script gets
+        // copied into SSMS and run by someone who never saw the checkbox.
+        if (options.ContinueAfterError)
+        {
+            sb.AppendLine();
+            sb.AppendLine("-- WARNING: CONTINUE_AFTER_ERROR is set. If SQL Server hits a damaged");
+            sb.AppendLine("-- page or a failed checksum it will keep going and finish anyway, so");
+            sb.AppendLine("-- a database this produces may be corrupt. Run DBCC CHECKDB on it.");
+        }
+
         sb.AppendLine();
     }
 
@@ -171,6 +182,10 @@ public class RestoreScriptGenerator
             sb.AppendLine("         ENABLE_BROKER,");
         if (options.NewBroker)
             sb.AppendLine("         NEW_BROKER,");
+        if (options.WithChecksum)
+            sb.AppendLine("         CHECKSUM,");
+        if (options.ContinueAfterError)
+            sb.AppendLine("         CONTINUE_AFTER_ERROR,");
         sb.AppendLine($"         STATS = {options.StatsPercent};");
     }
 

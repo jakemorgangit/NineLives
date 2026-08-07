@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +9,8 @@ namespace Blackcat.NineLives.ViewModels;
 
 public partial class BlobBrowserViewModel : ViewModelBase
 {
-    private readonly BlobStorageService _blobService;
-    private readonly CredentialStore _credentialStore;
+    private readonly IBlobStorageService _blobService;
+    private readonly ICredentialStore _credentialStore;
     private readonly OperationCancellation _loadCancellation = new();
 
     /// <summary>True while a listing is running and has not been asked to stop (#25).</summary>
@@ -68,7 +68,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [ObservableProperty]
     private string _dbSummaryText = string.Empty;
 
-    public BlobBrowserViewModel(BlobStorageService blobService, CredentialStore credentialStore)
+    public BlobBrowserViewModel(IBlobStorageService blobService, ICredentialStore credentialStore)
     {
         _blobService = blobService;
         _credentialStore = credentialStore;
@@ -147,7 +147,8 @@ public partial class BlobBrowserViewModel : ViewModelBase
         try
         {
             _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer, ct);
-            _allSets = _blobService.GroupIntoBackupSets(_allFiles);
+            _allSets = _blobService.GroupIntoBackupSets(
+                _allFiles, SelectedContainer?.BackupServerTimeZoneId);
             HasFiles = _allFiles.Count > 0;
 
             var servers = _blobService.GetDiscoveredServers(_allFiles);
@@ -261,7 +262,15 @@ public partial class BlobBrowserViewModel : ViewModelBase
         {
             var earliest = filtered.Min(s => s.Timestamp);
             var latest = filtered.Max(s => s.Timestamp);
-            DbSummaryText = $"{Summary.FullBackups} Full, {Summary.DiffBackups} Diff, {Summary.LogBackups} Log sets  |  {earliest:yyyy-MM-dd} to {latest:yyyy-MM-dd}";
+
+            // Sets whose filename carried no timestamp fall back to the blob's LastModified, which
+            // is UTC rather than the backup server's clock - so the range they bound is only as
+            // good as that skew. Say so rather than presenting one exact-looking window.
+            var approximate = Summary.ApproximateSets > 0
+                ? $"  |  {Summary.ApproximateSets} approximate"
+                : string.Empty;
+
+            DbSummaryText = $"{Summary.FullBackups} Full, {Summary.DiffBackups} Diff, {Summary.LogBackups} Log sets  |  {earliest:yyyy-MM-dd} to {latest:yyyy-MM-dd}{approximate}";
         }
         else
         {
