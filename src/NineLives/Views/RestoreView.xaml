@@ -1762,6 +1762,16 @@
                                 Command="{Binding SaveScriptCommand}"
                                 IsEnabled="{Binding HasScript}"
                                 Margin="0,0,8,0" />
+
+                        <!-- For a restore that cannot happen interactively: a maintenance window,
+                             a change process that takes submitted scripts, an operator running what
+                             a DBA handed them. The job is created disabled and unscheduled (#32). -->
+                        <Button Content="Copy as Agent job"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CopyAsAgentJobCommand}"
+                                IsEnabled="{Binding HasScript}"
+                                Margin="0,0,8,0"
+                                ToolTip="Wraps this restore as a SQL Server Agent job, one step per batch. The job is created DISABLED and with no schedule - enable or start it when the restore should actually happen." />
                         <Button Content="{Binding Execution.ButtonText}"
                                 Style="{StaticResource DangerButton}"
                                 Command="{Binding ExecuteScriptCommand}"
