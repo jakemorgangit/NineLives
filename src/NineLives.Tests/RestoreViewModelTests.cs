@@ -94,10 +94,40 @@ public class RestoreViewModelTests
         Assert.Null(vm.SelectedDatabaseName);
         Assert.Null(vm.Timeline.SelectedPoint);
 
+        // And NOTHING is drawn. This is the part that bit hardest: with no database chosen the
+        // working set fell back to every set in the container, so the timeline rendered every
+        // backup of every database on every server - thousands of points on a real container, none
+        // of them meaningful, because a restore chain only exists within one database.
+        Assert.False(vm.Timeline.HasPoints);
+        Assert.Empty(vm.Timeline.Points);
+        Assert.Equal(0, vm.SetCount);
+
         // And nothing downstream has been built from a choice nobody made.
         Assert.Null(vm.RestoreChain);
         Assert.False(vm.HasScript);
         Assert.Equal(string.Empty, vm.RestoreSummaryText);
+    }
+
+    /// <summary>
+    /// Clearing the database selection clears what it produced. The old code returned early on a
+    /// null, which was safe only because something was always selected.
+    /// </summary>
+    [Fact]
+    public async Task ClearingTheDatabaseClearsTheRestorePointsItProduced()
+    {
+        var vm = NewViewModel();
+        _blob.Files = FullPlusLogs(3);
+        vm.SelectedContainer = Container();
+        await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        vm.SelectedDatabaseName = "MyDb";
+        Assert.True(vm.Timeline.HasPoints);
+
+        vm.SelectedDatabaseName = null;
+
+        Assert.False(vm.Timeline.HasPoints);
+        Assert.Empty(vm.Timeline.Points);
+        Assert.Equal(0, vm.SetCount);
     }
 
     [Fact]

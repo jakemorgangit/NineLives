@@ -589,7 +589,17 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void RefreshSelectedDatabase(string? value)
     {
-        if (value == null || _allSets.Count == 0) return;
+        // No database chosen: nothing to compute a chain from, so show nothing rather than
+        // everything. Returning early used to be safe because something was always selected.
+        // No database chosen: nothing to compute a chain from, so show nothing rather than
+        // everything. Returning early used to be safe because something was always selected.
+        if (string.IsNullOrEmpty(value) || _allSets.Count == 0)
+        {
+            _dbSets = [];
+            FullCount = DiffCount = LogCount = SetCount = 0;
+            Timeline.Clear();
+            return;
+        }
 
         _dbSets = _allSets
             .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
@@ -716,19 +726,10 @@ public partial class RestoreViewModel : ViewModelBase
             DiscoveredDatabases = new ObservableCollection<string>(dbs);
             BackupsLoaded = _allBackups.Count > 0;
 
-            // Same again: the lists are offered, not answered. What follows is the no-selection
-            // case, which is now what every load starts in.
-            {
-                _dbSets = _allSets;
-                FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
-                DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
-                LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
-                SetCount = _dbSets.Count;
-                ComputeAndDisplayRestorePoints();
-            }
-
-
-            // Unconditionally, not just when the selection changed - see RefreshSelectedDatabase.
+            // The lists are offered, not answered - and until one IS answered there is nothing to
+            // show. Falling back to every set in the container meant a timeline of every backup of
+            // every database on every server: on a real container that is thousands of points, all
+            // of them meaningless, because a restore chain only exists within one database.
             RefreshSelectedDatabase(SelectedDatabaseName);
 
             // Only when nothing above went wrong. Selecting the first server or database runs the
