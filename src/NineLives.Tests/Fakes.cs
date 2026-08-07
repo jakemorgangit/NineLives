@@ -269,7 +269,7 @@ internal static class RestoreSetup
 {
     public static void ChooseADatabaseAndAPoint(RestoreViewModel vm)
     {
-        vm.SelectedDatabaseName ??= vm.DiscoveredDatabases.FirstOrDefault();
+        vm.Inventory.SelectedDatabaseName ??= vm.Inventory.DiscoveredDatabases.FirstOrDefault();
         vm.Timeline.SelectedPoint ??= vm.Timeline.Points.LastOrDefault();
     }
 }

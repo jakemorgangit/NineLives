@@ -21,9 +21,8 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly BackupChainValidator _chainValidator = new();
     private readonly ICredentialStore _credentialStore;
 
-    private List<BackupFileInfo> _allBackups = [];
-    private List<BackupSet> _allSets = [];
-    private List<BackupSet> _dbSets = [];
+    // The loaded backups, what was found in them and which container they came from all live on
+    // the inventory seam (#115 seam 4).
 
     // Two separate operations, two separate sources: browsing a container and running a restore
     // can both be in flight, and cancelling one must not touch the other (#25).
@@ -52,6 +51,13 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public RestoreExecutionViewModel Execution { get; }
 
+    /// <summary>
+    /// What the selected container holds, and which server and database within it is being looked
+    /// at - carrying the container it was loaded FROM, so nothing downstream has to assume (#115
+    /// seam 4).
+    /// </summary>
+    public BackupInventoryViewModel Inventory { get; }
+
     #region Observable Properties
 
     [ObservableProperty]
@@ -59,21 +65,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private BlobContainerConfig? _selectedContainer;
-
-    [ObservableProperty]
-    private bool _backupsLoaded;
-
-    [ObservableProperty]
-    private ObservableCollection<string> _discoveredServers = [];
-
-    [ObservableProperty]
-    private string? _selectedServerName;
-
-    [ObservableProperty]
-    private ObservableCollection<string> _discoveredDatabases = [];
-
-    [ObservableProperty]
-    private string? _selectedDatabaseName;
 
     [ObservableProperty]
     private string _targetDatabaseName = string.Empty;
@@ -166,10 +157,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     // ── Cancellation (#25) ──────────────────────────────────────────────────────
 
-    /// <summary>True while a backup listing is running and has not been asked to stop.</summary>
-    [ObservableProperty]
-    private bool _canCancelLoad;
-
     /// <summary>True while a server query is running and has not been asked to stop (#111).</summary>
     [ObservableProperty]
     private bool _canCancelQuery;
@@ -177,13 +164,6 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>True between asking to stop and the operation actually unwinding.</summary>
     [ObservableProperty]
     private bool _isCancelling;
-
-    /// <summary>
-    /// Running count during a listing. A container of any size takes long enough that "Loading..."
-    /// on its own gives no sense of whether it is progressing or hung (#28).
-    /// </summary>
-    [ObservableProperty]
-    private string _loadProgressText = string.Empty;
 
     // ── Execution console ───────────────────────────────────────────────────────
 
@@ -200,7 +180,7 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
     private void RefreshCancelState()
     {
-        CanCancelLoad = _loadCancellation.CanCancel;
+        Inventory.CanCancelLoad = _loadCancellation.CanCancel;
 
         CanCancelQuery = _queryCancellation.CanCancel;
         IsCancelling = _loadCancellation.IsCancelling
@@ -343,23 +323,12 @@ public partial class RestoreViewModel : ViewModelBase
 
     /// <summary>
     /// Drops everything derived from a container's contents. Called when the container changes and
-    /// when a load is abandoned, so what is on screen always belongs to the container named above
-    /// it.
+    /// when a load is abandoned, so what is on screen always belongs to the container named above it.
     /// </summary>
     private void ClearLoadedBackups()
     {
-        _allBackups = [];
-        _allSets = [];
-        _dbSets = [];
+        Inventory.Clear();
 
-        BackupsLoaded = false;
-        DiscoveredServers = [];
-        DiscoveredDatabases = [];
-        SelectedServerName = null;
-        SelectedDatabaseName = null;
-
-        // Clearing the timeline drops its selection, which runs the selection handler below and
-        // clears the chain, the script, the verification results and the inventory findings.
         Timeline.Clear();
 
         // Disarm. An armed Execute that survives a container change is an armed Execute aimed at
@@ -423,18 +392,6 @@ public partial class RestoreViewModel : ViewModelBase
     public bool IsExecuting => Execution.IsExecuting;
 
     // Backup summary
-    [ObservableProperty]
-    private int _fullCount;
-
-    [ObservableProperty]
-    private int _diffCount;
-
-    [ObservableProperty]
-    private int _logCount;
-
-    [ObservableProperty]
-    private int _setCount;
-
     #endregion
 
     public RestoreViewModel(
@@ -458,6 +415,46 @@ public partial class RestoreViewModel : ViewModelBase
         // without it, running the execute path in a test appends real restore lines to the user's
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
+
+        Inventory = new BackupInventoryViewModel(blobService);
+
+        // The chain and the timeline are built from whatever the inventory currently holds, so a
+        // change there is the one signal that rebuilds them.
+        Inventory.WorkingSetChanged += ComputeAndDisplayRestorePoints;
+        Inventory.CancelStateChanged += RefreshCancelState;
+        Inventory.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(BackupInventoryViewModel.StatusMessage) when !Inventory.HasError:
+                    SetStatus(Inventory.StatusMessage);
+                    break;
+                case nameof(BackupInventoryViewModel.ErrorMessage) when Inventory.HasError:
+                    SetError(Inventory.ErrorMessage);
+                    break;
+                case nameof(BackupInventoryViewModel.IsBusy):
+                    IsBusy = Inventory.IsBusy;
+                    break;
+                case nameof(BackupInventoryViewModel.SelectedDatabaseName):
+                    // The target defaults to the source name, and the MOVE paths follow from it.
+                    // Both belong to the screen rather than to the inventory - they describe where
+                    // the restore is GOING, not what the container holds.
+                    if (!string.IsNullOrEmpty(Inventory.SelectedDatabaseName))
+                    {
+                        TargetDatabaseName = Inventory.SelectedDatabaseName!;
+                        AutoPopulateMoveDefaults();
+                    }
+                    RefreshSteps();
+                    RefreshCheckState();
+                    break;
+
+                case nameof(BackupInventoryViewModel.BackupsLoaded):
+                case nameof(BackupInventoryViewModel.SelectedServerName):
+                    RefreshSteps();
+                    RefreshCheckState();
+                    break;
+            }
+        };
 
         Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation);
 
@@ -496,8 +493,8 @@ public partial class RestoreViewModel : ViewModelBase
             if (e.PropertyName is nameof(IsBusy) or nameof(TargetDatabaseName))
                 RefreshCheckState();
 
-            if (e.PropertyName is nameof(BackupsLoaded) or nameof(SelectedDatabaseName)
-                or nameof(SelectedServerName) or nameof(SelectedContainer)
+            if (e.PropertyName is nameof(Inventory.BackupsLoaded) or nameof(Inventory.SelectedDatabaseName)
+                or nameof(Inventory.SelectedServerName) or nameof(SelectedContainer)
                 or nameof(TargetDatabaseName))
                 RefreshSteps();
         };
@@ -551,80 +548,7 @@ public partial class RestoreViewModel : ViewModelBase
             SelectedContainer = Containers[0];
     }
 
-    partial void OnSelectedServerNameChanged(string? value)
-    {
-        if (_allSets.Count == 0) return;
 
-        // Compare the FULL server identity. Matching on the host alone made selecting
-        // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that
-        // only exist on the other instance.
-        var filtered = _allSets.Where(s => s.MatchesServer(value));
-
-        var dbs = filtered
-            .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
-            .Select(s => s.DatabaseName!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        DiscoveredDatabases = new ObservableCollection<string>(dbs);
-
-        // Nothing is chosen for the user. Picking the first database alphabetically is a decision
-        // about WHICH DATABASE TO RESTORE, made silently, and the rest of the screen then fills in
-        // around it as though somebody had asked for it - a chain, a restore point, a target name.
-        // On a screen whose last button overwrites a database, the app does not get to guess.
-    }
-
-    partial void OnSelectedDatabaseNameChanged(string? value) => RefreshSelectedDatabase(value);
-
-    /// <summary>
-    /// Rebuilds the working set and the restore points for the chosen database.
-    ///
-    /// Called on selection change AND at the end of every load. Relying on the change alone meant
-    /// a reload with the same server and database still selected - the natural thing to do after
-    /// taking a fresh backup - raised no property change at all, so the sets and the timeline kept
-    /// the PREVIOUS scan's contents and the new backup never appeared.
-    /// </summary>
-    private void RefreshSelectedDatabase(string? value)
-    {
-        // No database chosen: nothing to compute a chain from, so show nothing rather than
-        // everything. Returning early used to be safe because something was always selected.
-        // No database chosen: nothing to compute a chain from, so show nothing rather than
-        // everything. Returning early used to be safe because something was always selected.
-        if (string.IsNullOrEmpty(value) || _allSets.Count == 0)
-        {
-            _dbSets = [];
-            FullCount = DiffCount = LogCount = SetCount = 0;
-            Timeline.Clear();
-            return;
-        }
-
-        _dbSets = _allSets
-            .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        // Full server identity again - this is the filter that decides which sets reach
-        // BackupChainBuilder, so a host-only match let one instance's full pair with another
-        // instance's differentials and logs.
-        if (!string.IsNullOrEmpty(SelectedServerName))
-            _dbSets = _dbSets.Where(s => s.MatchesServer(SelectedServerName)).ToList();
-
-        FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
-        DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
-        LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
-        SetCount = _dbSets.Count;
-
-        TargetDatabaseName = value;
-        AutoPopulateMoveDefaults();
-
-        ComputeAndDisplayRestorePoints();
-    }
-
-    [RelayCommand]
-    private void ToggleChainDetails()
-    {
-        ShowChainDetails = !ShowChainDetails;
-    }
 
     /// <summary>
     /// Everything downstream of the timeline: the chain, the script, the point-in-time window and
@@ -691,6 +615,7 @@ public partial class RestoreViewModel : ViewModelBase
         CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>Lists the selected container. Everything it finds lives on the inventory seam.</summary>
     [RelayCommand]
     private async Task LoadBackupsAsync()
     {
@@ -700,87 +625,9 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        var ct = _loadCancellation.Begin();
-        IsBusy = true;
-        LoadProgressText = "Scanning container...";
-        RefreshCancelState();
-        ClearStatus();
-        try
-        {
-            // If a database is already chosen - a reload after taking a fresh backup, say - push
-            // that down to Azure as a prefix instead of walking the whole container and discarding
-            // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
-            // about 233 ms for one database (#28).
-            //
-            // The FIRST load has no selection yet and stays a full scan, which it has to be: the
-            // server and database lists are built from what it finds.
-            var scope = BuildListingScope();
-            var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
-
-            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer, scope, progress, ct);
-            _allSets = _blobService.GroupIntoBackupSets(
-                _allBackups, SelectedContainer?.BackupServerTimeZoneId);
-
-            var servers = _blobService.GetDiscoveredServers(_allBackups);
-            DiscoveredServers = new ObservableCollection<string>(servers);
-
-            var dbs = _blobService.GetDiscoveredDatabases(_allBackups);
-            DiscoveredDatabases = new ObservableCollection<string>(dbs);
-            BackupsLoaded = _allBackups.Count > 0;
-
-            // The lists are offered, not answered - and until one IS answered there is nothing to
-            // show. Falling back to every set in the container meant a timeline of every backup of
-            // every database on every server: on a real container that is thousands of points, all
-            // of them meaningless, because a restore chain only exists within one database.
-            RefreshSelectedDatabase(SelectedDatabaseName);
-
-            // Only when nothing above went wrong. Selecting the first server or database runs the
-            // whole filter-and-compute cascade, which can end in "no valid restore points found" -
-            // and painting a success line over that left an empty timeline with the status bar
-            // cheerfully reporting how many files had loaded. Found by the first ViewModel test.
-            if (!HasError)
-                SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
-        }
-        catch (OperationCanceledException)
-        {
-            // Asked for, not a failure. Nothing was written anywhere - listing is read-only - so
-            // there is nothing to explain beyond saying it stopped.
-            SetStatus("Loading cancelled.");
-            BackupsLoaded = false;
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to load backups: {ex.Message}");
-            BackupsLoaded = false;
-        }
-        finally
-        {
-            _loadCancellation.End();
-            IsBusy = false;
-            LoadProgressText = string.Empty;
-            RefreshCancelState();
-        }
+        await Inventory.LoadAsync(SelectedContainer);
     }
 
-    /// <summary>
-    /// The scope to push down to Azure, or null to scan everything.
-    ///
-    /// Only offered when a database is chosen. A server on its own narrows far less and the
-    /// database list is built from the previous scan anyway, so scoping to a server alone would
-    /// mostly re-fetch what is already in memory.
-    /// </summary>
-    private BlobListingScope? BuildListingScope()
-    {
-        if (string.IsNullOrWhiteSpace(SelectedDatabaseName)) return null;
-
-        // ServerName here is the identity used in the PATH, which for an instance is the host
-        // part - "SRV01\PROD" lives under "SRV01". ServerIdentity knows how to split it.
-        var pathServer = string.IsNullOrWhiteSpace(SelectedServerName)
-            ? null
-            : SelectedServerName.Split('\\')[0];
-
-        return new BlobListingScope(pathServer, SelectedDatabaseName);
-    }
 
     /// <summary>
     /// Stops whichever server query is running - verify, validate, a metadata read, or a recovery
@@ -798,11 +645,12 @@ public partial class RestoreViewModel : ViewModelBase
 
     /// <summary>Stops an in-progress backup listing.</summary>
     [RelayCommand]
-    private void CancelLoad()
+    private void CancelLoad() => Inventory.CancelLoadCommand.Execute(null);
+
+    [RelayCommand]
+    private void ToggleChainDetails()
     {
-        _loadCancellation.Cancel();
-        RefreshCancelState();
-        SetStatus("Cancelling...");
+        ShowChainDetails = !ShowChainDetails;
     }
 
     /// <summary>
@@ -810,7 +658,7 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     private void ComputeAndDisplayRestorePoints()
     {
-        var points = _chainBuilder.ComputeRestorePoints(_dbSets);
+        var points = _chainBuilder.ComputeRestorePoints(Inventory.WorkingSet);
 
         // Inventory-level findings: backups that exist but can never be offered. These belong to
         // the discovered set rather than to any one chain, so they are held separately and survive
@@ -819,8 +667,8 @@ public partial class RestoreViewModel : ViewModelBase
         // ValidateInventory was written for #62 and then never called, so orphaned differentials,
         // orphaned logs and "no full backup at all" were being computed nowhere and shown nowhere.
         InventoryIssues = new ObservableCollection<ChainIssue>(
-            _chainValidator.ValidateInventory(_dbSets)
-                .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
+            _chainValidator.ValidateInventory(Inventory.WorkingSet)
+                .Concat(_chainValidator.ValidateReachability(Inventory.WorkingSet, points)));
         HasInventoryIssues = InventoryIssues.Count > 0;
 
         Timeline.Load(points);
@@ -912,7 +760,7 @@ public partial class RestoreViewModel : ViewModelBase
         }
 
         var parts = new List<string>();
-        parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
+        parts.Add($"Restore '{Inventory.SelectedDatabaseName}' as '{TargetDatabaseName}'");
         parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
 
         if (PointInTime.Effective is DateTime stopAt)
@@ -960,7 +808,7 @@ public partial class RestoreViewModel : ViewModelBase
         // people out of the step before they could use them.
         Steps.Report(
             Steps.Source,
-            BackupsLoaded && !string.IsNullOrWhiteSpace(SelectedDatabaseName),
+            Inventory.BackupsLoaded && !string.IsNullOrWhiteSpace(Inventory.SelectedDatabaseName),
             DescribeSource());
 
         // Described, and confirmed by the user rather than by a click. Choosing a restore point is
@@ -985,11 +833,11 @@ public partial class RestoreViewModel : ViewModelBase
         if (SelectedContainer == null) return string.Empty;
 
         var parts = new List<string> { SelectedContainer.Name };
-        if (!string.IsNullOrWhiteSpace(SelectedDatabaseName))
+        if (!string.IsNullOrWhiteSpace(Inventory.SelectedDatabaseName))
         {
-            parts.Add(string.IsNullOrWhiteSpace(SelectedServerName)
-                ? SelectedDatabaseName!
-                : $"{SelectedDatabaseName} on {SelectedServerName}");
+            parts.Add(string.IsNullOrWhiteSpace(Inventory.SelectedServerName)
+                ? Inventory.SelectedDatabaseName!
+                : $"{Inventory.SelectedDatabaseName} on {Inventory.SelectedServerName}");
         }
 
         return string.Join(", ", parts);
@@ -1398,7 +1246,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             // Guessed logical names. Wrong for a renamed database or one with secondary files,
             // which is what Get file names exists to fix.
-            var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
+            var sourceDbName = Inventory.SelectedDatabaseName ?? TargetDatabaseName;
             fileMoves.Add(new FileMoveOption
             {
                 LogicalName = sourceDbName,
@@ -1691,7 +1539,7 @@ public partial class RestoreViewModel : ViewModelBase
                 server,
                 GeneratedScript,
                 TargetDatabaseName,
-                SelectedDatabaseName,
+                Inventory.SelectedDatabaseName,
                 SelectedContainer?.Name,
                 RestoreChain?.Summary ?? "no chain",
                 Timeline.SelectedPoint?.Timestamp,

@@ -346,7 +346,7 @@ public class XamlLoadTests(WpfFixture wpf)
             var vm = NewRestoreViewModel();
             // The execute card only exists once backups are loaded, which is correct - there is
             // no script to run before then.
-            vm.BackupsLoaded = true;
+            vm.Inventory.BackupsLoaded = true;
             vm.HasScript = true;
             vm.IsConnectedToServer = true;
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
@@ -376,7 +376,7 @@ public class XamlLoadTests(WpfFixture wpf)
         {
             var vm = NewRestoreViewModel();
             vm.IsBusy = true;
-            vm.CanCancelLoad = true;
+            vm.Inventory.CanCancelLoad = true;
 
             // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
             // parent never measures, so its item containers are never generated to be found.
@@ -423,7 +423,7 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.BackupsLoaded = true;
+            vm.Inventory.BackupsLoaded = true;
             vm.HasScript = true;
             vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
             vm.Execution.Console.Lines =
@@ -479,7 +479,7 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.BackupsLoaded = true;
+            vm.Inventory.BackupsLoaded = true;
             vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
             vm.Execution.Console.HasOutput = true;
 
@@ -511,7 +511,7 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.BackupsLoaded = true;
+            vm.Inventory.BackupsLoaded = true;
             vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
             vm.Execution.Console.HasOutput = true;
             vm.IsConsoleDetached = false;   // as if the wiring failed

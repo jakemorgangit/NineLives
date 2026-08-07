@@ -1,0 +1,287 @@
+﻿using System.Collections.ObjectModel;
+using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Services;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace Blackcat.NineLives.ViewModels;
+
+/// <summary>
+/// What a container holds, and which server and database within it is being looked at.
+///
+/// Fourth seam out of RestoreViewModel (#115). Its point is not the line count: it is that the
+/// loaded backups now carry the container they came FROM, as a field, instead of everything on the
+/// screen assuming that whatever is loaded belongs to whatever is currently selected above it.
+///
+/// That assumption has produced real bugs twice. #112: changing the container left the previous
+/// one's chain and script armed and executable, so Execute ran against blob URLs from a container
+/// nobody was looking at. And when the preselection was removed, the working set silently fell
+/// back to EVERY set in the container, drawing a timeline of every backup of every database on
+/// every server. Both are the same mistake - data whose provenance is implied rather than stated.
+/// </summary>
+public partial class BackupInventoryViewModel : ViewModelBase
+{
+    private readonly IBlobStorageService _blob;
+    private readonly OperationCancellation _loadCancellation = new();
+
+    public BackupInventoryViewModel(IBlobStorageService blob)
+    {
+        _blob = blob;
+    }
+
+    /// <summary>Raised when the working set changes, so the chain and timeline can be rebuilt.</summary>
+    public event Action? WorkingSetChanged;
+
+    /// <summary>Raised when the cancel state changes, so the parent's Stop button can follow.</summary>
+    public event Action? CancelStateChanged;
+
+    // ── what was loaded, and where from ─────────────────────────────────────────
+
+    private List<BackupFileInfo> _allBackups = [];
+    private List<BackupSet> _allSets = [];
+
+    /// <summary>
+    /// The container these backups were listed from.
+    ///
+    /// The whole reason this type exists. Anything derived from the inventory - a chain, a script,
+    /// a restore point - belongs to THIS container, and can be checked against the one currently
+    /// selected rather than assumed to match it.
+    /// </summary>
+    [ObservableProperty]
+    private BlobContainerConfig? _loadedFrom;
+
+    /// <summary>The sets for the chosen server and database: what a chain can actually be built from.</summary>
+    public List<BackupSet> WorkingSet { get; private set; } = [];
+
+    /// <summary>Every set in the container, for the inventory findings that look wider than one database.</summary>
+    public List<BackupSet> AllSets => _allSets;
+
+    [ObservableProperty]
+    private bool _backupsLoaded;
+
+    [ObservableProperty]
+    private string _loadProgressText = string.Empty;
+
+    [ObservableProperty]
+    private bool _canCancelLoad;
+
+    // ── what is being looked at within it ───────────────────────────────────────
+
+    [ObservableProperty]
+    private ObservableCollection<string> _discoveredServers = [];
+
+    [ObservableProperty]
+    private ObservableCollection<string> _discoveredDatabases = [];
+
+    [ObservableProperty]
+    private string? _selectedServerName;
+
+    [ObservableProperty]
+    private string? _selectedDatabaseName;
+
+    [ObservableProperty]
+    private int _fullCount;
+
+    [ObservableProperty]
+    private int _diffCount;
+
+    [ObservableProperty]
+    private int _logCount;
+
+    [ObservableProperty]
+    private int _setCount;
+
+    partial void OnSelectedServerNameChanged(string? value)
+    {
+        if (_allSets.Count == 0) return;
+
+        // Compare the FULL server identity. Matching on the host alone made selecting
+        // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that only
+        // exist on the other instance.
+        var dbs = _allSets
+            .Where(s => s.MatchesServer(value))
+            .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
+            .Select(s => s.DatabaseName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        DiscoveredDatabases = new ObservableCollection<string>(dbs);
+
+        // Nothing is chosen for the user. Picking the first database alphabetically is a decision
+        // about WHICH DATABASE TO RESTORE, made silently, and the rest of the screen then fills in
+        // around it as though somebody had asked for it. On a screen whose last button overwrites a
+        // database, the app does not get to guess.
+        RebuildWorkingSet();
+    }
+
+    partial void OnSelectedDatabaseNameChanged(string? value) => RebuildWorkingSet();
+
+    /// <summary>
+    /// Narrows the loaded sets to the chosen server and database.
+    ///
+    /// With no database chosen the working set is EMPTY, not everything. Falling back to every set
+    /// in the container produced a timeline of every backup of every database on every server -
+    /// thousands of points on a real container, none of them meaningful, because a restore chain
+    /// only exists within one database.
+    /// </summary>
+    private void RebuildWorkingSet()
+    {
+        if (string.IsNullOrEmpty(SelectedDatabaseName) || _allSets.Count == 0)
+        {
+            WorkingSet = [];
+            FullCount = DiffCount = LogCount = SetCount = 0;
+            WorkingSetChanged?.Invoke();
+            return;
+        }
+
+        var sets = _allSets
+            .Where(s => string.Equals(s.DatabaseName, SelectedDatabaseName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // Full server identity again - this is the filter that decides which sets reach
+        // BackupChainBuilder, so a host-only match let one instance's full pair with another
+        // instance's differentials and logs.
+        if (!string.IsNullOrEmpty(SelectedServerName))
+            sets = sets.Where(s => s.MatchesServer(SelectedServerName)).ToList();
+
+        WorkingSet = sets;
+        FullCount = sets.Count(s => s.Type == BackupType.Full);
+        DiffCount = sets.Count(s => s.Type == BackupType.Differential);
+        LogCount = sets.Count(s => s.Type == BackupType.TransactionLog);
+        SetCount = sets.Count;
+
+        WorkingSetChanged?.Invoke();
+    }
+
+    // ── loading ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists a container and works out what is in it.
+    /// </summary>
+    public async Task LoadAsync(BlobContainerConfig container)
+    {
+        var ct = _loadCancellation.Begin();
+        IsBusy = true;
+        LoadProgressText = "Scanning container...";
+        RaiseCancelStateChanged();
+        ClearStatus();
+
+        try
+        {
+            // If a database is already chosen - a reload after taking a fresh backup, say - push
+            // that down to Azure as a prefix instead of walking the whole container and discarding
+            // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
+            // about 233 ms for one database (#28).
+            //
+            // The FIRST load has no selection yet and stays a full scan, which it has to be: the
+            // server and database lists are built from what it finds.
+            var scope = BuildListingScope();
+            var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
+
+            var files = await _blob.ListBackupFilesAsync(container, scope, progress, ct);
+            var sets = _blob.GroupIntoBackupSets(files, container.BackupServerTimeZoneId);
+
+            _allBackups = files;
+            _allSets = sets;
+
+            // Stated, not assumed: everything derived from here belongs to THIS container.
+            LoadedFrom = container;
+
+            DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(files));
+            DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(files));
+            BackupsLoaded = files.Count > 0;
+
+            // The lists are offered, not answered - and until one IS answered there is nothing to
+            // show.
+            RebuildWorkingSet();
+
+            // Only when nothing above went wrong. The filter-and-compute cascade can end in "no
+            // valid restore points found", and painting a success line over that left an empty
+            // timeline with the status bar cheerfully reporting how many files had loaded.
+            if (!HasError)
+                SetStatus($"Loaded {files.Count} files in {sets.Count} backup set(s) across " +
+                          $"{DiscoveredDatabases.Count} database(s).");
+        }
+        catch (OperationCanceledException)
+        {
+            // Asked for, not a failure. Nothing was written anywhere - listing is read-only - so
+            // there is nothing to explain beyond saying it stopped.
+            SetStatus("Loading cancelled.");
+            BackupsLoaded = false;
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to load backups: {ex.Message}");
+            BackupsLoaded = false;
+        }
+        finally
+        {
+            _loadCancellation.End();
+            IsBusy = false;
+            LoadProgressText = string.Empty;
+            RaiseCancelStateChanged();
+        }
+    }
+
+    /// <summary>
+    /// The scope to push down to Azure, or null to scan everything.
+    ///
+    /// Only offered when a database is chosen. A server on its own narrows far less and the
+    /// database list is built from the previous scan anyway, so scoping to a server alone would
+    /// mostly re-fetch what is already in memory.
+    /// </summary>
+    private BlobListingScope? BuildListingScope()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedDatabaseName)) return null;
+
+        // ServerName here is the identity used in the PATH, which for an instance is the host
+        // part - "SRV01\PROD" lives under "SRV01". ServerIdentity knows how to split it.
+        var pathServer = string.IsNullOrWhiteSpace(SelectedServerName)
+            ? null
+            : SelectedServerName.Split('\\')[0];
+
+        return new BlobListingScope(pathServer, SelectedDatabaseName);
+    }
+
+    /// <summary>Stops an in-progress listing.</summary>
+    [RelayCommand]
+    private void CancelLoad()
+    {
+        if (!_loadCancellation.CanCancel) return;
+
+        _loadCancellation.Cancel();
+        RaiseCancelStateChanged();
+        SetStatus("Stopping the scan...");
+    }
+
+    /// <summary>
+    /// Drops everything the previous container produced.
+    ///
+    /// Called when the container changes, so what is on screen always belongs to the container
+    /// named above it - the failure #112 was, where the previous container's chain and script
+    /// stayed armed and executable against blob URLs nobody was looking at any more.
+    /// </summary>
+    public void Clear()
+    {
+        _allBackups = [];
+        _allSets = [];
+        WorkingSet = [];
+        LoadedFrom = null;
+
+        BackupsLoaded = false;
+        DiscoveredServers = [];
+        DiscoveredDatabases = [];
+        SelectedServerName = null;
+        SelectedDatabaseName = null;
+        FullCount = DiffCount = LogCount = SetCount = 0;
+
+        WorkingSetChanged?.Invoke();
+    }
+
+    private void RaiseCancelStateChanged()
+    {
+        CanCancelLoad = _loadCancellation.CanCancel;
+        CancelStateChanged?.Invoke();
+    }
+}

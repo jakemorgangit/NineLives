@@ -44,7 +44,7 @@ public class KeyboardShortcutTests
         vm.ReloadCommand.Execute(null);
 
         Assert.False(vm.Restore.IsBusy);
-        Assert.False(vm.Restore.BackupsLoaded);
+        Assert.False(vm.Restore.Inventory.BackupsLoaded);
     }
 
     [Fact]
