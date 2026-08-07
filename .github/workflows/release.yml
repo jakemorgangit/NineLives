@@ -53,8 +53,15 @@ jobs:
       # Through the publish PROFILE, not a hand-repeated flag list. The two had drifted - the
       # profile asked for ReadyToRun and this line did not - and nothing compares them, so the
       # difference went unnoticed through three releases (#39).
-      - name: Publish single-file exe
+      - name: Publish single-file exe (x64)
         run: dotnet publish src/NineLives/NineLives.csproj -p:PublishProfile=SingleFileExe -o publish
+
+      # Windows on ARM is ordinary on new laptops now, and an x64 build runs there only through
+      # emulation - slower, and with its own class of oddity. The profile was written with its
+      # RuntimeIdentifier overridable from the command line precisely so a second architecture is
+      # one more line rather than a second copy of every flag (#39).
+      - name: Publish single-file exe (arm64)
+        run: dotnet publish src/NineLives/NineLives.csproj -p:PublishProfile=SingleFileExe -p:RuntimeIdentifier=win-arm64 -o publish-arm64
 
       - name: Package release assets
         shell: pwsh
@@ -64,8 +71,16 @@ jobs:
 
           # The exe IS the product (portable, no installer) - ship it directly, plus a
           # versioned zip for anyone whose tooling wants an archive.
+          #
+          # The bare NineLives.exe stays x64 and unsuffixed. It is what every existing link, the
+          # README and the update check all point at, and what somebody who just wants the app
+          # clicks - so the architecture that runs everywhere keeps the plain name, and arm64 is
+          # named for what it is rather than quietly becoming the default for people on x64.
           Copy-Item publish/NineLives.exe releases/NineLives.exe
           Compress-Archive -Path publish/NineLives.exe -DestinationPath "releases/NineLives-$version-win-x64.zip" -Force
+
+          Copy-Item publish-arm64/NineLives.exe releases/NineLives-arm64.exe
+          Compress-Archive -Path publish-arm64/NineLives.exe -DestinationPath "releases/NineLives-$version-win-arm64.zip" -Force
 
           $checksums = Get-ChildItem releases/NineLives* | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
@@ -89,9 +104,11 @@ jobs:
         with:
           subject-path: |
             releases/NineLives.exe
+            releases/NineLives-arm64.exe
             releases/NineLives-${{ steps.version.outputs.VERSION }}-win-x64.zip
+            releases/NineLives-${{ steps.version.outputs.VERSION }}-win-arm64.zip
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.event.release.tag_name }} releases/NineLives.exe "releases/NineLives-${{ steps.version.outputs.VERSION }}-win-x64.zip" releases/SHA256SUMS.txt --clobber
+        run: gh release upload ${{ github.event.release.tag_name }} releases/NineLives.exe releases/NineLives-arm64.exe "releases/NineLives-${{ steps.version.outputs.VERSION }}-win-x64.zip" "releases/NineLives-${{ steps.version.outputs.VERSION }}-win-arm64.zip" releases/SHA256SUMS.txt --clobber

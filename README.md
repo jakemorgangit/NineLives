@@ -16,6 +16,8 @@ Download the latest release from the [Releases page](https://github.com/jakemorg
 
 The application is distributed as a single self-contained executable (`NineLives.exe`) — no installation required. Simply download and run.
 
+On a Windows-on-ARM machine, take `NineLives-arm64.exe` instead. The plain `NineLives.exe` is x64 and will run there under emulation, just more slowly.
+
 ## Why Nine Lives?
 
 Restoring a native SQL Server backup is painful with existing tooling when the destination server has no msdb backup history — the normal case for DR, environment refreshes, and migrations:
