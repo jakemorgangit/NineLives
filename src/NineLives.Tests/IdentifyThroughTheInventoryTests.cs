@@ -36,7 +36,7 @@ public class IdentifyThroughTheInventoryTests
     {
         var blob = new FakeBlobStorageService { Files = files.ToList() };
         var sql = new FakeSqlServerService();
-        return (new BackupInventoryViewModel(blob, sql), sql);
+        return (new BackupInventoryViewModel(blob, sql, TestLogs.Temp()), sql);
     }
 
     private static ServerConnection Server() =>
@@ -229,7 +229,7 @@ public class IdentifyThroughTheInventoryTests
             ]
         };
 
-        var vm = new BackupInventoryViewModel(new FakeBlobStorageService(), sql);
+        var vm = new BackupInventoryViewModel(new FakeBlobStorageService(), sql, TestLogs.Temp());
 
         await vm.LoadAsync(BackupLocation.Shared(Server()));
 

@@ -865,7 +865,7 @@ public class XamlLoadTests(WpfFixture wpf)
             var vm = new RestoreViewModel(
                 blob, new FakeSqlServerService(), new BackupChainBuilder(),
                 new RestoreScriptGenerator(), store,
-                new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))),
+                TestLogs.Temp(),
                 new FakeRestoreHistoryStore());
 
             vm.RefreshContainers();
@@ -936,7 +936,7 @@ public class XamlLoadTests(WpfFixture wpf)
             store.Config.BlobContainers.Add(new BlobContainerConfig
             { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
 
-            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestOperationLog());
+            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestLogs.Temp());
             vm.SourceServer = vm.Servers.First();
             vm.TargetServer = vm.Servers.Last();
             vm.Container = vm.Containers.Single();
@@ -969,7 +969,7 @@ public class XamlLoadTests(WpfFixture wpf)
             var server = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
             store.Config.Servers.Add(server);
 
-            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestOperationLog());
+            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestLogs.Temp());
             vm.SourceServer = vm.Servers.Single();
             vm.TargetServer = vm.Servers.Single();
             vm.SourceDatabase = "MyDb";
@@ -985,10 +985,7 @@ public class XamlLoadTests(WpfFixture wpf)
     }
 
     private static CopyDatabaseViewModel NewCopyViewModel()
-        => new(Store(), new SqlServerService(Store()), TestOperationLog());
-
-    private static OperationLog TestOperationLog()
-        => new(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n")));
+        => new(Store(), new SqlServerService(Store()), TestLogs.Temp());
 
     // ── the Backup screen (#165) ────────────────────────────────────────────────
 
@@ -1050,7 +1047,7 @@ public class XamlLoadTests(WpfFixture wpf)
         return new BackupViewModel(
             store,
             new SqlServerService(store),
-            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))));
+            TestLogs.Temp());
     }
 
     // ── the Restore screen under a shared path (#149, #165) ─────────────────
@@ -1213,7 +1210,7 @@ public class XamlLoadTests(WpfFixture wpf)
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
             store,
-            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))),
+            TestLogs.Temp(),
             new FakeRestoreHistoryStore());
     }
 

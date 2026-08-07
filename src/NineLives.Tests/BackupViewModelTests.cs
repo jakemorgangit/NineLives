@@ -16,10 +16,6 @@ namespace Blackcat.NineLives.Tests;
 /// </summary>
 public class BackupViewModelTests
 {
-    /// <summary>A log in a temp directory: constructing this must not append to the user's own.</summary>
-    private static OperationLog TestLog() =>
-        new(Path.Combine(Path.GetTempPath(), "ninelives-backup-tests", Guid.NewGuid().ToString("n")));
-
     private static (BackupViewModel vm, FakeSqlServerService sql) New()
     {
         var store = new FakeCredentialStore();
@@ -35,7 +31,7 @@ public class BackupViewModelTests
         });
 
         var sql = new FakeSqlServerService { DatabaseList = ["MyDb", "OtherDb"] };
-        var vm = new BackupViewModel(store, sql, TestLog());
+        var vm = new BackupViewModel(store, sql, TestLogs.Temp());
 
         vm.Server = vm.Servers.Single();
         vm.Container = vm.Containers.Single();

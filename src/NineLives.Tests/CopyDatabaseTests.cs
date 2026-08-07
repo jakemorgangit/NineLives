@@ -19,9 +19,6 @@ namespace Blackcat.NineLives.Tests;
 /// </summary>
 public class CopyDatabaseTests
 {
-    private static OperationLog TestLog() =>
-        new(Path.Combine(Path.GetTempPath(), "ninelives-copy-tests", Guid.NewGuid().ToString("n")));
-
     private static (CopyDatabaseViewModel vm, FakeSqlServerService sql) New()
     {
         var store = new FakeCredentialStore();
@@ -39,7 +36,7 @@ public class CopyDatabaseTests
         });
 
         var sql = new FakeSqlServerService { DatabaseList = ["MyDb", "OtherDb"] };
-        var vm = new CopyDatabaseViewModel(store, sql, TestLog());
+        var vm = new CopyDatabaseViewModel(store, sql, TestLogs.Temp());
 
         vm.SourceServer = vm.Servers.First();
         vm.TargetServer = vm.Servers.Last();
