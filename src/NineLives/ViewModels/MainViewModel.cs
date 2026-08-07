@@ -51,6 +51,7 @@ public partial class MainViewModel : ViewModelBase
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
     public BackupViewModel Backup { get; }
+    public CopyDatabaseViewModel CopyDatabase { get; }
     public RestoreViewModel Restore { get; }
     public HistoryViewModel History { get; }
     public SettingsViewModel Settings { get; }
@@ -98,6 +99,7 @@ public partial class MainViewModel : ViewModelBase
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
         Backup = new BackupViewModel(_credentialStore, _sqlService);
+        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService);
         History = new HistoryViewModel(_historyStore);
         Settings = new SettingsViewModel(_credentialStore);
         About = new AboutViewModel();
@@ -113,7 +115,7 @@ public partial class MainViewModel : ViewModelBase
         // One place that answers "is it doing something?". Every screen already tracks its own
         // work; without this the answer depended on which part of a long page was scrolled into
         // view, and the Restore screen's own status line is below the fold most of the time (#128).
-        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Backup, Restore);
+        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Backup, Restore, CopyDatabase);
 
         CurrentView = BlobConfig;
 
@@ -341,12 +343,13 @@ public partial class MainViewModel : ViewModelBase
         public const string BrowseBackups = "Browse Backups";
         public const string Backup = "Back Up";
         public const string Restore = "Restore";
+        public const string CopyDatabase = "Copy Database";
         public const string History = "History";
         public const string Settings = "Settings";
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Backup, Restore, History, Settings, About];
+            [BlobStorage, SqlServers, BrowseBackups, Backup, Restore, CopyDatabase, History, Settings, About];
     }
 
     [RelayCommand]
@@ -360,6 +363,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.BrowseBackups => BlobBrowser,
             Nav.Backup => Backup,
             Nav.Restore => Restore,
+            Nav.CopyDatabase => CopyDatabase,
             Nav.History => History,
             Nav.Settings => Settings,
             Nav.About => About,
@@ -373,6 +377,9 @@ public partial class MainViewModel : ViewModelBase
             // Servers AND containers: a backup needs one of each, and either can have been added
             // on another screen since the last visit.
             Backup.Refresh();
+        else if (viewName is Nav.CopyDatabase)
+            // Two servers and a container here, for the same reason.
+            CopyDatabase.Refresh();
         else if (viewName is Nav.Restore)
             // Containers AND servers: either can be the backup source now, and one added on
             // another screen since the last visit has to be selectable here (#165).

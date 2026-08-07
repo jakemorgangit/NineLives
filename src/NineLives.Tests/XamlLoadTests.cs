@@ -832,6 +832,95 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("HistoryView (empty)", () =>
             new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
 
+    // ── the Copy Database screen (#105) ─────────────────────────────────────────
+
+    [Fact]
+    public void CopyDatabaseViewLoads()
+        => Check("CopyDatabaseView", () => new CopyDatabaseView { DataContext = NewCopyViewModel() });
+
+    [Fact]
+    public void TheCopyViewLoadsWithASharedPathChosen()
+        => Check("CopyDatabaseView (shared path)", () =>
+        {
+            var vm = NewCopyViewModel();
+            vm.Medium = BackupMedium.SharedPath;
+            return new CopyDatabaseView { DataContext = vm };
+        });
+
+    /// <summary>
+    /// The armed confirmation names BOTH servers, on screen.
+    ///
+    /// The whole point of this screen is that two are involved, so a prompt naming one is a prompt
+    /// somebody can read as being about the other. A collapsed panel is not a confirmation, so this
+    /// asserts on what is drawn.
+    /// </summary>
+    [Fact]
+    public void TheArmedConfirmationNamesBothServersOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            var source = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
+            var target = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV02", ServerName = "SRV02" };
+            store.Config.Servers.Add(source);
+            store.Config.Servers.Add(target);
+            store.Config.BlobContainers.Add(new BlobContainerConfig
+            { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
+
+            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestOperationLog());
+            vm.SourceServer = vm.Servers.First();
+            vm.TargetServer = vm.Servers.Last();
+            vm.Container = vm.Containers.Single();
+            vm.SourceDatabase = "MyDb";
+            vm.TargetDatabaseName = "MyDb_Test";
+            vm.GenerateCommand.Execute(null);
+            vm.RunCommand.Execute(null);
+
+            var view = new CopyDatabaseView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.True(vm.IsArmed);
+            Assert.Contains(shown, t => t.Contains("SRV01", StringComparison.Ordinal)
+                                     && t.Contains("SRV02", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// A refusal is shown rather than silently disabling the button - a button dead for no stated
+    /// reason is one somebody works around.
+    /// </summary>
+    [Fact]
+    public void ARefusedCopySaysWhyOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            var server = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
+            store.Config.Servers.Add(server);
+
+            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestOperationLog());
+            vm.SourceServer = vm.Servers.Single();
+            vm.TargetServer = vm.Servers.Single();
+            vm.SourceDatabase = "MyDb";
+            vm.TargetDatabaseName = "MyDb";
+
+            var view = new CopyDatabaseView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("over itself", StringComparison.Ordinal));
+        });
+    }
+
+    private static CopyDatabaseViewModel NewCopyViewModel()
+        => new(Store(), new SqlServerService(Store()), TestOperationLog());
+
+    private static OperationLog TestOperationLog()
+        => new(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n")));
+
     // ── the Backup screen (#165) ────────────────────────────────────────────────
 
     [Fact]
