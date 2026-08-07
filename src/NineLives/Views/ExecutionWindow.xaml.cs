@@ -27,9 +27,9 @@ public partial class ExecutionWindow : Window
         InitializeComponent();
         DataContext = _viewModel = viewModel;
 
-        viewModel.Console.Lines.CollectionChanged += OnConsoleLinesChanged;
+        viewModel.Execution.Console.Lines.CollectionChanged += OnConsoleLinesChanged;
         ConsoleList.Loaded += (_, _) => HookScroller();
-        Closed += (_, _) => viewModel.Console.Lines.CollectionChanged -= OnConsoleLinesChanged;
+        Closed += (_, _) => viewModel.Execution.Console.Lines.CollectionChanged -= OnConsoleLinesChanged;
     }
 
     private void HookScroller()

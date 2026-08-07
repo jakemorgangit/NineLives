@@ -123,7 +123,7 @@ public class ExecuteBlockedReasonTests
         var vm = await Loaded();
         vm.IsConnectedToServer = true;
         vm.TargetDatabaseName = "MyDb_Restored";
-        vm.IsExecuting = true;
+        vm.Execution.IsExecuting = true;
 
         // The button is doing its other job here; a "why not" line would be noise.
         Assert.Empty(vm.ExecuteBlockedReason);

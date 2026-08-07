@@ -179,10 +179,10 @@ public class ChainCheckStateTests
         Assert.Equal("Verifying backups...", vm.BusyDescription);
 
         vm.IsVerifyingChain = false;
-        vm.IsExecuting = true;
+        vm.Execution.IsExecuting = true;
         Assert.Contains("MyDb_Restored", vm.BusyDescription);
 
-        vm.IsExecuting = false;
+        vm.Execution.IsExecuting = false;
         Assert.Empty(vm.BusyDescription);
     }
 
@@ -192,7 +192,7 @@ public class ChainCheckStateTests
         var vm = await Loaded();
 
         vm.IsBusy = true;
-        vm.IsExecuting = true;
+        vm.Execution.IsExecuting = true;
 
         // The one that matters is the one writing to a database.
         Assert.Contains("Restoring", vm.BusyDescription);
@@ -245,7 +245,7 @@ public class GlobalBusyTests
 
         vm.ServerManager.IsBusy = true;
         vm.Restore.TargetDatabaseName = "MyDb_Restored";
-        vm.Restore.IsExecuting = true;
+        vm.Restore.Execution.IsExecuting = true;
 
         Assert.Contains("Restoring", vm.BusyText);
     }
