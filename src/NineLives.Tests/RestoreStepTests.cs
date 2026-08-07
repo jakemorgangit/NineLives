@@ -307,6 +307,55 @@ public class RestoreStepTests
     }
 
     /// <summary>
+    /// Once confirmed there is nothing left to confirm. The bar is rendered outside the fold, so
+    /// without this a confirmed - and therefore collapsed - step still showed a button asking to
+    /// confirm what had just been confirmed.
+    /// </summary>
+    [Fact]
+    public void TheConfirmBarGoesAwayOnceTheStepIsConfirmed()
+    {
+        var steps = new RestoreStepsViewModel();
+        steps.Report(steps.Source, true, "a source");
+
+        steps.Point.CanConfirm = true;
+        Assert.True(steps.Point.IsAwaitingConfirmation);
+
+        steps.Point.ConfirmCommand.Execute(null);
+
+        Assert.False(steps.Point.IsAwaitingConfirmation);
+    }
+
+    /// <summary>A step that never asks for confirmation never shows the bar.</summary>
+    [Fact]
+    public void AStepThatFinishesByItselfNeverAsksToBeConfirmed()
+    {
+        var steps = new RestoreStepsViewModel();
+
+        Assert.False(steps.Source.IsAwaitingConfirmation);
+        Assert.False(steps.Execute.IsAwaitingConfirmation);
+    }
+
+    /// <summary>
+    /// Backtracking must not leave the screen closed.
+    ///
+    /// Changing the database after confirming a point withdraws everything downstream - and step 1
+    /// was already complete, so nothing handed over and every pane ended up collapsed with no
+    /// indication of what to do next. That is the flow getting stuck.
+    /// </summary>
+    [Fact]
+    public void BacktrackingReopensTheStepYouHaveBeenSentBackTo()
+    {
+        var steps = Confirmed();
+
+        // As choosing a different database does: the point is no longer valid for it.
+        steps.Point.Invalidate();
+
+        Assert.True(steps.Point.IsVisible);
+        Assert.True(steps.Point.IsExpanded);
+        Assert.Contains(steps.All, s => s.IsVisible && s.IsExpanded);
+    }
+
+    /// <summary>
     /// Changing a confirmed point takes the confirmation back, and the steps that stood on it go
     /// with it. A script and a summary describing a moment nobody chose is exactly the failure
     /// this screen cannot have.

@@ -23,7 +23,18 @@ public partial class RestoreStep(string title, bool needsConfirmation = false) :
     public bool NeedsConfirmation { get; } = needsConfirmation;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAwaitingConfirmation))]
     private bool _isExpanded = true;
+
+    /// <summary>
+    /// Whether the confirm button belongs on screen: this step asks to be confirmed, it is open,
+    /// and it has not been confirmed yet.
+    ///
+    /// All three matter. The button is rendered outside the fold, so a confirmed - and therefore
+    /// collapsed - step still showed a bar asking to confirm what had just been confirmed. It
+    /// comes back if the answer is withdrawn, which is what backtracking does.
+    /// </summary>
+    public bool IsAwaitingConfirmation => NeedsConfirmation && IsExpanded && !IsComplete;
 
     /// <summary>
     /// Hidden until the step before it is done. A step nobody can act on yet is noise, and on this
@@ -40,6 +51,7 @@ public partial class RestoreStep(string title, bool needsConfirmation = false) :
     private string _summary = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAwaitingConfirmation))]
     private bool _isComplete;
 
     /// <summary>Whether there is yet anything to confirm - a point chosen, say.</summary>
@@ -226,6 +238,20 @@ public sealed class RestoreStepsViewModel
 
                 step.IsExpanded = false;
                 step.Invalidate();
+            }
+
+            // Backtracking must not leave the screen closed.
+            //
+            // Changing the database after confirming a point withdraws everything downstream, and
+            // step 1 was already complete so nothing handed over - every pane ended up collapsed
+            // with no indication of what to do next. Whenever nothing is open, open the earliest
+            // step still unanswered, which is where the user has just been sent back to.
+            if (!All.Any(s => s.IsVisible && s.IsExpanded))
+            {
+                var resume = All.FirstOrDefault(s => s.IsVisible && !s.IsComplete)
+                    ?? All.LastOrDefault(s => s.IsVisible);
+
+                if (resume != null) resume.IsExpanded = true;
             }
         }
         finally

@@ -861,7 +861,8 @@
                     </StackPanel>
                         <!-- Finishing this step is something the user says (#117 item 3). This is the moment the database will be restored to. Confirm to continue. -->
                         <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
-                                Padding="12,10" Margin="0,16,0,0">
+                                Padding="12,10" Margin="0,16,0,0"
+                                Visibility="{Binding Steps.Point.IsAwaitingConfirmation, Converter={StaticResource BoolToVis}}">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                 <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
                                            Margin="0,0,12,0" TextWrapping="Wrap"
@@ -1258,7 +1259,8 @@
                     </Grid>
                         <!-- Finishing this step is something the user says (#117 item 3). Happy with these? Confirm to move on to generating the script. -->
                         <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
-                                Padding="12,10" Margin="0,16,0,0">
+                                Padding="12,10" Margin="0,16,0,0"
+                                Visibility="{Binding Steps.Options.IsAwaitingConfirmation, Converter={StaticResource BoolToVis}}">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                 <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
                                            Margin="0,0,12,0" TextWrapping="Wrap"
