@@ -208,6 +208,14 @@ public partial class MainViewModel : ViewModelBase
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
+        // From looking to restoring in one move (#202). Navigation first, so the load's progress
+        // happens on the screen the user is now watching rather than behind the one they left.
+        BlobBrowser.RestoreRequested += handoff =>
+        {
+            NavigateTo(Nav.Restore);
+            _ = Restore.AcceptHandoffAsync(handoff);
+        };
+
         // Changing the mode from Settings has to move the app immediately - a sidebar that still
         // offers a screen the new mode hides, or a screen left on display underneath one that no
         // longer lists it, is worse than not offering the setting (#176).

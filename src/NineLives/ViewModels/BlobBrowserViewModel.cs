@@ -7,6 +7,25 @@ using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.ViewModels;
 
+/// <summary>
+/// Everything the restore screen needs to pick up where the browser left off (#202).
+///
+/// The browser answers "what do I actually have?", and once it has answered, making somebody
+/// re-select the same source, server and database by hand on the restore screen is the app
+/// repeating a question it already asked.
+/// </summary>
+/// <param name="Medium">Which source the browser was looking at.</param>
+/// <param name="Container">The container, when the medium is blob.</param>
+/// <param name="SourceServer">The instance whose history was read, when it is not.</param>
+/// <param name="ServerFilter">The server/instance filter in force, if any.</param>
+/// <param name="Database">The database to land on.</param>
+public sealed record BrowseHandoff(
+    BackupMedium Medium,
+    BlobContainerConfig? Container,
+    ServerConnection? SourceServer,
+    string? ServerFilter,
+    string? Database);
+
 public partial class BlobBrowserViewModel : ViewModelBase
 {
     private readonly IBlobStorageService _blobService;
@@ -182,6 +201,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     {
         ApplyFilter();
         UpdateFilteredSummary();
+        OnPropertyChanged(nameof(CanRestoreFromHere));
     }
 
     [RelayCommand]
@@ -413,6 +433,36 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [RelayCommand]
     private void CopyPathContainer(BackupFileInfo? file)
         => CopyBlobContainerPath(file ?? SelectedFile, SelectedContainer);
+
+    // ── from looking to restoring (#202) ────────────────────────────────────────
+
+    /// <summary>Raised when somebody wants to restore what they found. The shell wires it.</summary>
+    public event Action<BrowseHandoff>? RestoreRequested;
+
+    /// <summary>
+    /// Jumps to the restore screen with everything already answered (#202).
+    ///
+    /// The parameter is a database name when it came from a row's context menu; null means "use
+    /// the database filter in force", which is what the button under the summary does.
+    /// </summary>
+    [RelayCommand]
+    private void RestoreFromHere(string? database)
+    {
+        var target = string.IsNullOrWhiteSpace(database) ? SelectedDatabase : database;
+        if (string.IsNullOrWhiteSpace(target)) return;
+
+        RestoreRequested?.Invoke(new BrowseHandoff(
+            SelectedMedium,
+            MediumIsBlob ? SelectedContainer : null,
+            MediumIsSharedPath ? SourceServer : null,
+            SelectedServer,
+            target));
+    }
+
+    /// <summary>Whether there is anything to hand over - a database chosen, from a loaded source.</summary>
+    public bool CanRestoreFromHere => HasFiles && !string.IsNullOrWhiteSpace(SelectedDatabase);
+
+    partial void OnHasFilesChanged(bool value) => OnPropertyChanged(nameof(CanRestoreFromHere));
 
     /// <summary>
     /// The path a file on disk actually has (#197).
