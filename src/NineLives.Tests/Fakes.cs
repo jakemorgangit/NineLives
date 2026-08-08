@@ -245,6 +245,30 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make asking about volumes fail - which must not become a warning (#32).</summary>
     public Exception? VolumeCheckThrows { get; set; }
 
+    /// <summary>What GetDatabaseOverviewAsync answers (#205).</summary>
+    public DatabaseOverview? DatabaseOverview { get; set; } = new(150, "FULL", "sa");
+
+    public Exception? OverviewThrows { get; set; }
+
+    public Task<DatabaseOverview?> GetDatabaseOverviewAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        if (OverviewThrows != null) throw OverviewThrows;
+        return Task.FromResult(DatabaseOverview);
+    }
+
+    /// <summary>What FindOrphanedUsersAsync answers (#205).</summary>
+    public List<OrphanedUser> OrphanedUsers { get; set; } = [];
+
+    public Exception? OrphanScanThrows { get; set; }
+
+    public Task<List<OrphanedUser>> FindOrphanedUsersAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        if (OrphanScanThrows != null) throw OrphanScanThrows;
+        return Task.FromResult(OrphanedUsers.ToList());
+    }
+
     public Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
         ServerConnection server, CancellationToken ct = default)
     {

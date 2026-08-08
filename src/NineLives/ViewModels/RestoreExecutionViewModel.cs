@@ -198,6 +198,9 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         Console.Clear();
         RecoveryActions = [];
         HasRecoveryActions = false;
+        PostRestoreActions = [];
+        HasPostRestoreActions = false;
+        PostRestoreMessage = string.Empty;
         RaiseCancelStateChanged();
 
         try
@@ -222,13 +225,26 @@ public partial class RestoreExecutionViewModel : ViewModelBase
                 // Server sends an info message, and a synchronous Invoke BLOCKS that thread until
                 // the UI has finished handling it. With the UI busy re-rendering, progress backed
                 // up and then arrived in bursts - which is precisely what "not live" looked like.
-                msg => Application.Current.Dispatcher.InvokeAsync(() => AppendLog(msg)),
+                msg =>
+                {
+                    // InvokeAsync when a dispatcher exists and this is not its thread - see the
+                    // note above. Null when there is no Application at all (headless: the tests),
+                    // where appending directly is both safe and the only option.
+                    var dispatcher = Application.Current?.Dispatcher;
+                    if (dispatcher == null || dispatcher.CheckAccess()) AppendLog(msg);
+                    else dispatcher.InvokeAsync(() => AppendLog(msg));
+                },
                 executeToken);
 
             ExecutionSuccess = true;
             outcome = RestoreOutcome.Succeeded;
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
+
+            // The restore is not the end of the job (#205): nobody has verified the data yet, and
+            // on a different server every SQL-auth user is orphaned. Reported while the outcome is
+            // on screen, in the same shape as the recovery panel - read, then run.
+            await ReportPostRestoreAsync(run.Server, run.TargetDatabase);
         }
         catch (OperationCanceledException)
         {
@@ -336,6 +352,69 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// SQL error, when the app is still holding the connection that could tell them, is the wrong
     /// place to stop.
     /// </summary>
+    // ── after a SUCCESSFUL restore (#205) ───────────────────────────────────────
+
+    /// <summary>What finishing the job involves, shown under the success banner.</summary>
+    [ObservableProperty]
+    private ObservableCollection<RecoveryAction> _postRestoreActions = [];
+
+    [ObservableProperty]
+    private bool _hasPostRestoreActions;
+
+    /// <summary>The overview and the orphan verdict, as one readable paragraph.</summary>
+    [ObservableProperty]
+    private string _postRestoreMessage = string.Empty;
+
+    /// <summary>
+    /// The counterpart of <see cref="ReportRecoveryStateAsync"/> for the restore that WORKED.
+    ///
+    /// CHECKDB is offered on every success - the restore is the cheapest moment to find corruption,
+    /// and it proves the backup rather than just the copy. The orphan scan runs automatically
+    /// because it is one cheap query, and its findings are the single most common post-restore
+    /// fault: login succeeds, database access fails, and nothing on screen says why.
+    ///
+    /// Best effort throughout. A restore that succeeded must never LOOK failed because the
+    /// follow-up queries could not run.
+    /// </summary>
+    private async Task ReportPostRestoreAsync(ServerConnection server, string targetDatabase)
+    {
+        var actions = new List<RecoveryAction> { PostRestoreAdvice.CheckDb(targetDatabase) };
+        var message = new List<string>();
+
+        try
+        {
+            var overview = await _sql.GetDatabaseOverviewAsync(server, targetDatabase);
+            if (overview != null) message.Add(overview.Describe(targetDatabase));
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"\nCould not read [{targetDatabase}]'s properties: {ex.Message}");
+        }
+
+        try
+        {
+            var orphans = await _sql.FindOrphanedUsersAsync(server, targetDatabase);
+            message.Add(PostRestoreAdvice.DescribeOrphans(orphans));
+
+            foreach (var orphan in orphans)
+            {
+                actions.Add(orphan.HasSameNamedLogin
+                    ? PostRestoreAdvice.FixOrphan(targetDatabase, orphan)
+                    : PostRestoreAdvice.ExplainUnmappableOrphan(targetDatabase, orphan));
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"\nCould not check [{targetDatabase}] for orphaned users: {ex.Message}");
+        }
+
+        PostRestoreMessage = string.Join(" ", message);
+        PostRestoreActions = new ObservableCollection<RecoveryAction>(actions);
+        HasPostRestoreActions = true;
+
+        AppendLog($"\n{PostRestoreMessage}");
+    }
+
     private async Task ReportRecoveryStateAsync(ServerConnection server, string targetDatabase)
     {
         RecoveryActions = [];

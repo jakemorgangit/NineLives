@@ -107,4 +107,9 @@ public sealed record DatabaseRecoveryState(
 /// <param name="Title">Short label for the button.</param>
 /// <param name="Sql">The exact statement - shown before it is run, never hidden.</param>
 /// <param name="Caution">What running it commits them to.</param>
-public sealed record RecoveryAction(string Title, string Sql, string Caution);
+/// <param name="Runnable">
+/// False when the Sql is guidance rather than a statement to execute - a commented template that
+/// needs a human decision (a password, a name) before it means anything. Copy still applies; Run
+/// would only ever produce a confusing error.
+/// </param>
+public sealed record RecoveryAction(string Title, string Sql, string Caution, bool Runnable = true);
