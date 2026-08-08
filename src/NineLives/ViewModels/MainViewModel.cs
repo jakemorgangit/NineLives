@@ -44,6 +44,7 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowBrowseBackups));
 
         Restore.Mode = value;
+        Settings.CurrentMode = value;
 
         // A screen that has just been hidden must not stay on display underneath a sidebar that no
         // longer offers it - which is what changing mode from Settings would otherwise do.
@@ -54,7 +55,29 @@ public partial class MainViewModel : ViewModelBase
     {
         Mode = mode;
         IsChoosingMode = false;
+
+        // Restore rather than back to Settings, deliberately: the point of changing the mode is the
+        // shape of the app, and landing on the settings page you came from shows none of it.
         NavigateTo(Nav.Restore);
+    }
+
+    /// <summary>
+    /// Puts the cards back up from Settings (#191).
+    ///
+    /// They used to be shown once and then reduced to a drop-down of three names, which is the part
+    /// of them worth the least - what each mode turns ON is written on the cards.
+    /// </summary>
+    private void ShowModeCards()
+    {
+        ModeSelection.ShowCurrent(Mode);
+        IsChoosingMode = true;
+        CurrentView = ModeSelection;
+    }
+
+    private void OnModeCardsCancelled()
+    {
+        IsChoosingMode = false;
+        NavigateTo(Nav.Settings);
     }
 
     /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
@@ -144,6 +167,7 @@ public partial class MainViewModel : ViewModelBase
             log: null, history: _historyStore);
         ModeSelection = new ModeSelectionViewModel(_credentialStore);
         ModeSelection.Chosen += OnModeChosen;
+        ModeSelection.Cancelled += OnModeCardsCancelled;
 
         Backup = new BackupViewModel(_credentialStore, _sqlService);
         CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService);
@@ -162,7 +186,7 @@ public partial class MainViewModel : ViewModelBase
         // Changing the mode from Settings has to move the app immediately - a sidebar that still
         // offers a screen the new mode hides, or a screen left on display underneath one that no
         // longer lists it, is worse than not offering the setting (#176).
-        Settings.ModeChanged += mode => Mode = mode;
+        Settings.ShowModeCardsRequested += ShowModeCards;
 
         // One place that answers "is it doing something?". Every screen already tracks its own
         // work; without this the answer depended on which part of a long page was scrolled into

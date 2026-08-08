@@ -37,7 +37,7 @@ public partial class SettingsViewModel : ViewModelBase
         {
             var config = _credentialStore.LoadConfig();
             _selectedTheme = ThemeManager.Current;
-            _selectedMode = config.Mode ?? AppMode.Pro;
+            _currentMode = config.Mode ?? AppMode.Pro;
             _checkForUpdates = config.CheckForUpdates;
             _logRetentionDays = config.LogRetentionDays;
         }
@@ -57,32 +57,30 @@ public partial class SettingsViewModel : ViewModelBase
 
     // ── how much of the app to show (#176) ──────────────────────────────────────
 
-    /// <summary>One entry per mode, with what it turns on, for the picker.</summary>
-    public IReadOnlyList<ModeOption> Modes { get; } =
-        new[] { AppMode.Basic, AppMode.Standard, AppMode.Pro }
-            .Select(m => new ModeOption(m, AppModeCapabilities.Title(m), AppModeCapabilities.Tagline(m)))
-            .ToList();
-
-    [ObservableProperty]
-    private AppMode _selectedMode = AppMode.Pro;
-
-    /// <summary>Raised so the shell can hide or show what the new mode decides.</summary>
-    public event Action<AppMode>? ModeChanged;
-
     /// <summary>
-    /// Changes what is on screen, and remembers it.
+    /// The mode in force. Kept in step by the shell, which owns it.
     ///
-    /// Nothing is deleted by narrowing the mode: a container, a server or a saved credential set up
-    /// under Pro is all still there under Basic, it is simply not shown. That has to stay true, or
-    /// the picker becomes a decision people are afraid to make.
+    /// Changing it is NOT done here: it reopens the cards, which is the screen that says what each
+    /// mode actually turns on. A drop-down of three names could only ever say what they were
+    /// called (#191).
     /// </summary>
-    partial void OnSelectedModeChanged(AppMode value)
-    {
-        if (_loading) return;
+    [ObservableProperty]
+    private AppMode _currentMode = AppMode.Pro;
 
-        ModeChanged?.Invoke(value);
-        Save(config => config.Mode = value, "The mode was applied, but could not be saved for next time");
+    public string CurrentModeTitle => AppModeCapabilities.Title(CurrentMode);
+    public string CurrentModeTagline => AppModeCapabilities.Tagline(CurrentMode);
+
+    partial void OnCurrentModeChanged(AppMode value)
+    {
+        OnPropertyChanged(nameof(CurrentModeTitle));
+        OnPropertyChanged(nameof(CurrentModeTagline));
     }
+
+    /// <summary>Raised so the shell can put the cards back up.</summary>
+    public event Action? ShowModeCardsRequested;
+
+    [RelayCommand]
+    private void ShowModeCards() => ShowModeCardsRequested?.Invoke();
 
     // ── appearance ──────────────────────────────────────────────────────────────
 

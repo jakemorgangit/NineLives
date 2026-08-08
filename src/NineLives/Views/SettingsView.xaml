@@ -17,14 +17,25 @@
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="HOW MUCH OF THE APP TO SHOW" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
-                    <ComboBox ItemsSource="{Binding Modes}"
-                              DisplayMemberPath="Name"
-                              SelectedValuePath="Mode"
-                              SelectedValue="{Binding SelectedMode}"
-                              Style="{StaticResource DarkComboBox}"
-                              Width="240"
-                              HorizontalAlignment="Left"
-                              Margin="0,0,0,6" />
+
+                    <!-- The mode is READ here and CHANGED on the cards (#191).
+                         A drop-down of three names could only say what the modes were called; what
+                         each one turns on is written on the cards, and they were being shown once
+                         and then never again. -->
+                    <TextBlock Text="{Binding CurrentModeTitle}"
+                               Style="{StaticResource SubHeaderText}"
+                               FontSize="17" />
+                    <TextBlock Text="{Binding CurrentModeTagline}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+
+                    <Button Content="Compare the modes..."
+                            Command="{Binding ShowModeCardsCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            HorizontalAlignment="Left"
+                            Margin="0,12,0,8" />
+
                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,20"
                                Text="Narrowing this hides screens and options; it never deletes anything. Containers, servers and saved credentials set up under a wider mode are all still there, and come back when you widen it again." />
 
