@@ -1,0 +1,119 @@
+﻿<UserControl x:Class="Blackcat.NineLives.Views.ModeSelectionView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="1100" HorizontalAlignment="Center" Margin="0,24,0,24">
+
+            <TextBlock Text="How much of Nine Lives do you need?"
+                       Style="{StaticResource HeaderText}"
+                       HorizontalAlignment="Center" />
+
+            <TextBlock Style="{StaticResource SecondaryText}"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       MaxWidth="760"
+                       Margin="0,8,0,0"
+                       Text="Pick the one that sounds like you. Nothing is locked away - this is only about what is on screen, and you can change it at any time in Settings." />
+
+            <!-- Three cards, one row. Deliberately not a wizard: this is one choice, and putting it
+                 behind a Next button would make it feel like setup rather than a preference. -->
+            <ItemsControl ItemsSource="{Binding Cards}" Margin="0,24,0,0">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Rows="1" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border CornerRadius="8" Margin="8" Padding="0"
+                                Background="{DynamicResource CardBackgroundBrush}"
+                                BorderBrush="{DynamicResource CardBorderBrush}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <!-- The shade. One accent getting stronger rather than a traffic
+                                     light: these are more and less, not better and worse. -->
+                                <!-- The default lives in the Style, NOT as a local Background. A
+                                     style setter cannot override a locally set value, so a local
+                                     one here made every card the same colour and the triggers below
+                                     silently did nothing - the same trap as the audit tick (#130). -->
+                                <Border Height="6" CornerRadius="8,8,0,0">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource ModeBasicBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding AccentBrushKey}" Value="ModeStandardBrush">
+                                                    <Setter Property="Background" Value="{DynamicResource ModeStandardBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding AccentBrushKey}" Value="ModeProBrush">
+                                                    <Setter Property="Background" Value="{DynamicResource ModeProBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                </Border>
+
+                                <StackPanel Margin="20,18,20,20">
+                                    <TextBlock Text="{Binding Title}"
+                                               Style="{StaticResource SubHeaderText}"
+                                               FontSize="20" />
+
+                                    <TextBlock Text="{Binding Tagline}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,6,0,0" />
+
+                                    <!-- Who it is for, before what it contains. Somebody choosing
+                                         between three cards is asking "which one am I?" rather than
+                                         "what does each include?". -->
+                                    <TextBlock Text="{Binding WhoFor}"
+                                               Style="{StaticResource BodyText}"
+                                               TextWrapping="Wrap"
+                                               FontStyle="Italic"
+                                               Margin="0,14,0,0" />
+
+                                    <ItemsControl ItemsSource="{Binding Highlights}" Margin="0,14,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,6">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="&#x2713;"
+                                                               Foreground="{DynamicResource SuccessBrush}"
+                                                               Margin="0,0,8,0"
+                                                               VerticalAlignment="Top" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding}"
+                                                               Style="{StaticResource SecondaryText}"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <Button Content="{Binding ChooseLabel}"
+                                            Command="{Binding DataContext.ChooseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource PrimaryButton}"
+                                            Padding="16,9"
+                                            Margin="0,18,0,0"
+                                            HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Style="{StaticResource SecondaryText}"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       Margin="0,20,0,0"
+                       Text="Whatever you choose, none of your containers, servers or saved credentials are affected. A mode only decides what is shown." />
+
+            <ContentControl Style="{StaticResource ErrorBanner}" Margin="0,16,0,0" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

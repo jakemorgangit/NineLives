@@ -2,6 +2,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
@@ -1004,6 +1005,104 @@ public class XamlLoadTests(WpfFixture wpf)
             var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
             Assert.DoesNotContain(shown, t => t.Contains("not on the timeline", StringComparison.Ordinal));
+        });
+    }
+
+    // ── the mode cards (#176) ───────────────────────────────────────────────────
+
+    [Fact]
+    public void ModeSelectionViewLoads()
+        => Check("ModeSelectionView", () =>
+            new ModeSelectionView { DataContext = new ModeSelectionViewModel(Store()) });
+
+    /// <summary>
+    /// Each card takes its own shade.
+    ///
+    /// Found by rendering it: the default was a LOCAL Background, and a style setter cannot override
+    /// a local value - so all three bars were the same blue and the triggers silently did nothing.
+    /// The identical trap to the audit tick (#130), repeated a few hours later, which is why it is
+    /// pinned here rather than left to a comment.
+    /// </summary>
+    [Fact]
+    public void EachModeCardTakesItsOwnShade()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new ModeSelectionView { DataContext = new ModeSelectionViewModel(Store()) };
+            Realise(view);
+
+            // The 6px bars: every Border that is exactly that tall and actually painted.
+            var shades = FindAll<Border>(view)
+                .Where(IsShown)
+                .Where(b => Math.Abs(b.ActualHeight - 6) < 0.5)
+                .Select(b => (b.Background as SolidColorBrush)?.Color)
+                .Where(c => c != null)
+                .ToList();
+
+            Assert.Equal(3, shades.Count);
+            Assert.Equal(3, shades.Distinct().Count());
+        });
+    }
+
+    /// <summary>
+    /// The button says what pressing it does.
+    ///
+    /// Also found by rendering: Button.Content is an object, so a StringFormat on the binding is
+    /// quietly ignored - the button read "Basic" rather than "Use Basic", a label describing the
+    /// card rather than the action.
+    /// </summary>
+    [Fact]
+    public void EachCardsButtonSaysWhatPressingItDoes()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new ModeSelectionView { DataContext = new ModeSelectionViewModel(Store()) };
+            Realise(view);
+
+            var labels = VisibleButtons(view).Select(b => b.Content as string).ToList();
+
+            Assert.Contains("Use Basic", labels);
+            Assert.Contains("Use Standard", labels);
+            Assert.Contains("Use Pro", labels);
+        });
+    }
+
+    /// <summary>
+    /// Basic does not offer what it cannot do. A medium selector with one option, or an audit panel
+    /// for a check the mode has turned off, would be the clutter this whole idea exists to remove.
+    /// </summary>
+    [Fact]
+    public void TheRestoreScreenInBasicDoesNotOfferWhatBasicCannotDo()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.Mode = AppMode.Basic;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain("WHERE THE BACKUPS LIVE", shown);
+            Assert.DoesNotContain("AUDIT THESE BACKUPS", shown);
+        });
+    }
+
+    [Fact]
+    public void TheRestoreScreenInProOffersThemAgain()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.Mode = AppMode.Pro;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("WHERE THE BACKUPS LIVE", shown);
         });
     }
 

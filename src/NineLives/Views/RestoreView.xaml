@@ -98,7 +98,8 @@
                          the timeline, the chain, the options, the script, the execute path - works
                          the same either way, which is why this is a selector here rather than a
                          second screen. -->
-                    <StackPanel Margin="0,0,0,14">
+                    <StackPanel Margin="0,0,0,14"
+                                Visibility="{Binding ShowMediumChoice, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="WHERE THE BACKUPS LIVE" Style="{StaticResource LabelText}" />
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                             <RadioButton Content="Azure Blob Storage"
@@ -339,8 +340,8 @@
                  The estimate goes in FRONT of it because a three-minute operation nobody expected
                  reads as a hang. -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding Inventory.BackupsLoaded, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
+                    Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}">
+                <StackPanel Visibility="{Binding Inventory.BackupsLoaded, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="AUDIT THESE BACKUPS" Style="{StaticResource LabelText}" />
                     <TextBlock Style="{StaticResource SecondaryText}"
                                TextWrapping="Wrap"
@@ -1250,6 +1251,7 @@
                                       ToolTip="SET SINGLE_USER WITH ROLLBACK IMMEDIATE before restore." />
 
                             <CheckBox Content="KEEP_REPLICATION"
+                                      Visibility="{Binding ShowAdvancedOptions, Converter={StaticResource BoolToVis}}"
                                       IsChecked="{Binding Options.KeepReplication}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
@@ -1287,6 +1289,7 @@
                                        Text="A restore that finishes despite errors can leave a corrupt database. Run DBCC CHECKDB on the result before trusting it." />
 
                             <CheckBox Content="WITH MOVE (relocate files)"
+                                      Visibility="{Binding ShowFileRelocation, Converter={StaticResource BoolToVis}}"
                                       IsChecked="{Binding UseWithMove}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
@@ -1497,7 +1500,8 @@
                             <!-- Point-in-time (STOPAT): only shown for a log restore point, where
                                  stopping partway through the log is meaningful. -->
                             <StackPanel Visibility="{Binding PointInTime.CanUse, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="POINT IN TIME" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="POINT IN TIME" Style="{StaticResource LabelText}"
+                                           Visibility="{Binding ShowPointInTime, Converter={StaticResource BoolToVis}}" />
                                 <CheckBox Content="Stop at a specific time (STOPAT)"
                                           IsChecked="{Binding PointInTime.Use}"
                                           Style="{StaticResource DarkCheckBox}"
@@ -1552,11 +1556,11 @@
                             </Border>
 
                             <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}"
-                                       Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}" />
+                                       Visibility="{Binding ShowCredentialPanel, Converter={StaticResource BoolToVis}}" />
                             <TextBox Text="{Binding Credential.Name, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,8"
-                                     Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}"
+                                     Visibility="{Binding ShowCredentialPanel, Converter={StaticResource BoolToVis}}"
                                      ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
 
                             <!-- Which identity the credential holds (#147).
@@ -1567,7 +1571,7 @@
                                  the credential this app wrote was always a SAS. On an Entra
                                  container the button failed outright with "no SAS token stored",
                                  which is true, by design, and useless. -->
-                            <StackPanel Visibility="{Binding CredentialApplies, Converter={StaticResource BoolToVis}}"
+                            <StackPanel Visibility="{Binding ShowCredentialPanel, Converter={StaticResource BoolToVis}}"
                                         Margin="0,0,0,10">
                                 <TextBlock Text="AUTHENTICATE AS" Style="{StaticResource LabelText}" />
                                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
@@ -1623,7 +1627,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Credential.SectionVisible}" Value="True" />
-                                                    <Condition Binding="{Binding CredentialApplies}" Value="True" />
+                                                    <Condition Binding="{Binding ShowCredentialPanel}" Value="True" />
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible" />
                                             </MultiDataTrigger>
@@ -1770,6 +1774,7 @@
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding CopyAsAgentJobCommand}"
                                 IsEnabled="{Binding HasScript}"
+                                Visibility="{Binding ShowAgentJob, Converter={StaticResource BoolToVis}}"
                                 Margin="0,0,8,0"
                                 ToolTip="Wraps this restore as a SQL Server Agent job, one step per batch. The job is created DISABLED and with no schedule - enable or start it when the restore should actually happen." />
                         <Button Content="{Binding Execution.ButtonText}"

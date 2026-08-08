@@ -53,6 +53,9 @@
         <DataTemplate DataType="{x:Type vm:BlobBrowserViewModel}">
             <views:BlobBrowserView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ModeSelectionViewModel}">
+            <views:ModeSelectionView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:BackupViewModel}">
             <views:BackupView />
         </DataTemplate>
@@ -149,8 +152,12 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Sidebar -->
-            <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}">
+            <!-- Sidebar.
+                 Hidden while the mode cards are up (#176): a sidebar sitting behind a choice about
+                 what the sidebar should contain would be answering the question twice, and the
+                 entries it shows would be the ones about to change. -->
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}"
+                    Visibility="{Binding IsChoosingMode, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                 <DockPanel>
                     <!-- App Title -->
                     <StackPanel DockPanel.Dock="Top" Margin="20,20,20,8">
@@ -263,6 +270,7 @@
                         <RadioButton Style="{StaticResource SidebarButton}"
                                      IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Browse Backups'}"
                                      Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowBrowseBackups, Converter={StaticResource BoolToVis}}"
                                      CommandParameter="Browse Backups">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x1F4C2;" FontSize="15" VerticalAlignment="Center" Width="24" />
@@ -273,6 +281,7 @@
                         <RadioButton Style="{StaticResource SidebarButton}"
                                      IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Back Up'}"
                                      Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowBackup, Converter={StaticResource BoolToVis}}"
                                      CommandParameter="Back Up">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x1F4BE;" FontSize="15" VerticalAlignment="Center" Width="24" />
@@ -293,6 +302,7 @@
                         <RadioButton Style="{StaticResource SidebarButton}"
                                      IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Copy Database'}"
                                      Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowCopyDatabase, Converter={StaticResource BoolToVis}}"
                                      CommandParameter="Copy Database">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x21C4;" FontSize="15" VerticalAlignment="Center" Width="24" />

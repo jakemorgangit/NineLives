@@ -23,6 +23,49 @@ public partial class MainViewModel : ViewModelBase
     // startup - it used to be a hardcoded IsChecked="True" on the first one (#117 item 5).
     private string _currentViewName = Nav.BlobStorage;
 
+    /// <summary>How much of the app is on screen (#176).</summary>
+    [ObservableProperty]
+    private AppMode _mode = AppMode.Pro;
+
+    /// <summary>True while the mode cards are up, which is once, on first run.</summary>
+    [ObservableProperty]
+    private bool _isChoosingMode;
+
+    // Each of these is asked by the navigation and by the screens themselves, so they live here
+    // rather than being recomputed from Mode at every binding.
+    public bool ShowBackup => AppModeCapabilities.CanBackUp(Mode);
+    public bool ShowCopyDatabase => AppModeCapabilities.CanCopyBetweenServers(Mode);
+    public bool ShowBrowseBackups => AppModeCapabilities.CanBrowseBackups(Mode);
+
+    partial void OnModeChanged(AppMode value)
+    {
+        OnPropertyChanged(nameof(ShowBackup));
+        OnPropertyChanged(nameof(ShowCopyDatabase));
+        OnPropertyChanged(nameof(ShowBrowseBackups));
+
+        Restore.Mode = value;
+
+        // A screen that has just been hidden must not stay on display underneath a sidebar that no
+        // longer offers it - which is what changing mode from Settings would otherwise do.
+        if (!IsViewAvailable(CurrentViewName)) NavigateTo(Nav.Restore);
+    }
+
+    private void OnModeChosen(AppMode mode)
+    {
+        Mode = mode;
+        IsChoosingMode = false;
+        NavigateTo(Nav.Restore);
+    }
+
+    /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
+    public bool IsViewAvailable(string viewName) => viewName switch
+    {
+        Nav.Backup => ShowBackup,
+        Nav.CopyDatabase => ShowCopyDatabase,
+        Nav.BrowseBackups => ShowBrowseBackups,
+        _ => true
+    };
+
     [ObservableProperty]
     private string _globalStatus = "Ready";
 
@@ -50,6 +93,7 @@ public partial class MainViewModel : ViewModelBase
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
+    public ModeSelectionViewModel ModeSelection { get; }
     public BackupViewModel Backup { get; }
     public CopyDatabaseViewModel CopyDatabase { get; }
     public RestoreViewModel Restore { get; }
@@ -98,6 +142,9 @@ public partial class MainViewModel : ViewModelBase
         Restore = new RestoreViewModel(
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
+        ModeSelection = new ModeSelectionViewModel(_credentialStore);
+        ModeSelection.Chosen += OnModeChosen;
+
         Backup = new BackupViewModel(_credentialStore, _sqlService);
         CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService);
         History = new HistoryViewModel(_historyStore);
@@ -112,12 +159,36 @@ public partial class MainViewModel : ViewModelBase
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
 
+        // Changing the mode from Settings has to move the app immediately - a sidebar that still
+        // offers a screen the new mode hides, or a screen left on display underneath one that no
+        // longer lists it, is worse than not offering the setting (#176).
+        Settings.ModeChanged += mode => Mode = mode;
+
         // One place that answers "is it doing something?". Every screen already tracks its own
         // work; without this the answer depended on which part of a long page was scrolled into
         // view, and the Restore screen's own status line is below the fold most of the time (#128).
         WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Backup, Restore, CopyDatabase);
 
-        CurrentView = BlobConfig;
+        // How much of the app to show (#176). Unknown means nobody has chosen yet, which is what
+        // makes the cards a first-run screen rather than a gate on every launch.
+        //
+        // An unreadable or unrecognised value lands on Pro rather than Basic: hiding features from
+        // somebody whose config got mangled is a worse failure than showing too many, because the
+        // second is untidy and the first looks like the app has lost a capability.
+        var savedMode = _credentialStore.LoadConfig().Mode;
+        Mode = savedMode ?? AppMode.Pro;
+
+        if (savedMode == null)
+        {
+            // First run. Nothing else is shown until the question is answered - a sidebar behind a
+            // choice about what the sidebar contains would be answering it twice.
+            IsChoosingMode = true;
+            CurrentView = ModeSelection;
+        }
+        else
+        {
+            CurrentView = BlobConfig;
+        }
 
         // Fire and forget - startup must not wait on the network.
         _ = CheckForUpdatesAsync();

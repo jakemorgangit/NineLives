@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -297,6 +297,19 @@ public class AppConfig
     public List<ServerConnection> Servers { get; set; } = [];
     public string? LastSelectedContainer { get; set; }
     public string? LastSelectedServer { get; set; }
+
+    /// <summary>
+    /// How much of the app to show (#176).
+    ///
+    /// Null until somebody has chosen, which is what makes the mode cards a FIRST-RUN screen rather
+    /// than a gate on every launch. Being asked every time would be worse than the clutter it is
+    /// meant to fix.
+    ///
+    /// An unknown value degrades to Pro rather than Basic: hiding features from somebody whose
+    /// config got mangled is a worse failure than showing them too many, because the second is
+    /// merely untidy and the first looks like the app has lost a capability.
+    /// </summary>
+    public AppMode? Mode { get; set; }
 
     /// <summary>Check GitHub for a newer release at startup. Turn off for offline installs.</summary>
     public bool CheckForUpdates { get; set; } = true;
