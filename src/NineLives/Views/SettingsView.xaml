@@ -16,6 +16,18 @@
             <!-- Appearance -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
+                    <TextBlock Text="HOW MUCH OF THE APP TO SHOW" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                    <ComboBox ItemsSource="{Binding Modes}"
+                              DisplayMemberPath="Name"
+                              SelectedValuePath="Mode"
+                              SelectedValue="{Binding SelectedMode}"
+                              Style="{StaticResource DarkComboBox}"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,20"
+                               Text="Narrowing this hides screens and options; it never deletes anything. Containers, servers and saved credentials set up under a wider mode are all still there, and come back when you widen it again." />
+
                     <TextBlock Text="APPEARANCE" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
                     <ComboBox ItemsSource="{Binding Themes}"
                               DisplayMemberPath="Name"

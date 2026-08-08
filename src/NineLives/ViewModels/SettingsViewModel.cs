@@ -1,4 +1,5 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
+using Blackcat.NineLives.Models;
 using System.IO;
 using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -36,6 +37,7 @@ public partial class SettingsViewModel : ViewModelBase
         {
             var config = _credentialStore.LoadConfig();
             _selectedTheme = ThemeManager.Current;
+            _selectedMode = config.Mode ?? AppMode.Pro;
             _checkForUpdates = config.CheckForUpdates;
             _logRetentionDays = config.LogRetentionDays;
         }
@@ -51,6 +53,35 @@ public partial class SettingsViewModel : ViewModelBase
         {
             _loading = false;
         }
+    }
+
+    // ── how much of the app to show (#176) ──────────────────────────────────────
+
+    /// <summary>One entry per mode, with what it turns on, for the picker.</summary>
+    public IReadOnlyList<ModeOption> Modes { get; } =
+        new[] { AppMode.Basic, AppMode.Standard, AppMode.Pro }
+            .Select(m => new ModeOption(m, AppModeCapabilities.Title(m), AppModeCapabilities.Tagline(m)))
+            .ToList();
+
+    [ObservableProperty]
+    private AppMode _selectedMode = AppMode.Pro;
+
+    /// <summary>Raised so the shell can hide or show what the new mode decides.</summary>
+    public event Action<AppMode>? ModeChanged;
+
+    /// <summary>
+    /// Changes what is on screen, and remembers it.
+    ///
+    /// Nothing is deleted by narrowing the mode: a container, a server or a saved credential set up
+    /// under Pro is all still there under Basic, it is simply not shown. That has to stay true, or
+    /// the picker becomes a decision people are afraid to make.
+    /// </summary>
+    partial void OnSelectedModeChanged(AppMode value)
+    {
+        if (_loading) return;
+
+        ModeChanged?.Invoke(value);
+        Save(config => config.Mode = value, "The mode was applied, but could not be saved for next time");
     }
 
     // ── appearance ──────────────────────────────────────────────────────────────

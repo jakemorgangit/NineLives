@@ -328,8 +328,41 @@ public partial class RestoreViewModel : ViewModelBase
     // whole of what a second medium changes on this screen: which inputs step 1 offers, and whether
     // the server-side credential is applicable at all.
 
+    /// <summary>
+    /// How much of this screen to show (#176).
+    ///
+    /// Pro by default, so anything that constructs this without a shell - a test, a future CLI -
+    /// gets the whole thing rather than silently losing capability.
+    /// </summary>
+    [ObservableProperty]
+    private AppMode _mode = AppMode.Pro;
+
     [ObservableProperty]
     private BackupMedium _selectedMedium = BackupMedium.AzureBlob;
+
+    public bool ShowMediumChoice => AppModeCapabilities.CanUseSharedPath(Mode);
+    public bool ShowPointInTime => AppModeCapabilities.CanRestoreToAPointInTime(Mode);
+    public bool ShowFileRelocation => AppModeCapabilities.CanRelocateFiles(Mode);
+    public bool ShowVerifyAndAudit => AppModeCapabilities.CanVerifyAndAudit(Mode);
+    public bool ShowCredentialPanel => AppModeCapabilities.CanManageServerCredentials(Mode) && CredentialApplies;
+    public bool ShowAgentJob => AppModeCapabilities.CanScriptAsAgentJob(Mode);
+    public bool ShowAdvancedOptions => AppModeCapabilities.CanUseAdvancedRestoreOptions(Mode);
+
+    partial void OnModeChanged(AppMode value)
+    {
+        OnPropertyChanged(nameof(ShowMediumChoice));
+        OnPropertyChanged(nameof(ShowPointInTime));
+        OnPropertyChanged(nameof(ShowFileRelocation));
+        OnPropertyChanged(nameof(ShowVerifyAndAudit));
+        OnPropertyChanged(nameof(ShowCredentialPanel));
+        OnPropertyChanged(nameof(ShowAgentJob));
+        OnPropertyChanged(nameof(ShowAdvancedOptions));
+
+        // A medium that is no longer offered must not stay selected underneath a hidden control -
+        // the screen would be restoring FROM DISK with nothing on screen saying so.
+        if (!ShowMediumChoice && SelectedMedium != BackupMedium.AzureBlob)
+            SelectedMedium = BackupMedium.AzureBlob;
+    }
 
     public bool MediumIsBlob => SelectedMedium == BackupMedium.AzureBlob;
     public bool MediumIsSharedPath => SelectedMedium == BackupMedium.SharedPath;
@@ -348,6 +381,7 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(MediumIsBlob));
         OnPropertyChanged(nameof(MediumIsSharedPath));
         OnPropertyChanged(nameof(CredentialApplies));
+        OnPropertyChanged(nameof(ShowCredentialPanel));
 
         // Same rule as changing the container, for the same reason: what is on screen came from the
         // other medium entirely, and an armed Execute that survives the switch is aimed at

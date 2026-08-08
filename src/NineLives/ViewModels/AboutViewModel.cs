@@ -1,4 +1,5 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
+using Blackcat.NineLives.Models;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Services;
 
@@ -7,6 +8,9 @@ namespace Blackcat.NineLives.ViewModels;
 /// <summary>A theme and the name shown for it.</summary>
 /// <param name="Value">The theme itself.</param>
 /// <param name="Name">What the picker calls it.</param>
+/// <summary>One mode in the Settings picker: what it is called and what it turns on (#176).</summary>
+public sealed record ModeOption(AppMode Mode, string Name, string Description);
+
 public sealed record ThemeOption(AppTheme Value, string Name)
 {
     /// <summary>
