@@ -36,6 +36,17 @@ public interface ISqlServerService
     Task<List<FileMoveOption>> GetDatabaseFilesAsync(
         ServerConnection server, string database, CancellationToken ct = default);
 
+    /// <summary>What the restored database looks like now - compat level, recovery model, owner (#205).</summary>
+    Task<DatabaseOverview?> GetDatabaseOverviewAsync(
+        ServerConnection server, string database, CancellationToken ct = default);
+
+    /// <summary>
+    /// Database users whose SIDs match no login on this server (#205). SQL-auth users only -
+    /// Windows and Entra principals resolve by directory identity, not by per-server SID.
+    /// </summary>
+    Task<List<OrphanedUser>> FindOrphanedUsersAsync(
+        ServerConnection server, string database, CancellationToken ct = default);
+
     Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
         ServerConnection server, CancellationToken ct = default);
 

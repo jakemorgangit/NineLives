@@ -1193,6 +1193,71 @@ public class SqlServerService : ISqlServerService
         return files;
     }
 
+    public async Task<DatabaseOverview?> GetDatabaseOverviewAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"
+            SELECT d.compatibility_level,
+                   d.recovery_model_desc,
+                   SUSER_SNAME(d.owner_sid) AS OwnerName
+            FROM sys.databases AS d
+            WHERE d.name = @database";
+        cmd.Parameters.AddWithValue("@database", database);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+
+        return new DatabaseOverview(
+            Convert.ToInt32(reader["compatibility_level"]),
+            reader["recovery_model_desc"]?.ToString() ?? "UNKNOWN",
+            reader["OwnerName"] as string);
+    }
+
+    public async Task<List<OrphanedUser>> FindOrphanedUsersAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        var orphans = new List<OrphanedUser>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // Three-part naming rather than USE, so the connection state never changes. The database
+        // name is our own restore target and is quoted, not parameterised - object names cannot
+        // be parameters.
+        //
+        // SQL-auth users only (authentication_type 1): a Windows or Entra principal resolves by
+        // directory identity, so a SID mismatch there is not the orphaning this looks for.
+        // principal_id > 4 skips dbo, guest, sys and INFORMATION_SCHEMA.
+        cmd.CommandText = $@"
+            SELECT dp.name AS UserName,
+                   CASE WHEN same_named.name IS NOT NULL THEN 1 ELSE 0 END AS HasSameNamedLogin
+            FROM {TSql.QuoteName(database)}.sys.database_principals AS dp
+            LEFT JOIN sys.server_principals AS by_sid
+                   ON by_sid.sid = dp.sid
+            LEFT JOIN sys.server_principals AS same_named
+                   ON same_named.name = dp.name AND same_named.type = 'S'
+            WHERE dp.type = 'S'
+              AND dp.authentication_type = 1
+              AND dp.principal_id > 4
+              AND by_sid.sid IS NULL
+            ORDER BY dp.name";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            orphans.Add(new OrphanedUser(
+                reader["UserName"]?.ToString() ?? string.Empty,
+                Convert.ToInt32(reader["HasSameNamedLogin"]) == 1));
+        }
+
+        return orphans;
+    }
+
     public async Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
         ServerConnection server, CancellationToken ct = default)
     {

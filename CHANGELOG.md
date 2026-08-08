@@ -57,6 +57,13 @@ built for.
 
 ### Changed
 
+- **A successful restore now ends with the job's remainder on screen**, in the same read-then-run
+  shape as the recovery panel: DBCC CHECKDB offered on every success - the restore is the cheapest
+  moment to find corruption, and it proves the backup rather than just the copy - plus an automatic
+  scan for orphaned SQL-auth users, the single most common post-restore fault. Fixable orphans get
+  the ALTER USER ... WITH LOGIN statement; one with no matching login gets guidance that copies but
+  never runs, because inventing a statement means inventing a password. The database's compat
+  level, recovery model and owner are stated, not altered (#205)
 - **A backup file nobody's msdb knows can now be restored** - the vendor .bak, the file that
   outlived its server. A third source on the restore screen takes pasted paths, asks a server to
   read each file's own headers, and hands the result to the same chain, options and script

@@ -2150,6 +2150,60 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+        <!-- What finishes the restore that WORKED (#205): the recovery panel's counterpart.
+             CHECKDB proves the backup rather than just the copy, and the orphan scan names the
+             single most common post-restore fault before anybody hits it. -->
+        <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                Background="{DynamicResource SuccessPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource SuccessBrush}"
+                BorderThickness="1"
+                Visibility="{Binding Execution.HasPostRestoreActions, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <TextBlock Text="FINISHING THE JOB"
+                           Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding Execution.PostRestoreMessage}"
+                           Style="{StaticResource BodyText}"
+                           TextWrapping="Wrap" Margin="0,0,0,10" />
+                <ItemsControl ItemsSource="{Binding Execution.PostRestoreActions}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBox Text="{Binding Sql, Mode=OneWay}"
+                                             Style="{StaticResource DarkTextBox}"
+                                             IsReadOnly="True" TextWrapping="Wrap"
+                                             FontFamily="{StaticResource ConsoleFont}"
+                                             FontSize="12" Margin="0,6,0,6" />
+                                    <TextBlock Text="{Binding Caution}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Run this"
+                                                Visibility="{Binding Runnable, Converter={StaticResource BoolToVis}}"
+                                                Command="{Binding DataContext.Execution.RunRecoveryActionCommand,
+                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="10,6" Margin="0,0,8,0" />
+                                        <Button Content="Copy"
+                                                Command="{Binding DataContext.Execution.CopyRecoveryActionCommand,
+                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="10,6" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
                     </StackPanel>
                 </StackPanel>
             </Border>
