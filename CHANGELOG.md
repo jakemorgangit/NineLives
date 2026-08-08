@@ -77,6 +77,9 @@ built for.
 
 ### Fixed
 
+- The widest mode drew an empty bordered box under the source picker. The audit card's border was
+  gated on the mode while its contents waited on the backups, so between "this mode can audit" and
+  "there is something to audit" the chrome outlived its own contents (#195)
 - The mode cards sat at the top of the window and off to the right of it. Hiding the sidebar left
   its 220px column behind, because a ColumnDefinition keeps its width whatever happens to the
   element inside it (#191)

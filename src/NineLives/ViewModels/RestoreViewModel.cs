@@ -344,6 +344,15 @@ public partial class RestoreViewModel : ViewModelBase
     public bool ShowPointInTime => AppModeCapabilities.CanRestoreToAPointInTime(Mode);
     public bool ShowFileRelocation => AppModeCapabilities.CanRelocateFiles(Mode);
     public bool ShowVerifyAndAudit => AppModeCapabilities.CanVerifyAndAudit(Mode);
+
+    /// <summary>
+    /// Whether the audit card appears at all.
+    ///
+    /// The mode AND something to audit. The card used to be shown on the mode alone while its
+    /// contents waited on the backups, so anybody in the widest mode met an empty bordered box
+    /// sitting under the source picker before they had loaded anything (#195).
+    /// </summary>
+    public bool ShowAuditPanel => ShowVerifyAndAudit && Inventory.BackupsLoaded;
     public bool ShowCredentialPanel => AppModeCapabilities.CanManageServerCredentials(Mode) && CredentialApplies;
     public bool ShowAgentJob => AppModeCapabilities.CanScriptAsAgentJob(Mode);
     public bool ShowAdvancedOptions => AppModeCapabilities.CanUseAdvancedRestoreOptions(Mode);
@@ -354,6 +363,7 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowPointInTime));
         OnPropertyChanged(nameof(ShowFileRelocation));
         OnPropertyChanged(nameof(ShowVerifyAndAudit));
+        OnPropertyChanged(nameof(ShowAuditPanel));
         OnPropertyChanged(nameof(ShowCredentialPanel));
         OnPropertyChanged(nameof(ShowAgentJob));
         OnPropertyChanged(nameof(ShowAdvancedOptions));
@@ -614,6 +624,11 @@ public partial class RestoreViewModel : ViewModelBase
                     break;
 
                 case nameof(BackupInventoryViewModel.BackupsLoaded):
+                    OnPropertyChanged(nameof(ShowAuditPanel));
+                    RefreshSteps();
+                    RefreshCheckState();
+                    break;
+
                 case nameof(BackupInventoryViewModel.SelectedServerName):
                     RefreshSteps();
                     RefreshCheckState();

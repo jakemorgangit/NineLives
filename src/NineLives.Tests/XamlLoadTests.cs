@@ -1045,6 +1045,49 @@ public class XamlLoadTests(WpfFixture wpf)
     }
 
     /// <summary>
+    /// No mode shows a card with nothing in it.
+    ///
+    /// Found by rendering the restore screen in all three modes: the audit card's BORDER was shown
+    /// on the mode alone while its contents waited for backups to be loaded, so the widest mode met
+    /// an empty bordered box under the source picker before it had anything to audit (#195).
+    ///
+    /// Written against every card rather than that one, because the shape of the mistake - chrome
+    /// gated on one condition and contents on another - is the kind that arrives again the next
+    /// time a panel learns a second reason to be hidden.
+    /// </summary>
+    [Theory]
+    [InlineData(AppMode.Basic)]
+    [InlineData(AppMode.Standard)]
+    [InlineData(AppMode.Pro)]
+    public void NoModeDrawsACardAroundNothing(AppMode mode)
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.Mode = mode;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // Cards only. Every control template in the app is full of Borders, and a hidden child
+            // inside one of those is ordinary - it is the CARD chrome that must not outlive its
+            // own contents.
+            var cardStyle = view.TryFindResource("CardBorder") as Style;
+            Assert.NotNull(cardStyle);
+
+            foreach (var card in FindAll<Border>(view).Where(b => b.Style == cardStyle).Where(IsShown))
+            {
+                if (card.Child is not FrameworkElement child) continue;
+
+                Assert.True(
+                    IsShown(child),
+                    $"A card is visible in {mode} with its contents hidden - a border drawn around "
+                    + $"nothing. First label inside: {FirstLabel(card) ?? "(none)"}");
+            }
+        });
+    }
+
+    /// <summary>
     /// The button says what pressing it does, and does NOT repeat the card's own title.
     ///
     /// Found by rendering: Button.Content is an object, so a StringFormat on the binding is quietly
@@ -1458,6 +1501,9 @@ public class XamlLoadTests(WpfFixture wpf)
     /// </summary>
     private static List<Button> VisibleButtons(DependencyObject root)
         => FindAll<Button>(root).Where(IsShown).ToList();
+
+    private static string? FirstLabel(DependencyObject card)
+        => FindAll<TextBlock>(card).Select(t => t.Text).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
 
     private static bool IsShown(FrameworkElement element)
     {

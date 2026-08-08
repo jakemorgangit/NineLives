@@ -339,9 +339,11 @@
 
                  The estimate goes in FRONT of it because a three-minute operation nobody expected
                  reads as a hang. -->
+            <!-- One condition on the CARD, not the mode on the border and the backups on what is
+                 inside it - that combination drew the chrome around nothing (#195). -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}">
-                <StackPanel Visibility="{Binding Inventory.BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding ShowAuditPanel, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
                     <TextBlock Text="AUDIT THESE BACKUPS" Style="{StaticResource LabelText}" />
                     <TextBlock Style="{StaticResource SecondaryText}"
                                TextWrapping="Wrap"
