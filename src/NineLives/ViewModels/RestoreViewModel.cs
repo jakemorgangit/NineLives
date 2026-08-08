@@ -310,8 +310,96 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _restoreSummaryText = string.Empty;
 
+    /// <summary>
+    /// Other containers to read as well as the selected one (#32).
+    ///
+    /// The layout this exists for is asymmetric, and the model follows it: full backups archived to
+    /// cool storage while the logs that carry them forward stay hot. There is a container somebody
+    /// is working in - the credential panel points at it, the script header names it, a copied path
+    /// is relative to it - and others that happen to hold parts of the chain.
+    ///
+    /// Peers would have been the tidier model and the wrong one: it would have made every one of
+    /// those anchored things ask "which container?" and have no answer.
+    /// </summary>
+    public ObservableCollection<ContainerChoice> AdditionalContainers { get; } = [];
+
+    /// <summary>Every container a load will read, primary first.</summary>
+    public IReadOnlyList<BlobContainerConfig> ContainersToRead
+    {
+        get
+        {
+            if (SelectedContainer == null) return [];
+
+            return
+            [
+                SelectedContainer,
+                .. AdditionalContainers
+                    .Where(c => c.IsSelected && c.Container.Id != SelectedContainer.Id)
+                    .Select(c => c.Container)
+            ];
+        }
+    }
+
+    /// <summary>Whether more than one container is being read, for the screen to say so.</summary>
+    public bool ReadsSeveralContainers => ContainersToRead.Count > 1;
+
+    public string ContainersToReadSummary => ContainersToRead.Count switch
+    {
+        0 or 1 => string.Empty,
+        var n => $"Reading {n} containers. A chain may span them."
+    };
+
+    /// <summary>
+    /// Called by each tick. The list rebuilds rather than the choice being observable itself,
+    /// because what changed is what a LOAD would read - and that is a property of the whole set.
+    /// </summary>
+    private void OnAdditionalContainerToggled()
+    {
+        // What is on screen came from the previous set of containers.
+        ClearLoadedBackups();
+
+        OnPropertyChanged(nameof(ContainersToRead));
+        OnPropertyChanged(nameof(ReadsSeveralContainers));
+        OnPropertyChanged(nameof(ContainersToReadSummary));
+        OnPropertyChanged(nameof(CurrentLocation));
+        RefreshSteps();
+    }
+
+    /// <summary>
+    /// Rebuilds the additional list to be everything EXCEPT the primary.
+    ///
+    /// Offering the primary again would be a tick that either does nothing or, read literally, asks
+    /// to list the same container twice.
+    /// </summary>
+    private void RefreshAdditionalContainers()
+    {
+        var ticked = AdditionalContainers
+            .Where(c => c.IsSelected)
+            .Select(c => c.Container.Id)
+            .ToHashSet();
+
+        AdditionalContainers.Clear();
+
+        foreach (var container in Containers)
+        {
+            if (SelectedContainer != null && container.Id == SelectedContainer.Id) continue;
+
+            AdditionalContainers.Add(new ContainerChoice(container, OnAdditionalContainerToggled)
+            {
+                IsSelected = ticked.Contains(container.Id)
+            });
+        }
+
+        OnPropertyChanged(nameof(ContainersToRead));
+        OnPropertyChanged(nameof(ReadsSeveralContainers));
+        OnPropertyChanged(nameof(ContainersToReadSummary));
+        OnPropertyChanged(nameof(ShowMultipleContainers));
+    }
+
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
     {
+        RefreshAdditionalContainers();
+
         // Everything on screen below this point came from the PREVIOUS container. Leaving it there
         // meant the credential panel and Create credential targeted the new container while the
         // script still restored from the old one's URLs - so Execute stayed armed and enabled, and
@@ -357,6 +445,16 @@ public partial class RestoreViewModel : ViewModelBase
     public bool ShowAgentJob => AppModeCapabilities.CanScriptAsAgentJob(Mode);
     public bool ShowAdvancedOptions => AppModeCapabilities.CanUseAdvancedRestoreOptions(Mode);
 
+    /// <summary>
+    /// Whether to offer reading more than one container (#32).
+    ///
+    /// Pro, and only when there is more than one container to offer. It answers a question somebody
+    /// has to know to ask - that a chain CAN be split across containers - and a tick list with
+    /// nothing in it is worse than no tick list.
+    /// </summary>
+    public bool ShowMultipleContainers =>
+        AppModeCapabilities.CanUseAdvancedRestoreOptions(Mode) && AdditionalContainers.Count > 0;
+
     partial void OnModeChanged(AppMode value)
     {
         OnPropertyChanged(nameof(ShowMediumChoice));
@@ -366,7 +464,8 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowAuditPanel));
         OnPropertyChanged(nameof(ShowCredentialPanel));
         OnPropertyChanged(nameof(ShowAgentJob));
-        OnPropertyChanged(nameof(ShowAdvancedOptions));
+        OnPropertyChanged(nameof(ShowAdvancedOptions));
+        OnPropertyChanged(nameof(ShowMultipleContainers));
 
         // A medium that is no longer offered must not stay selected underneath a hidden control -
         // the screen would be restoring FROM DISK with nothing on screen saying so.
@@ -434,7 +533,7 @@ public partial class RestoreViewModel : ViewModelBase
     public BackupLocation? CurrentLocation => SelectedMedium switch
     {
         BackupMedium.AzureBlob =>
-            SelectedContainer == null ? null : BackupLocation.Blob(SelectedContainer),
+            SelectedContainer == null ? null : BackupLocation.Blob(ContainersToRead),
 
         BackupMedium.SharedPath =>
             SourceServer == null
@@ -734,6 +833,9 @@ public partial class RestoreViewModel : ViewModelBase
             SelectedContainer = Containers.FirstOrDefault(c => c.Name == previous);
         if (SelectedContainer == null && Containers.Count > 0)
             SelectedContainer = Containers[0];
+
+        // After the primary is settled, so the list it excludes is the right one.
+        RefreshAdditionalContainers();
     }
 
 
@@ -1946,7 +2048,75 @@ public partial class RestoreViewModel : ViewModelBase
         if (MediumIsSharedPath)
             return await CheckTargetCanReadFilesAsync(server, appendLog);
 
-        return await Credential.PrepareForRestoreAsync(server, appendLog);
+        var primary = await Credential.PrepareForRestoreAsync(server, appendLog);
+        if (!primary.CanProceed) return primary;
+
+        return await CheckOtherContainersHaveCredentialsAsync(server, appendLog);
+    }
+
+    /// <summary>
+    /// The containers this chain's files actually came from (#32).
+    ///
+    /// From the FILES rather than from what is ticked on screen: a container that was read but
+    /// contributed nothing to this chain needs no credential for this restore, and saying it does
+    /// would be a refusal nobody can act on sensibly.
+    /// </summary>
+    private IReadOnlyList<BlobContainerConfig> ChainContainers()
+    {
+        var ids = RestoreChain?.AllFiles
+            .Select(f => f.ContainerId)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Distinct()
+            .ToHashSet() ?? [];
+
+        return [.. ContainersToRead.Where(c => ids.Contains(c.Id))];
+    }
+
+    /// <summary>
+    /// Every container beyond the primary needs its own credential on the target (#32).
+    ///
+    /// <c>RESTORE ... FROM URL</c> matches a credential by URL prefix, so a chain whose full is in
+    /// one container and whose logs are in another needs a credential for BOTH - and the panel only
+    /// ever points at the primary. Without this the restore starts, reads the full, and fails on
+    /// the first log with "Cannot open backup device" - after WITH REPLACE has already dropped the
+    /// database being restored over.
+    ///
+    /// Checked, not created. Creating one needs a stored SAS this app may not have, and writing
+    /// server-side credentials nobody asked for is what #145 and #10 are both about. Refusing
+    /// before anything is touched leaves nothing to unwind.
+    /// </summary>
+    private async Task<CredentialPreflight> CheckOtherContainersHaveCredentialsAsync(
+        ServerConnection server, Action<string> appendLog)
+    {
+        var others = ChainContainers()
+            .Where(c => c.Id != SelectedContainer?.Id)
+            .ToList();
+
+        if (others.Count == 0) return CredentialPreflight.Proceed;
+
+        appendLog($"This chain spans {others.Count + 1} containers. "
+                  + $"Checking the others have credentials on {server.ServerName}...");
+
+        var missing = new List<string>();
+
+        foreach (var container in others)
+        {
+            var status = await _sqlService.CredentialExistsAsync(server, container.ContainerUrl);
+
+            if (status.CanRestoreFromUrl)
+                appendLog($"  {container.Name}: credential present.");
+            else
+                missing.Add(container.Name);
+        }
+
+        if (missing.Count == 0) return CredentialPreflight.Proceed;
+
+        return CredentialPreflight.Stop(
+            $"This restore also reads from {string.Join(" and ", missing)}, and {server.ServerName} "
+            + $"has no credential for {(missing.Count == 1 ? "it" : "them")}. RESTORE FROM URL "
+            + "matches a credential by container URL, so every container in the chain needs one. "
+            + "Select each as the container above and use Create credential, then come back - "
+            + "nothing has been changed on the server or the database.");
     }
 
     /// <summary>

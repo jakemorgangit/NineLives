@@ -40,8 +40,22 @@ public sealed record BackupLocation
 
     // ── blob ────────────────────────────────────────────────────────────────────
 
-    /// <summary>The container to list. Set when <see cref="Medium"/> is AzureBlob.</summary>
-    public BlobContainerConfig? Container { get; init; }
+    /// <summary>
+    /// The containers to list, in order. Set when <see cref="Medium"/> is AzureBlob.
+    ///
+    /// Plural because a chain can span containers (#32) - the layout this exists for is full
+    /// backups archived to cool storage while the logs stay hot, so the full and the logs that
+    /// carry it forward are in different places.
+    ///
+    /// A LIST rather than a set, because the first is the primary: it is what the credential panel
+    /// points at, what the script header names, and what a copied path is relative to. The rest are
+    /// also read. That asymmetry is real rather than an implementation detail - there is a
+    /// container somebody is working in, and others that happen to hold parts of the chain.
+    /// </summary>
+    public IReadOnlyList<BlobContainerConfig> Containers { get; init; } = [];
+
+    /// <summary>The primary container - the one everything anchored to a single container uses.</summary>
+    public BlobContainerConfig? Container => Containers.Count > 0 ? Containers[0] : null;
 
     // ── shared path ─────────────────────────────────────────────────────────────
 
@@ -62,7 +76,11 @@ public sealed record BackupLocation
     public BackupPathMapping Mapping { get; init; } = BackupPathMapping.None;
 
     public static BackupLocation Blob(BlobContainerConfig container) =>
-        new() { Medium = BackupMedium.AzureBlob, Container = container };
+        new() { Medium = BackupMedium.AzureBlob, Containers = [container] };
+
+    /// <summary>Several containers, the first of which is the primary.</summary>
+    public static BackupLocation Blob(IReadOnlyList<BlobContainerConfig> containers) =>
+        new() { Medium = BackupMedium.AzureBlob, Containers = containers };
 
     public static BackupLocation Shared(ServerConnection sourceServer, BackupPathMapping? mapping = null) =>
         new()
@@ -78,7 +96,12 @@ public sealed record BackupLocation
     /// <summary>What this location is, for a status line or a history entry.</summary>
     public string Describe() => Medium switch
     {
-        BackupMedium.AzureBlob => Container?.Name ?? "a container",
+        BackupMedium.AzureBlob => Containers.Count switch
+        {
+            0 => "a container",
+            1 => Containers[0].Name,
+            _ => $"{Containers[0].Name} and {Containers.Count - 1} other container(s)"
+        },
         BackupMedium.SharedPath => SourceServer == null
             ? "a shared path"
             : $"{SourceServer.ServerName}'s backup history",
@@ -95,7 +118,11 @@ public sealed record BackupLocation
 
         return Medium switch
         {
-            BackupMedium.AzureBlob => Container?.Id == other.Container?.Id,
+            // Every container, in order. A chain built while a second container was also being read
+            // is not a chain from the primary alone, and treating them as the same place is exactly
+            // the assumption #112 was.
+            BackupMedium.AzureBlob =>
+                Containers.Select(c => c.Id).SequenceEqual(other.Containers.Select(c => c.Id)),
 
             // The mapping is part of the identity, not decoration: the same instance's history read
             // with a different substitution names different files, and a chain from one is not a

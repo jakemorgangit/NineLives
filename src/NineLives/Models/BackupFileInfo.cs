@@ -171,6 +171,19 @@ public class BackupFileInfo
 
     /// <summary>True when this is a file on a path rather than a blob.</summary>
     public bool IsOnDisk => !string.IsNullOrWhiteSpace(LocalPath);
+
+    /// <summary>
+    /// Which container this was listed from (#32).
+    ///
+    /// Carried on the FILE rather than on the working set as a whole, because a chain can span
+    /// containers - and each container means a separate credential on the instance and a separate
+    /// URL prefix. Without it, a restore reaching across two containers has no way to say which
+    /// container a missing credential is about.
+    ///
+    /// Null for anything read from an instance's msdb, which has no container.
+    /// </summary>
+    public string? ContainerId { get; set; }
+
     public BackupType Type { get; set; } = BackupType.Unknown;
     public long SizeBytes { get; set; }
     public DateTimeOffset LastModified { get; set; }

@@ -355,8 +355,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
 
             // Regroup: what the headers said changes which set a file belongs to, and a set is
             // keyed on the database and type that have just been corrected.
-            _allSets = _blob.GroupIntoBackupSets(
-                _allBackups, LoadedFrom?.Container?.BackupServerTimeZoneId);
+            _allSets = RegroupPerContainer(_allBackups);
 
             ApplyCachedAudit();
 
@@ -488,7 +487,6 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 return;
             }
 
-            var container = location.Container!;
             // If a database is already chosen - a reload after taking a fresh backup, say - push
             // that down to Azure as a prefix instead of walking the whole container and discarding
             // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
@@ -497,13 +495,28 @@ public partial class BackupInventoryViewModel : ViewModelBase
             // The FIRST load has no selection yet and stays a full scan, which it has to be: the
             // server and database lists are built from what it finds.
             var scope = BuildListingScope();
-            var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
 
-            var files = await _blob.ListBackupFilesAsync(container, scope, progress, ct);
-            var sets = _blob.GroupIntoBackupSets(files, container.BackupServerTimeZoneId);
+            var files = new List<BackupFileInfo>();
+
+            // One container at a time (#32).
+            foreach (var container in location.Containers)
+            {
+                var scanning = container;
+                var progress = new Progress<int>(n => LoadProgressText = location.Containers.Count > 1
+                    ? $"Scanned {n:N0} blobs in {scanning.Name}..."
+                    : $"Scanned {n:N0} blobs...");
+
+                var found = await _blob.ListBackupFilesAsync(container, scope, progress, ct);
+
+                // Stamped here, the only point that knows. Everything downstream that has to tell
+                // one container from another - the credential check above all - reads this.
+                foreach (var file in found) file.ContainerId = container.Id;
+
+                files.AddRange(found);
+            }
 
             _allBackups = files;
-            _allSets = sets;
+            _allSets = RegroupPerContainer(files, location);
 
             // Stated, not assumed: everything derived from here belongs to THIS location.
             LoadedFrom = location;
@@ -524,8 +537,16 @@ public partial class BackupInventoryViewModel : ViewModelBase
             // valid restore points found", and painting a success line over that left an empty
             // timeline with the status bar cheerfully reporting how many files had loaded.
             if (!HasError)
-                SetStatus($"Loaded {files.Count} files in {sets.Count} backup set(s) across " +
+            {
+                // Names the containers when there is more than one, because "loaded 900 files" from
+                // an unstated number of places is not something anybody can check.
+                var across = location.Containers.Count > 1
+                    ? $" from {location.Containers.Count} containers"
+                    : string.Empty;
+
+                SetStatus($"Loaded {files.Count} files in {_allSets.Count} backup set(s){across} across " +
                           $"{DiscoveredDatabases.Count} database(s).");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -555,6 +576,38 @@ public partial class BackupInventoryViewModel : ViewModelBase
     /// connections, for the same reason the container path derives them from what it found: what
     /// matters is what can actually be restored, not what somebody once configured.
     /// </summary>
+    /// <summary>
+    /// Groups files into sets, one container at a time (#32).
+    ///
+    /// Per container rather than over everything at once, because the backup-server time zone is a
+    /// property OF a container - it is how a set whose filename carried no timestamp gets a time at
+    /// all - and a single grouping could only ever apply one container's zone to every set.
+    ///
+    /// It also states what is true anyway: a backup SET is one operation and does not span
+    /// containers. A CHAIN does, which is the whole point here - a full archived to cool storage
+    /// with the logs that carry it forward still in the hot one.
+    /// </summary>
+    private List<BackupSet> RegroupPerContainer(List<BackupFileInfo> files, BackupLocation? location = null)
+    {
+        var from = location ?? LoadedFrom;
+        // Keyed on the same "" fallback the grouping below uses, because a container's Id is
+        // nullable and a null key would throw rather than simply not match.
+        var zones = from?.Containers
+                        .ToDictionary(c => c.Id ?? string.Empty, c => c.BackupServerTimeZoneId)
+                    ?? [];
+
+        // One container is the overwhelmingly common case and groups exactly as it always did.
+        if (zones.Count <= 1)
+            return _blob.GroupIntoBackupSets(files, from?.Container?.BackupServerTimeZoneId);
+
+        return files
+            .GroupBy(f => f.ContainerId ?? string.Empty)
+            .SelectMany(g => _blob.GroupIntoBackupSets(
+                [.. g],
+                zones.TryGetValue(g.Key, out var zone) ? zone : null))
+            .ToList();
+    }
+
     private async Task LoadFromHistoryAsync(BackupLocation location, CancellationToken ct)
     {
         var source = location.SourceServer!;

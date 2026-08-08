@@ -71,6 +71,19 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
     public List<BackupFileInfo> Files { get; set; } = [];
 
+    /// <summary>
+    /// What each container holds, keyed by container NAME (#32).
+    ///
+    /// <see cref="Files"/> answers for every container, which is fine when there is one and useless
+    /// for the case multi-container exists for: a full in one container and the logs that carry it
+    /// forward in another. A container with no entry here falls back to Files.
+    /// </summary>
+    public Dictionary<string, List<BackupFileInfo>> FilesByContainer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every container listed, in order, so a test can prove which were read.</summary>
+    public List<string> ListedContainers { get; } = [];
+
     /// <summary>Throw instead of listing, for the failure paths.</summary>
     public Exception? ListThrows { get; set; }
 
@@ -109,12 +122,45 @@ public sealed class FakeBlobStorageService : IBlobStorageService
     {
         ListCalls++;
         LastScope = scope;
+        LastConfig = config;
+        ListedContainers.Add(config.Name);
         ct.ThrowIfCancellationRequested();
         if (ListThrows != null) throw ListThrows;
 
-        progress?.Report(Files.Count);
-        return Task.FromResult(Files.ToList());
+        var files = FilesByContainer.TryGetValue(config.Name, out var forContainer)
+            ? forContainer
+            : Files;
+
+        progress?.Report(files.Count);
+
+        // A copy per call. The real service returns fresh objects each time, and handing the same
+        // instances back twice would let one listing's ContainerId stamp overwrite another's.
+        return Task.FromResult(files.Select(Copy).ToList());
     }
+
+    /// <summary>
+    /// A shallow copy, so one listing cannot mutate another's file objects.
+    ///
+    /// Only the fields the inventory reads. Enough for the tests, and it keeps the fake honest
+    /// about the real service returning fresh objects per call.
+    /// </summary>
+    private static BackupFileInfo Copy(BackupFileInfo f) => new()
+    {
+        BlobName = f.BlobName,
+        BlobUrl = f.BlobUrl,
+        ETag = f.ETag,
+        LocalPath = f.LocalPath,
+        ContainerId = f.ContainerId,
+        Type = f.Type,
+        BackupTypeCode = f.BackupTypeCode,
+        SizeBytes = f.SizeBytes,
+        LastModified = f.LastModified,
+        DatabaseName = f.DatabaseName,
+        InferredDatabaseName = f.InferredDatabaseName,
+        InferredServerName = f.InferredServerName,
+        InferredInstanceName = f.InferredInstanceName,
+        InferredSetId = f.InferredSetId
+    };
 
     public ContainerSummary GetContainerSummary(List<BackupFileInfo> files) => _real.GetContainerSummary(files);
     public ContainerSummary GetSetBasedSummary(List<BackupSet> sets) => _real.GetSetBasedSummary(sets);
