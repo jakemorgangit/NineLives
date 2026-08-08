@@ -57,6 +57,11 @@ built for.
 
 ### Changed
 
+- **A running restore shows its progress as a bar**, built from the server's own STATS lines -
+  per statement across the chain, mirrored to the Windows taskbar so the app conveys progress
+  while minimised. Failure turns the taskbar red and stays red until the next run; finishing
+  behind another window flashes the taskbar button, the polite signal that stops the moment the
+  app is clicked (#204)
 - **A successful restore now ends with the job's remainder on screen**, in the same read-then-run
   shape as the recovery panel: DBCC CHECKDB offered on every success - the restore is the cheapest
   moment to find corruption, and it proves the backup rather than just the copy - plus an automatic

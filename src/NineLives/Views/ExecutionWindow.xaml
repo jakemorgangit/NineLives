@@ -10,6 +10,12 @@
         Background="{DynamicResource WindowBackgroundBrush}"
         Closing="OnClosing">
 
+    <Window.TaskbarItemInfo>
+        <TaskbarItemInfo ProgressState="{Binding Execution.TaskbarState}"
+                         ProgressValue="{Binding Execution.TaskbarValue}" />
+    </Window.TaskbarItemInfo>
+
+
     <Window.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
     </Window.Resources>
@@ -93,6 +99,19 @@
         </Border>
 
         <!-- What a failed or cancelled restore left behind (#14). -->
+        
+        <!-- The chain's own progress, from the server's STATS lines (#204). Indeterminate until
+             the first percent arrives would be a lie in the other direction - the bar simply sits
+             at zero until the server has said something. -->
+        <StackPanel Grid.Row="2" Margin="0,10,0,0"
+                    Visibility="{Binding Execution.IsExecuting, Converter={StaticResource BoolToVis}}">
+            <ProgressBar Value="{Binding Execution.ProgressValue, Mode=OneWay}"
+                         Maximum="100" Height="8"
+                         Style="{StaticResource DarkProgressBar}" />
+            <TextBlock Text="{Binding Execution.ProgressText}"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,4,0,0" />
+        </StackPanel>
         <Border Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,12,0,0"
                 Background="{DynamicResource DangerPanelBackgroundBrush}" BorderBrush="{DynamicResource DangerPanelBorderBrush}" BorderThickness="1"
                 Visibility="{Binding Execution.HasRecoveryActions, Converter={StaticResource BoolToVis}}">

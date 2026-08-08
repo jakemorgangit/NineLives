@@ -201,6 +201,14 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         PostRestoreActions = [];
         HasPostRestoreActions = false;
         PostRestoreMessage = string.Empty;
+
+        // The denominator comes from the script itself, so it can never disagree with what runs.
+        _progress = new RestoreProgress(RestoreProgress.CountStatements(run.Script));
+        ProgressValue = 0;
+        ProgressText = string.Empty;
+        TaskbarValue = 0;
+        TaskbarState = System.Windows.Shell.TaskbarItemProgressState.Normal;
+
         RaiseCancelStateChanged();
 
         try
@@ -227,6 +235,10 @@ public partial class RestoreExecutionViewModel : ViewModelBase
                 // up and then arrived in bursts - which is precisely what "not live" looked like.
                 msg =>
                 {
+                    // The progress model reads every line on this thread - it is cheap and its
+                    // outputs are scalars, which WPF marshals itself (#204).
+                    TrackProgress(msg);
+
                     // InvokeAsync when a dispatcher exists and this is not its thread - see the
                     // note above. Null when there is no Application at all (headless: the tests),
                     // where appending directly is both safe and the only option.
@@ -238,6 +250,15 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             ExecutionSuccess = true;
             outcome = RestoreOutcome.Succeeded;
+
+            // The run IS over, whatever the last STATS line said - a small final statement often
+            // finishes without reporting 100.
+            ProgressValue = 100;
+            ProgressText = _progress is { TotalStatements: > 1 }
+                ? $"All {_progress.TotalStatements} statements complete"
+                : "Complete";
+            TaskbarValue = 1;
+
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
 
@@ -280,6 +301,18 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         }
         finally
         {
+            // Error stays red on the taskbar until the next run - it is the signal somebody who
+            // alt-tabbed away most needs to see. Success clears: a full green bar that never
+            // leaves reads as "still running" from the taskbar alone.
+            TaskbarState = ExecutionSuccess
+                ? System.Windows.Shell.TaskbarItemProgressState.None
+                : System.Windows.Shell.TaskbarItemProgressState.Error;
+            if (!ExecutionSuccess) TaskbarValue = 1;
+
+            // Told, not interrupted: the amber taskbar flash, only when none of our windows is
+            // foreground, and stops the moment the app is clicked.
+            WindowAttention.FlashIfInBackground();
+
             _executeCancellation.End();
             IsExecuting = false;
             Console.IsRunning = false;
@@ -352,6 +385,43 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// SQL error, when the app is still holding the connection that could tell them, is the wrong
     /// place to stop.
     /// </summary>
+    // ── progress, as a number again (#204) ──────────────────────────────────────
+
+    /// <summary>Overall progress across the chain, 0-100, from the server's own STATS lines.</summary>
+    [ObservableProperty]
+    private double _progressValue;
+
+    /// <summary>"Statement 2 of 5 - 60%", or just the percent for a one-statement run.</summary>
+    [ObservableProperty]
+    private string _progressText = string.Empty;
+
+    /// <summary>
+    /// The taskbar mirror, so the app conveys progress while minimised. 0-1 because that is the
+    /// scale TaskbarItemInfo speaks.
+    /// </summary>
+    [ObservableProperty]
+    private double _taskbarValue;
+
+    [ObservableProperty]
+    private System.Windows.Shell.TaskbarItemProgressState _taskbarState =
+        System.Windows.Shell.TaskbarItemProgressState.None;
+
+    private RestoreProgress? _progress;
+
+    /// <summary>
+    /// Feeds one console line into the progress model and mirrors the result. Runs on the
+    /// connection's message thread; the scalar properties are safe to set there - WPF marshals
+    /// scalar INPC to the UI thread itself.
+    /// </summary>
+    private void TrackProgress(string message)
+    {
+        if (_progress == null || !_progress.Feed(message)) return;
+
+        ProgressValue = _progress.OverallPercent;
+        ProgressText = _progress.Describe();
+        TaskbarValue = _progress.OverallPercent / 100.0;
+    }
+
     // ── after a SUCCESSFUL restore (#205) ───────────────────────────────────────
 
     /// <summary>What finishing the job involves, shown under the success banner.</summary>

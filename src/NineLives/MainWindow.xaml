@@ -10,6 +10,15 @@
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}">
 
+    <!-- The taskbar carries the restore's progress, so the app conveys it while minimised (#204).
+         Red on failure and it stays red until the next run - the signal somebody who alt-tabbed
+         away most needs. -->
+    <Window.TaskbarItemInfo>
+        <TaskbarItemInfo ProgressState="{Binding Restore.Execution.TaskbarState}"
+                         ProgressValue="{Binding Restore.Execution.TaskbarValue}" />
+    </Window.TaskbarItemInfo>
+
+
     <!-- DataContext is set in the constructor, not here. Declaring it in XAML meant every
          construction of this window - including a test that only wanted to check the markup -
          built a MainViewModel against the real %LOCALAPPDATA% config and ran the secret-key
