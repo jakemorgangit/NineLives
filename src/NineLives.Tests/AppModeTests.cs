@@ -242,6 +242,99 @@ public class AppModeTests
         Assert.False(vm.ShowMediumChoice);
     }
 
+    // ── getting back to the cards (#191) ────────────────────────────────────────
+
+    /// <summary>
+    /// The cards say what each mode turns ON. Showing them once and then replacing them with a list
+    /// of three names kept the part worth the least.
+    /// </summary>
+    [Fact]
+    public void SettingsCanPutTheCardsBackUp()
+    {
+        var main = Chosen(AppMode.Standard);
+
+        main.Settings.ShowModeCardsCommand.Execute(null);
+
+        Assert.True(main.IsChoosingMode);
+        Assert.Same(main.ModeSelection, main.CurrentView);
+    }
+
+    /// <summary>Which one you are on, or the screen starts by making you work that out.</summary>
+    [Fact]
+    public void TheCardForTheModeInForceSaysSo()
+    {
+        var main = Chosen(AppMode.Standard);
+
+        main.Settings.ShowModeCardsCommand.Execute(null);
+
+        Assert.Equal(
+            AppMode.Standard,
+            main.ModeSelection.Cards.Single(c => c.IsCurrent).Mode);
+    }
+
+    /// <summary>
+    /// A way out, because the cards are now opened to READ as often as to choose - and a screen you
+    /// cannot leave without changing something is one people learn not to open.
+    /// </summary>
+    [Fact]
+    public void ReopenedCardsCanBeLeftWithoutChangingAnything()
+    {
+        var main = Chosen(AppMode.Standard);
+        main.Settings.ShowModeCardsCommand.Execute(null);
+
+        Assert.True(main.ModeSelection.CanCancel);
+
+        main.ModeSelection.CancelCommand.Execute(null);
+
+        Assert.False(main.IsChoosingMode);
+        Assert.Equal(AppMode.Standard, main.Mode);
+        Assert.Same(main.Settings, main.CurrentView);
+    }
+
+    /// <summary>
+    /// On first run there is nothing to go back TO. A way out here would be a way to reach an app
+    /// that has not been told how much of itself to show.
+    /// </summary>
+    [Fact]
+    public void FirstRunOffersNoWayOut()
+    {
+        var main = new MainViewModel(new FakeCredentialStore());
+
+        Assert.True(main.IsChoosingMode);
+        Assert.False(main.ModeSelection.CanCancel);
+        Assert.DoesNotContain(main.ModeSelection.Cards, c => c.IsCurrent);
+    }
+
+    [Fact]
+    public void ChoosingFromTheReopenedCardsChangesTheMode()
+    {
+        var main = Chosen(AppMode.Standard);
+        main.Settings.ShowModeCardsCommand.Execute(null);
+
+        var basic = main.ModeSelection.Cards.Single(c => c.Mode == AppMode.Basic);
+        main.ModeSelection.ChooseCommand.Execute(basic);
+
+        Assert.Equal(AppMode.Basic, main.Mode);
+        Assert.False(main.IsChoosingMode);
+    }
+
+    /// <summary>
+    /// Settings reads the mode from the shell. It used to own a copy, which is how it came to show
+    /// one thing while the app did another.
+    /// </summary>
+    [Fact]
+    public void SettingsNamesTheModeInForceAndFollowsIt()
+    {
+        var main = Chosen(AppMode.Standard);
+
+        Assert.Equal("Standard", main.Settings.CurrentModeTitle);
+        Assert.NotEmpty(main.Settings.CurrentModeTagline);
+
+        main.Mode = AppMode.Basic;
+
+        Assert.Equal("Basic", main.Settings.CurrentModeTitle);
+    }
+
     // ── what the cards say ──────────────────────────────────────────────────────
 
     [Fact]
@@ -270,6 +363,14 @@ public class AppModeTests
         var vm = new ModeSelectionViewModel(new FakeCredentialStore());
 
         Assert.Equal(3, vm.Cards.Select(c => c.AccentBrushKey).Distinct().Count());
+    }
+
+    /// <summary>A shell that is past the first-run question, with a mode already in force.</summary>
+    private static MainViewModel Chosen(AppMode mode)
+    {
+        var store = new FakeCredentialStore();
+        store.Config.Mode = mode;
+        return new MainViewModel(store);
     }
 
     private static RestoreViewModel Restore(AppMode mode)

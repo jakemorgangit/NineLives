@@ -31,14 +31,20 @@
                                 Background="{DynamicResource CardBackgroundBrush}"
                                 BorderBrush="{DynamicResource CardBorderBrush}"
                                 BorderThickness="1">
-                            <StackPanel>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
                                 <!-- The shade. One accent getting stronger rather than a traffic
                                      light: these are more and less, not better and worse. -->
                                 <!-- The default lives in the Style, NOT as a local Background. A
                                      style setter cannot override a locally set value, so a local
                                      one here made every card the same colour and the triggers below
                                      silently did nothing - the same trap as the audit tick (#130). -->
-                                <Border Height="6" CornerRadius="8,8,0,0">
+                                <Border Grid.Row="0" Height="6" CornerRadius="8,8,0,0"
+                                        VerticalAlignment="Top">
                                     <Border.Style>
                                         <Style TargetType="Border">
                                             <Setter Property="Background" Value="{DynamicResource ModeBasicBrush}" />
@@ -54,10 +60,38 @@
                                     </Border.Style>
                                 </Border>
 
-                                <StackPanel Margin="20,18,20,20">
-                                    <TextBlock Text="{Binding Title}"
-                                               Style="{StaticResource SubHeaderText}"
-                                               FontSize="20" />
+                                <!-- Grid, not a StackPanel: the button lives in its own bottom row
+                                     so it sits on the card's edge rather than wherever the text
+                                     above it happened to end. The cards carry different numbers of
+                                     highlights and wrap to different depths, so stacked buttons
+                                     landed at three different heights (#191). -->
+                                <Grid Grid.Row="1" Margin="20,18,20,20">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <StackPanel Grid.Row="0">
+                                    <Grid>
+                                        <TextBlock Text="{Binding Title}"
+                                                   Style="{StaticResource SubHeaderText}"
+                                                   FontSize="20" />
+
+                                        <!-- Which one you are on. Only ever set when the cards are
+                                             reopened from Settings to read what the others do. -->
+                                        <Border Background="{DynamicResource AccentBrush}"
+                                                CornerRadius="3"
+                                                Padding="7,2"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="CURRENT"
+                                                       FontSize="9.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="White" />
+                                        </Border>
+                                    </Grid>
 
                                     <TextBlock Text="{Binding Tagline}"
                                                Style="{StaticResource SecondaryText}"
@@ -92,16 +126,18 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
+                                    </StackPanel>
 
-                                    <Button Content="{Binding ChooseLabel}"
+                                    <Button Grid.Row="2"
+                                            Content="{Binding ChooseLabel}"
                                             Command="{Binding DataContext.ChooseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                             CommandParameter="{Binding}"
                                             Style="{StaticResource PrimaryButton}"
                                             Padding="16,9"
                                             Margin="0,18,0,0"
                                             HorizontalAlignment="Stretch" />
-                                </StackPanel>
-                            </StackPanel>
+                                </Grid>
+                            </Grid>
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -112,6 +148,17 @@
                        TextAlignment="Center"
                        Margin="0,20,0,0"
                        Text="Whatever you choose, none of your containers, servers or saved credentials are affected. A mode only decides what is shown." />
+
+            <!-- A way out, but only once there is something to go back to (#191). Absent on first
+                 run, where leaving would mean an app that has not been told how much to show; there
+                 whenever the cards are reopened from Settings, because refusing to let somebody
+                 leave a screen they opened to READ is how you stop them opening it. -->
+            <Button Content="Keep what I have"
+                    Command="{Binding CancelCommand}"
+                    Style="{StaticResource SecondaryButton}"
+                    HorizontalAlignment="Center"
+                    Margin="0,20,0,0"
+                    Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}" />
 
             <ContentControl Style="{StaticResource ErrorBanner}" Margin="0,16,0,0" />
         </StackPanel>

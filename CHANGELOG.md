@@ -57,6 +57,12 @@ built for.
 
 ### Changed
 
+- **The mode cards can be reopened** from Settings, with the mode in force marked and a way to leave
+  without changing anything. They said what each mode turns on and were then shown once, replaced by
+  a drop-down of three names - which is the part of them worth the least (#191)
+- **The sidebar carries the logo** rather than the name typed out in bold, so the mark appears on the
+  screen people look at all day and not only on the splash. The strapline is now
+  RESTORE | RECOVER | RESUME: the old one named one medium and one direction (#191)
 - Chains are built from **LSNs** wherever the source knows them - which means anything read from an
   instance's `msdb`. A differential is paired with the full it was genuinely taken against rather
   than the nearest one by time, and a log joins a chain when it carries it forward rather than when
@@ -67,6 +73,9 @@ built for.
 
 ### Fixed
 
+- The mode picker in Settings showed a raw object - `ModeOption { Mode = Pro, Name` - instead of the
+  mode's name. The picker is gone in favour of the cards, and the buttons on those cards now line up
+  with each other rather than landing wherever the text above them ended (#191)
 - A differential whose base full is missing is no longer offered at all. It used to be paired with
   the nearest full by time, which SQL Server rejects - after `WITH REPLACE` has already dropped the
   target (#130)

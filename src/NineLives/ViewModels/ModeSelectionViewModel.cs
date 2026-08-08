@@ -7,9 +7,19 @@ using CommunityToolkit.Mvvm.Input;
 namespace Blackcat.NineLives.ViewModels;
 
 /// <summary>One card. What the mode is, who it is for, and what it turns on.</summary>
-public sealed class ModeCard(AppMode mode)
+public sealed partial class ModeCard(AppMode mode) : ObservableObject
 {
     public AppMode Mode { get; } = mode;
+
+    /// <summary>
+    /// Whether this is the mode currently in force.
+    ///
+    /// Only ever true when the cards are reopened from Settings, which is the case where it
+    /// matters: the screen is being read to find out what the OTHER two contain, so the one you
+    /// are already on has to be obvious or every reading of it starts by working that out.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isCurrent;
 
     public string Title { get; } = AppModeCapabilities.Title(mode);
 
@@ -69,6 +79,36 @@ public partial class ModeSelectionViewModel : ViewModelBase
 
     /// <summary>Raised once a mode has been chosen and saved, so the shell can move on.</summary>
     public event Action<AppMode>? Chosen;
+
+    /// <summary>Raised when the cards are closed without changing anything.</summary>
+    public event Action? Cancelled;
+
+    /// <summary>
+    /// Whether there is anything to go back to.
+    ///
+    /// False on first run, because there is no mode yet and a way out would be a way to reach an
+    /// app that has not been told how much of itself to show. True whenever the cards are reopened
+    /// from Settings, where refusing to let somebody leave a screen they opened to READ would be
+    /// the surest way to stop them opening it.
+    /// </summary>
+    [ObservableProperty]
+    private bool _canCancel;
+
+    /// <summary>
+    /// Reopens the cards as a reference rather than as a first-run question (#191).
+    ///
+    /// A drop-down list of three names told you what the modes were CALLED. What is actually worth
+    /// knowing - what each one turns on, and who it is for - was written on the cards and then
+    /// shown once. This is the same screen, reachable.
+    /// </summary>
+    public void ShowCurrent(AppMode mode)
+    {
+        foreach (var card in Cards) card.IsCurrent = card.Mode == mode;
+        CanCancel = true;
+    }
+
+    [RelayCommand]
+    private void Cancel() => Cancelled?.Invoke();
 
     [RelayCommand]
     private void Choose(ModeCard? card)
