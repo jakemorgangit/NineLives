@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **The app opens on the mode cards** rather than the container list. The first thing on screen
+  says what shape the app is in and offers to change it, instead of the app simply being that shape
+  with nothing saying why. Only a question the first time - after that the current mode is marked
+  and "Keep what I have" carries straight on (#200)
 - **A restore chain can span containers** - a full archived to cool storage with the logs that
   carry it forward still in the hot one. Additional containers are ticked alongside the selected
   one, which stays the primary: it is what the credential panel points at and the script header

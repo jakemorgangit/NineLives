@@ -80,17 +80,29 @@ public partial class MainViewModel : ViewModelBase
     /// They used to be shown once and then reduced to a drop-down of three names, which is the part
     /// of them worth the least - what each mode turns ON is written on the cards.
     /// </summary>
-    private void ShowModeCards()
+    private void ShowModeCards() => ShowModeCards(Nav.Settings);
+
+    private void ShowModeCards(string returnTo)
     {
+        _modeCardsReturnTo = returnTo;
         ModeSelection.ShowCurrent(Mode);
         IsChoosingMode = true;
         CurrentView = ModeSelection;
     }
 
+    /// <summary>
+    /// Where "Keep what I have" goes back to.
+    ///
+    /// Depends on why the cards are up: from Settings, back to Settings; from a launch, on into the
+    /// app. Sending somebody who has just started the app to the settings page would be a stranger
+    /// place to land than the one they were heading for.
+    /// </summary>
+    private string _modeCardsReturnTo = Nav.BlobStorage;
+
     private void OnModeCardsCancelled()
     {
         IsChoosingMode = false;
-        NavigateTo(Nav.Settings);
+        NavigateTo(_modeCardsReturnTo);
     }
 
     /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
@@ -206,8 +218,7 @@ public partial class MainViewModel : ViewModelBase
         // view, and the Restore screen's own status line is below the fold most of the time (#128).
         WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Backup, Restore, CopyDatabase);
 
-        // How much of the app to show (#176). Unknown means nobody has chosen yet, which is what
-        // makes the cards a first-run screen rather than a gate on every launch.
+        // How much of the app to show (#176).
         //
         // An unreadable or unrecognised value lands on Pro rather than Basic: hiding features from
         // somebody whose config got mangled is a worse failure than showing too many, because the
@@ -218,13 +229,21 @@ public partial class MainViewModel : ViewModelBase
         if (savedMode == null)
         {
             // First run. Nothing else is shown until the question is answered - a sidebar behind a
-            // choice about what the sidebar contains would be answering it twice.
+            // choice about what the sidebar contains would be answering it twice - and there is no
+            // way past it, because leaving would mean an app that has not been told how much of
+            // itself to show.
             IsChoosingMode = true;
             CurrentView = ModeSelection;
         }
         else
         {
-            CurrentView = BlobConfig;
+            // The cards are the landing screen, not a first-run gate (#200).
+            //
+            // It reads better than opening on the container list: the first thing on screen says
+            // what shape the app is in and offers to change it, rather than the app simply being
+            // that shape with no indication why. It is only a question the first time - after that
+            // the current mode is marked and "Keep what I have" carries straight on.
+            ShowModeCards(Nav.BlobStorage);
         }
 
         // Fire and forget - startup must not wait on the network.
