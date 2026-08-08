@@ -689,7 +689,8 @@ public class SqlServerService : ISqlServerService
             FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
             LastLsn = GetDecimalFromReader(reader, "LastLSN"),
             DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
-            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
+            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN"),
+            SoftwareVersionMajor = GetIntFromReader(reader, "SoftwareVersionMajor")
         };
         }, ct, "Reading the backup header");
     }
@@ -1191,6 +1192,18 @@ public class SqlServerService : ISqlServerService
         }
 
         return files;
+    }
+
+    public async Task<int?> GetProductMajorVersionAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT CONVERT(int, SERVERPROPERTY('ProductMajorVersion'))";
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is int major ? major : null;
     }
 
     public async Task<DatabaseOverview?> GetDatabaseOverviewAsync(

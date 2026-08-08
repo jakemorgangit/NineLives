@@ -214,6 +214,15 @@ public class BackupFileInfo
     public DateTime? BackupStartDate { get; set; }
     public DateTime? BackupFinishDate { get; set; }
     public int? BackupTypeCode { get; set; }
+
+    /// <summary>
+    /// The major version of the SQL Server that TOOK this backup, from HEADERONLY (#210).
+    ///
+    /// The one-directional law of RESTORE hangs on it: a backup from a newer major can never be
+    /// restored onto an older one, and without reading this the refusal arrives from the server
+    /// mid-restore - after WITH REPLACE has dropped the target.
+    /// </summary>
+    public int? SoftwareVersionMajor { get; set; }
     public decimal? FirstLsn { get; set; }
     public decimal? LastLsn { get; set; }
 
