@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **Browse Backups hands over to Restore in one move** - a button once a database is chosen, and
+  "Restore this database" on every row. The restore screen arrives with the same source selected,
+  the backups loaded and the database landed, so the only thing left is choosing the restore
+  point. Works from either browsing source, container or server history (#202)
 - **A newer version's backup aimed at an older server refuses before anything runs**, naming both
   versions and the way out - SQL Server can never restore in that direction (error 3169), and
   without the check it failed mid-restore, after WITH REPLACE had dropped the target. The legal

@@ -129,6 +129,17 @@
                         <TextBlock Text="{Binding DbSummaryText}"
                                    Style="{StaticResource SecondaryText}"
                                    Margin="0,0,0,8" />
+
+                        <!-- From looking to restoring in one move (#202). The browser has already
+                             answered which source, server and database - making somebody re-answer
+                             all three on the restore screen was the app repeating itself. -->
+                        <Button Content="Restore this database"
+                                Command="{Binding RestoreFromHereCommand}"
+                                Style="{StaticResource PrimaryButton}"
+                                HorizontalAlignment="Left"
+                                Padding="14,7"
+                                Margin="0,0,0,8"
+                                Visibility="{Binding CanRestoreFromHere, Converter={StaticResource BoolToVis}}" />
                     </StackPanel>
                 </Grid>
             </StackPanel>
@@ -264,6 +275,10 @@
                                       Command="{Binding CopyLocalPathCommand}"
                                       CommandParameter="{Binding SelectedFile}"
                                       Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}" />
+                            <Separator />
+                            <MenuItem Header="Restore this database"
+                                      Command="{Binding RestoreFromHereCommand}"
+                                      CommandParameter="{Binding SelectedFile.InferredDatabaseName}" />
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     <DataGrid.Columns>

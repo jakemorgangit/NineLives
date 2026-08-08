@@ -523,6 +523,43 @@ public partial class RestoreViewModel : ViewModelBase
         ClearLoadedBackups();
     }
 
+    /// <summary>
+    /// Picks up where the browser left off (#202): same source, same server, same database,
+    /// backups loaded - so the only thing left to do here is choose the restore point.
+    /// </summary>
+    public async Task AcceptHandoffAsync(BrowseHandoff handoff)
+    {
+        SelectedMedium = handoff.Medium == BackupMedium.SharedPath
+            ? BackupMedium.SharedPath
+            : BackupMedium.AzureBlob;
+
+        if (handoff.Medium == BackupMedium.SharedPath)
+        {
+            // By id against OUR list, because the browser's instance and this screen's are
+            // separate objects loaded from the same config.
+            SourceServer = SourceServers.FirstOrDefault(s => s.Id == handoff.SourceServer?.Id)
+                           ?? handoff.SourceServer;
+        }
+        else if (handoff.Container != null)
+        {
+            SelectedContainer = Containers.FirstOrDefault(c => c.Id == handoff.Container.Id)
+                                ?? handoff.Container;
+        }
+
+        await LoadBackupsCommand.ExecuteAsync(null);
+
+        // The filters land only when the load found them - a database the load did not see would
+        // put the working set into a state the screen cannot have reached by hand.
+        if (handoff.ServerFilter != null && Inventory.DiscoveredServers.Contains(handoff.ServerFilter))
+            Inventory.SelectedServerName = handoff.ServerFilter;
+
+        if (handoff.Database != null &&
+            Inventory.DiscoveredDatabases.Contains(handoff.Database, StringComparer.OrdinalIgnoreCase))
+            Inventory.SelectedDatabaseName =
+                Inventory.DiscoveredDatabases.First(d =>
+                    string.Equals(d, handoff.Database, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>The saved connections, for choosing whose backup history to read.</summary>
     [ObservableProperty]
     private ObservableCollection<ServerConnection> _sourceServers = [];
