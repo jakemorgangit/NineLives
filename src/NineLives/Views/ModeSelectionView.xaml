@@ -17,16 +17,18 @@
                     VerticalAlignment="Center"
                     Margin="0,24,0,24">
 
-            <TextBlock Text="How much of Nine Lives do you need?"
+            <!-- "How much do you NEED" asks people to rank themselves, which is half of why this
+                 screen read like a price list. It is a view setting (#191). -->
+            <TextBlock Text="How much do you want on screen?"
                        Style="{StaticResource HeaderText}"
                        HorizontalAlignment="Center" />
 
             <TextBlock Style="{StaticResource SecondaryText}"
                        TextWrapping="Wrap"
                        TextAlignment="Center"
-                       MaxWidth="760"
+                       MaxWidth="780"
                        Margin="0,8,0,0"
-                       Text="Pick the one that sounds like you. Nothing is locked away - this is only about what is on screen, and you can change it at any time in Settings." />
+                       Text="All three are the same application - this only sets how many options it puts in front of you. Nothing is locked, nothing is bought, and you can change it whenever you like in Settings." />
 
             <!-- Three cards, one row. Deliberately not a wizard: this is one choice, and putting it
                  behind a Next button would make it feel like setup rather than a preference. -->
@@ -49,8 +51,9 @@
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
 
-                                <!-- The shade. One accent getting stronger rather than a traffic
-                                     light: these are more and less, not better and worse. -->
+                                <!-- The shade. Three unrelated colours rather than a progression -
+                                     the old run went blue to purple to pink, and a gradient reads
+                                     as a ladder however carefully the words are chosen (#191). -->
                                 <!-- The default lives in the Style, NOT as a local Background. A
                                      style setter cannot override a locally set value, so a local
                                      one here made every card the same colour and the triggers below
@@ -119,7 +122,11 @@
                                                FontStyle="Italic"
                                                Margin="0,14,0,0" />
 
-                                    <ItemsControl ItemsSource="{Binding Highlights}" Margin="0,14,0,0">
+                                    <TextBlock Text="{Binding HighlightsLabel}"
+                                               Style="{StaticResource LabelText}"
+                                               Margin="0,16,0,6" />
+
+                                    <ItemsControl ItemsSource="{Binding Highlights}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Grid Margin="0,0,0,6">
@@ -127,8 +134,13 @@
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Grid.Column="0" Text="&#x2713;"
-                                                               Foreground="{DynamicResource SuccessBrush}"
+                                                    <!-- A quiet dot, not a green tick. A column of
+                                                         ticks against a column of features is the
+                                                         shape of a pricing table, and it made three
+                                                         views of one app read as three tiers of a
+                                                         product (#191). -->
+                                                    <TextBlock Grid.Column="0" Text="&#x2022;"
+                                                               Style="{StaticResource SecondaryText}"
                                                                Margin="0,0,8,0"
                                                                VerticalAlignment="Top" />
                                                     <TextBlock Grid.Column="1" Text="{Binding}"

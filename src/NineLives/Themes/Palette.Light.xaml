@@ -85,8 +85,8 @@
          High contrast takes the three pure hues it already uses elsewhere, because a 6px bar
          distinguished only by saturation is exactly what that theme exists to avoid. -->
     <SolidColorBrush x:Key="ModeBasicBrush" Color="#2C6FD1" />
-    <SolidColorBrush x:Key="ModeStandardBrush" Color="#6A46CC" />
-    <SolidColorBrush x:Key="ModeProBrush" Color="#AE4468" />
+    <SolidColorBrush x:Key="ModeStandardBrush" Color="#2F7F74" />
+    <SolidColorBrush x:Key="ModeProBrush" Color="#6A46CC" />
 
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />

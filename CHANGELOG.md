@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **The modes are named for the work, not for a rank.** "Restore only", "Back up and restore" and
+  "Everything", rather than Basic/Standard/Pro with a column of ticks against a column of features,
+  an "everything in Basic" ladder and a "Use Pro" button. They are three views of one application
+  and none of them costs anything; the screen should not suggest otherwise (#191)
 - **The mode cards can be reopened** from Settings, with the mode in force marked and a way to leave
   without changing anything. They said what each mode turns on and were then shown once, replaced by
   a drop-down of three names - which is the part of them worth the least (#191)
@@ -73,6 +77,9 @@ built for.
 
 ### Fixed
 
+- The mode cards sat at the top of the window and off to the right of it. Hiding the sidebar left
+  its 220px column behind, because a ColumnDefinition keeps its width whatever happens to the
+  element inside it (#191)
 - The mode picker in Settings showed a raw object - `ModeOption { Mode = Pro, Name` - instead of the
   mode's name. The picker is gone in favour of the cards, and the buttons on those cards now line up
   with each other rather than landing wherever the text above them ended (#191)

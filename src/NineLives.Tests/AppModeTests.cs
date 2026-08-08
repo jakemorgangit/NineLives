@@ -327,12 +327,12 @@ public class AppModeTests
     {
         var main = Chosen(AppMode.Standard);
 
-        Assert.Equal("Standard", main.Settings.CurrentModeTitle);
+        Assert.Equal(AppModeCapabilities.Title(AppMode.Standard), main.Settings.CurrentModeTitle);
         Assert.NotEmpty(main.Settings.CurrentModeTagline);
 
         main.Mode = AppMode.Basic;
 
-        Assert.Equal("Basic", main.Settings.CurrentModeTitle);
+        Assert.Equal(AppModeCapabilities.Title(AppMode.Basic), main.Settings.CurrentModeTitle);
     }
 
     // ── what the cards say ──────────────────────────────────────────────────────

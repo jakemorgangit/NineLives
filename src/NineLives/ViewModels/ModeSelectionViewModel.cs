@@ -27,21 +27,24 @@ public sealed partial class ModeCard(AppMode mode) : ObservableObject
     /// The button's text, built here rather than by a StringFormat on the binding.
     ///
     /// Button.Content is an object, so a StringFormat on it is quietly ignored - the button read
-    /// "Basic" where it should have said "Use Basic", which is a label describing the card rather
-    /// than the action.
+    /// "Basic" where it should have said what pressing it does.
+    ///
+    /// The same words on all three now that the titles name the work: "Use Pro" alongside a price
+    /// -list heading was most of what made this screen feel like a checkout (#191).
     /// </summary>
-    public string ChooseLabel { get; } = $"Use {AppModeCapabilities.Title(mode)}";
+    public string ChooseLabel { get; } = "Show me this view";
     public string Tagline { get; } = AppModeCapabilities.Tagline(mode);
     public string WhoFor { get; } = AppModeCapabilities.WhoFor(mode);
 
     public IReadOnlyList<string> Highlights { get; } = AppModeCapabilities.Highlights(mode);
+    public string HighlightsLabel { get; } = AppModeCapabilities.HighlightsLabel(mode);
 
     /// <summary>
     /// Which shade the card takes.
     ///
-    /// Deliberately not a traffic light. These are not better and worse, they are more and less -
-    /// so the progression is one accent getting stronger rather than green-amber-red, which would
-    /// read as "the safe one and the dangerous ones".
+    /// Deliberately not a traffic light, and deliberately not a gradient from cool to hot either -
+    /// three unrelated colours, because a progression is exactly the thing this screen should not
+    /// suggest. They are three views of one app, not three rungs.
     /// </summary>
     public string AccentBrushKey { get; } = mode switch
     {

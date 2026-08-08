@@ -148,7 +148,9 @@
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="220" />
+                <!-- Bound, because collapsing the sidebar does not collapse the space it sits in
+                     and the cards centre in what is left (#191). -->
+                <ColumnDefinition Width="{Binding SidebarWidth}" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 

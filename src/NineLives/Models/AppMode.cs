@@ -104,21 +104,35 @@ public static class AppModeCapabilities
 
     // ── what a mode is, in words ────────────────────────────────────────────────
 
+    /// <summary>
+    /// Named for the WORK, not for a rank.
+    ///
+    /// Basic/Standard/Pro reads as a price list, which is the wrong idea twice over: nothing here
+    /// is bought, and nothing is withheld. The enum keeps those names because they are already in
+    /// everybody's config.json and renaming them would reset the setting - what changes is what
+    /// anybody is shown (#191).
+    /// </summary>
     public static string Title(AppMode mode) => mode switch
     {
-        AppMode.Basic => "Basic",
-        AppMode.Standard => "Standard",
-        _ => "Pro"
+        AppMode.Basic => "Restore only",
+        AppMode.Standard => "Back up and restore",
+        _ => "Everything"
     };
 
+    /// <summary>One line on what is on SCREEN - not on what the mode is worth.</summary>
     public static string Tagline(AppMode mode) => mode switch
     {
-        AppMode.Basic => "Restore a database from a blob container.",
-        AppMode.Standard => "Back up and restore, to blob or a file share, with point-in-time recovery.",
-        _ => "Everything, including copying between servers and auditing backups."
+        AppMode.Basic => "The restore screen, and nothing else.",
+        AppMode.Standard => "Restoring, plus taking the backups yourself.",
+        _ => "Every screen, including the checks."
     };
 
-    /// <summary>What it turns on, for the card. Short lines, because a card nobody reads is a gate.</summary>
+    /// <summary>
+    /// What is on screen. Short lines, because a card nobody reads is a gate.
+    ///
+    /// The wider modes say what they ADD rather than "everything in Basic, plus" - the ladder
+    /// phrasing is what made three views of one app read as three tiers of a product.
+    /// </summary>
     public static IReadOnlyList<string> Highlights(AppMode mode) => mode switch
     {
         AppMode.Basic =>
@@ -130,29 +144,37 @@ public static class AppModeCapabilities
 
         AppMode.Standard =>
         [
-            "Everything in Basic",
-            "Back up a database, to blob or a file share",
-            "Restore from a path both servers can see",
-            "Restore to a moment in time, and relocate files"
+            "Taking a backup, to blob or a file share",
+            "Restoring from a path both servers can see",
+            "Restoring to a moment in time",
+            "Putting the database files somewhere else"
         ],
 
         _ =>
         [
-            "Everything in Standard",
-            "Copy a database onto another server in one action",
-            "Verify and audit backups against their own headers",
-            "Manage server-side credentials, and script as an Agent job"
+            "Copying a database onto another server",
+            "Verifying and auditing backups against their headers",
+            "Server-side credentials, and handing a restore to an Agent job"
         ]
     };
 
     /// <summary>
-    /// Who it is for. Named rather than described, because somebody choosing between three cards on
-    /// first run is asking "which one am I?" rather than "what does each contain?".
+    /// What the list underneath is. Said once, above it, rather than "Adds:" on every line - which
+    /// is what the phrasing had degenerated into once the "everything in Basic" ladder came out.
+    /// </summary>
+    public static string HighlightsLabel(AppMode mode) =>
+        mode == AppMode.Basic ? "On screen" : "Adds";
+
+    /// <summary>
+    /// Which one to pick, in terms of the job rather than the person.
+    ///
+    /// It used to say "you want every check the tool can make", which quietly makes the narrow
+    /// modes the choice of somebody who wants less - and nobody picks that about themselves.
     /// </summary>
     public static string WhoFor(AppMode mode) => mode switch
     {
-        AppMode.Basic => "You need last night's backup on another server, and nothing more.",
-        AppMode.Standard => "You look after the backups as well as the restores.",
-        _ => "You want every check the tool can make, and are happy to be asked."
+        AppMode.Basic => "Pick this if someone else looks after the backups.",
+        AppMode.Standard => "Pick this if the backups are yours too.",
+        _ => "Pick this if you would rather have everything to hand."
     };
 }
