@@ -57,6 +57,12 @@ built for.
 
 ### Changed
 
+- **A restore chain can span containers** - a full archived to cool storage with the logs that
+  carry it forward still in the hot one. Additional containers are ticked alongside the selected
+  one, which stays the primary: it is what the credential panel points at and the script header
+  names. Every container the chain actually uses is checked for a credential on the target before
+  the restore starts, because RESTORE FROM URL matches a credential by container URL and the
+  failure would otherwise land after WITH REPLACE had dropped the target (#32)
 - **Browse Backups can read a server's backup history**, not only a blob container. Backing up and
   restoring have taken either medium since #165 and this screen did not come along, so the one
   screen whose whole purpose is looking could not look at half of what the app writes. A share is

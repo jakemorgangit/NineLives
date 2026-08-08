@@ -154,6 +154,46 @@
                                 VerticalAlignment="Bottom" />
                     </Grid>
 
+                    <!-- Other containers to read as well (#32).
+                         The layout this exists for is asymmetric - fulls archived to cool storage
+                         while the logs that carry them forward stay hot - so these are additions to
+                         the container above rather than peers of it. Collapsed by default, because
+                         one container is what almost everybody has. -->
+                    <Expander Header="Also read other containers"
+                              Margin="0,12,0,0"
+                              Foreground="{DynamicResource SecondaryTextBrush}"
+                              Visibility="{Binding ShowMultipleContainers, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Margin="0,10,0,0">
+                            <TextBlock Style="{StaticResource SecondaryText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8"
+                                       Text="For a chain split across containers - a full archived to cool storage with its logs still in the hot one. Each container in the chain needs its own credential on the target, which is checked before a restore runs." />
+
+                            <ItemsControl ItemsSource="{Binding AdditionalContainers}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                            <CheckBox IsChecked="{Binding IsSelected}"
+                                                      Content="{Binding Name}"
+                                                      Style="{StaticResource DarkCheckBox}"
+                                                      VerticalAlignment="Center" />
+                                            <ItemsControl ItemsSource="{Binding TagChips}"
+                                                          Style="{StaticResource TagChipList}"
+                                                          Margin="8,0,0,0"
+                                                          VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="{Binding ContainersToReadSummary}"
+                                       Style="{StaticResource BodyText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0"
+                                       Visibility="{Binding ReadsSeveralContainers, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+                    </Expander>
+
                     <!-- Shared path: whose history, and how the target reaches the files.
 
                          A share cannot be listed the way a container can - a directory of .bak
