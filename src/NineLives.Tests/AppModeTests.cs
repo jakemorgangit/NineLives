@@ -147,8 +147,11 @@ public class AppModeTests
         main.ModeSelection.CancelCommand.Execute(null);
 
         Assert.False(main.IsChoosingMode);
-        Assert.NotSame(main.ModeSelection, main.CurrentView);
-        Assert.NotSame(main.Settings, main.CurrentView);
+
+        // Restore, specifically - the same place choosing a mode lands. "Not the settings page"
+        // was too weak a pin: it let the container list through, which is the landing the cards
+        // exist to get away from (#209).
+        Assert.Same(main.Restore, main.CurrentView);
     }
 
     /// <summary>The choice is remembered, or it would be asked again next time.</summary>
