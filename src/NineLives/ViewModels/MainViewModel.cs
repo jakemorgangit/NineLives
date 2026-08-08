@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -30,6 +31,18 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>True while the mode cards are up, which is once, on first run.</summary>
     [ObservableProperty]
     private bool _isChoosingMode;
+
+    /// <summary>
+    /// How much room the sidebar's COLUMN takes.
+    ///
+    /// Collapsing the sidebar itself is not enough: a ColumnDefinition keeps its width whatever
+    /// happens to the element inside it, so hiding the sidebar left 220px of nothing on the left
+    /// and pushed the mode cards - which centre inside the remaining column - visibly off to the
+    /// right of the window (#191).
+    /// </summary>
+    public GridLength SidebarWidth => IsChoosingMode ? new GridLength(0) : new GridLength(220);
+
+    partial void OnIsChoosingModeChanged(bool value) => OnPropertyChanged(nameof(SidebarWidth));
 
     // Each of these is asked by the navigation and by the screens themselves, so they live here
     // rather than being recomputed from Mode at every binding.

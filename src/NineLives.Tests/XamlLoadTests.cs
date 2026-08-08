@@ -1045,26 +1045,56 @@ public class XamlLoadTests(WpfFixture wpf)
     }
 
     /// <summary>
-    /// The button says what pressing it does.
+    /// The button says what pressing it does, and does NOT repeat the card's own title.
     ///
-    /// Also found by rendering: Button.Content is an object, so a StringFormat on the binding is
-    /// quietly ignored - the button read "Basic" rather than "Use Basic", a label describing the
-    /// card rather than the action.
+    /// Found by rendering: Button.Content is an object, so a StringFormat on the binding is quietly
+    /// ignored, and the button read "Basic" - a label describing the card rather than the action.
+    ///
+    /// The same words on all three since #191. "Use Pro" under a Basic/Standard/Pro heading was
+    /// most of what made this screen feel like a checkout, and the titles now name the work.
     /// </summary>
     [Fact]
     public void EachCardsButtonSaysWhatPressingItDoes()
     {
         wpf.Invoke(() =>
         {
-            var view = new ModeSelectionView { DataContext = new ModeSelectionViewModel(Store()) };
+            var vm = new ModeSelectionViewModel(Store());
+            var view = new ModeSelectionView { DataContext = vm };
             Realise(view);
 
             var labels = VisibleButtons(view).Select(b => b.Content as string).ToList();
 
-            Assert.Contains("Use Basic", labels);
-            Assert.Contains("Use Standard", labels);
-            Assert.Contains("Use Pro", labels);
+            foreach (var card in vm.Cards)
+            {
+                Assert.Contains(card.ChooseLabel, labels);
+                Assert.NotEqual(card.Title, card.ChooseLabel);
+            }
         });
+    }
+
+    /// <summary>
+    /// Nothing on this screen ranks the modes.
+    ///
+    /// It read as a price list: Basic/Standard/Pro, a column of green ticks against a column of
+    /// features, "Everything in Basic" laddering upwards, and a "Use Pro" button. They are three
+    /// views of one application, and none of them costs anything (#191).
+    /// </summary>
+    [Fact]
+    public void NothingOnTheCardsReadsLikeAPriceList()
+    {
+        var words = new[] { "Basic", "Standard", "Pro", "Everything in", "upgrade", "plan", "tier" };
+
+        foreach (var mode in new[] { AppMode.Basic, AppMode.Standard, AppMode.Pro })
+        {
+            var copy = string.Join(" ",
+                [AppModeCapabilities.Title(mode),
+                 AppModeCapabilities.Tagline(mode),
+                 AppModeCapabilities.WhoFor(mode),
+                 .. AppModeCapabilities.Highlights(mode)]);
+
+            foreach (var word in words)
+                Assert.DoesNotContain(word, copy, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>
