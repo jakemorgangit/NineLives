@@ -245,6 +245,12 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make asking about volumes fail - which must not become a warning (#32).</summary>
     public Exception? VolumeCheckThrows { get; set; }
 
+    /// <summary>What GetProductMajorVersionAsync answers - 16 is SQL Server 2022 (#210).</summary>
+    public int? ProductMajorVersion { get; set; } = 16;
+
+    public Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
+        => Task.FromResult(ProductMajorVersion);
+
     /// <summary>What GetDatabaseOverviewAsync answers (#205).</summary>
     public DatabaseOverview? DatabaseOverview { get; set; } = new(150, "FULL", "sa");
 
@@ -367,7 +373,8 @@ public sealed class FakeSqlServerService : ISqlServerService
         FirstLsn = source.FirstLsn,
         LastLsn = source.LastLsn,
         CheckpointLsn = source.CheckpointLsn,
-        DatabaseBackupLsn = source.DatabaseBackupLsn
+        DatabaseBackupLsn = source.DatabaseBackupLsn,
+        SoftwareVersionMajor = source.SoftwareVersionMajor
     };
 
     /// <summary>Called with the token the viewmodel supplied, so a test can see it was cancellable.</summary>

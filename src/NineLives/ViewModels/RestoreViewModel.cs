@@ -2102,12 +2102,78 @@ public partial class RestoreViewModel : ViewModelBase
         // Both non-blob media end in FROM DISK on the target, so both need the same answer: can
         // the instance that will run the RESTORE actually read these files (#203).
         if (MediumIsSharedPath || MediumIsAdHocFile)
-            return await CheckTargetCanReadFilesAsync(server, appendLog);
+        {
+            var readable = await CheckTargetCanReadFilesAsync(server, appendLog);
+            if (!readable.CanProceed) return readable;
+
+            return await CheckVersionCompatibilityAsync(server, appendLog);
+        }
 
         var primary = await Credential.PrepareForRestoreAsync(server, appendLog);
         if (!primary.CanProceed) return primary;
 
-        return await CheckOtherContainersHaveCredentialsAsync(server, appendLog);
+        var containers = await CheckOtherContainersHaveCredentialsAsync(server, appendLog);
+        if (!containers.CanProceed) return containers;
+
+        return await CheckVersionCompatibilityAsync(server, appendLog);
+    }
+
+    /// <summary>
+    /// Refuses a newer version's backup before anything is touched (#210).
+    ///
+    /// The one-directional law of RESTORE: a backup taken on a newer major version can never be
+    /// restored onto an older one - error 3169, no exceptions, not even between adjacent releases.
+    /// Without this it arrives from the server mid-restore, after WITH REPLACE has already dropped
+    /// the database being restored over. Same failure shape as every other preflight here, and the
+    /// cheapest: the header carries the version, and the target's is one SERVERPROPERTY away.
+    ///
+    /// One HEADERONLY on the full set, on the target, device-aware since #203 - so this one path
+    /// serves blob, shared path and ad-hoc alike. Best effort throughout: no verdict from silence,
+    /// because refusing on a guess would block legal restores.
+    /// </summary>
+    private async Task<CredentialPreflight> CheckVersionCompatibilityAsync(
+        ServerConnection server, Action<string> appendLog)
+    {
+        var files = RestoreChain?.FullSet.Files;
+        if (files == null || files.Count == 0) return CredentialPreflight.Proceed;
+
+        try
+        {
+            appendLog("Comparing the backup's SQL Server version with the target's...");
+
+            var devices = files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(server, devices);
+            var targetMajor = await _sqlService.GetProductMajorVersionAsync(server);
+
+            switch (VersionCompatibility.Check(header?.SoftwareVersionMajor, targetMajor))
+            {
+                case VersionVerdict.Refuse:
+                    return CredentialPreflight.Stop(
+                        VersionCompatibility.ExplainRefusal(
+                            header!.SoftwareVersionMajor!.Value, targetMajor!.Value, server.ServerName));
+
+                case VersionVerdict.UpgradeInPassing:
+                    appendLog(VersionCompatibility.ExplainUpgrade(
+                        header!.SoftwareVersionMajor!.Value, targetMajor!.Value));
+                    break;
+
+                default:
+                    appendLog("Versions are compatible.");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // The check could not run, which is not the same as the check failing. The restore
+            // itself will read the same header in a moment and report its own, better error if
+            // something is genuinely wrong with the file.
+            appendLog($"Could not compare versions: {ex.Message}");
+        }
+
+        return CredentialPreflight.Proceed;
     }
 
     /// <summary>

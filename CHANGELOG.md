@@ -57,6 +57,11 @@ built for.
 
 ### Changed
 
+- **A newer version's backup aimed at an older server refuses before anything runs**, naming both
+  versions and the way out - SQL Server can never restore in that direction (error 3169), and
+  without the check it failed mid-restore, after WITH REPLACE had dropped the target. The legal
+  upgrade direction proceeds with a note about the one-way door. One HEADERONLY on the target,
+  device-aware, so blob, shared-path and ad-hoc chains all get the same check (#210)
 - **A running restore shows its progress as a bar**, built from the server's own STATS lines -
   per statement across the chain, mirrored to the Windows taskbar so the app conveys progress
   while minimised. Failure turns the taskbar red and stays red until the next run; finishing

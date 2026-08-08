@@ -36,6 +36,9 @@ public interface ISqlServerService
     Task<List<FileMoveOption>> GetDatabaseFilesAsync(
         ServerConnection server, string database, CancellationToken ct = default);
 
+    /// <summary>SERVERPROPERTY('ProductMajorVersion') - 16 is SQL Server 2022 - or null if it did not say (#210).</summary>
+    Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default);
+
     /// <summary>What the restored database looks like now - compat level, recovery model, owner (#205).</summary>
     Task<DatabaseOverview?> GetDatabaseOverviewAsync(
         ServerConnection server, string database, CancellationToken ct = default);
