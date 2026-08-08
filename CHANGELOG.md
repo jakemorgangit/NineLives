@@ -13,7 +13,19 @@ more detail on the user-facing changes; this file is the short history.
 Nine Lives stops being a blob restore tool. It backs up and restores, to and from Azure Blob
 Storage or a path both servers can see - and it can do both in one action.
 
+It also stops showing all of that to everybody. The app grew a great deal in a short time, and
+growth without a way to opt out of it is how a tool becomes intimidating to the people it was
+built for.
+
 ### Added
+
+- **Three modes - Basic, Standard and Pro - chosen once on first run** and changeable in Settings.
+  Basic is the app as it originally was: pick a container, pick a restore point, restore. Standard
+  adds the second medium, taking backups, point-in-time and file relocation. Pro adds everything
+  else. Narrowing the mode never deletes anything (#176)
+- **Hand a restore over as a SQL Server Agent job**, one step per batch, created disabled and
+  unscheduled - for a maintenance window, or a change process that takes submitted scripts rather
+  than somebody at a keyboard (#32)
 
 - **Back up a database**, to a blob container or to a path the SQL Server service account can
   write to. `COPY_ONLY` by default, so a production differential schedule is left alone, with what
@@ -29,7 +41,7 @@ Storage or a path both servers can see - and it can do both in one action.
   a progress bar and a Stop, that reads what each backup actually is and reports where it disagrees
   with what its path claimed. Results are cached against the blob's ETag, so a second run is
   instant and a restart does not lose them. Audited backups carry a pill on the restore point and
-  the chain (#130)
+  the chain, and the scope is the chosen database or the whole container (#130)
 - **Identify backups a filename could not place.** Files landing with no type or no database are
   invisible to the restore screen entirely; the app now says how many there are and can settle them
   from their headers (#130)
