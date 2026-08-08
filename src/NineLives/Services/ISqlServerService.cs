@@ -50,6 +50,18 @@ public interface ISqlServerService
     Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default);
 
+    /// <summary>
+    /// Everything one backup FILE says about itself: one entry per backup set it holds (#203).
+    ///
+    /// For the backup nobody's msdb knows - a vendor's .bak, a file off a decommissioned server.
+    /// HEADERONLY is asked on <paramref name="server"/>, which must be able to read the path; the
+    /// entries carry Position (a file holds several sets whenever NOINIT appended) and FamilyCount
+    /// (more than one means the file is a single stripe of a striped set, and cannot be restored
+    /// alone).
+    /// </summary>
+    Task<List<BackupHistoryEntry>> ReadBackupFileHeadersAsync(
+        ServerConnection server, string path, CancellationToken ct = default);
+
     Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default);
 

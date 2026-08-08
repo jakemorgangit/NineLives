@@ -59,7 +59,12 @@ public static class BackupHistoryInventory
         {
             // msdb has no notion of the set ids this app derives from blob names, so the identity
             // is what a person would recognise it by: what it is and when it ran.
-            SetId = $"{entry.DatabaseName}_{entry.StartedAt:yyyyMMdd_HHmmss}",
+            // The position suffix keeps two backups of one database that share a second - which a
+            // multi-backup FILE can genuinely hold - from collapsing into one set.
+            SetId = entry.Position is int p
+                ? $"{entry.DatabaseName}_{entry.StartedAt:yyyyMMdd_HHmmss}_p{p}"
+                : $"{entry.DatabaseName}_{entry.StartedAt:yyyyMMdd_HHmmss}",
+            Position = entry.Position,
             DatabaseName = entry.DatabaseName,
             ServerName = host,
             InstanceName = instance,

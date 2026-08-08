@@ -487,6 +487,12 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 return;
             }
 
+            if (location.IsAdHocFile)
+            {
+                await LoadFromFileAsync(location, ct);
+                return;
+            }
+
             // If a database is already chosen - a reload after taking a fresh backup, say - push
             // that down to Azure as a prefix instead of walking the whole container and discarding
             // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
@@ -606,6 +612,101 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 [.. g],
                 zones.TryGetValue(g.Key, out var zone) ? zone : null))
             .ToList();
+    }
+
+    /// <summary>
+    /// Reads what the files themselves say they hold (#203).
+    ///
+    /// For the backup nobody's msdb knows: a vendor's .bak, a file that outlived its server. The
+    /// headers carry the same fields msdb records - database, type, LSNs, position - so everything
+    /// downstream of here is the shared-path path: ToSets, the LSN chain, FROM DISK.
+    ///
+    /// One failure fails the LOAD, by name. Reading three files and quietly showing two is how
+    /// somebody restores "everything" minus the log that carried the chain to the point they
+    /// wanted.
+    /// </summary>
+    private async Task LoadFromFileAsync(BackupLocation location, CancellationToken ct)
+    {
+        var reader = location.SourceServer!;
+        var entries = new List<BackupHistoryEntry>();
+
+        foreach (var path in location.FilePaths)
+        {
+            ct.ThrowIfCancellationRequested();
+            LoadProgressText = $"Reading {System.IO.Path.GetFileName(path)}...";
+
+            List<BackupHistoryEntry> read;
+            try
+            {
+                read = await _sql.ReadBackupFileHeadersAsync(reader, path, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                SetError($"{reader.ServerName} could not read {path}: {ex.Message} " +
+                         "The path must be one the SQL Server service account can open - " +
+                         "it is read on the server, not from this machine.");
+                BackupsLoaded = false;
+                return;
+            }
+
+            if (read.Count == 0)
+            {
+                SetError($"{path} contains no backups. RESTORE HEADERONLY read it and found nothing.");
+                BackupsLoaded = false;
+                return;
+            }
+
+            // A stripe cannot be restored alone, and its header does not say so loudly - HEADERONLY
+            // on one member happily describes the whole set. FamilyCount is the tell.
+            var striped = read.FirstOrDefault(e => e.FamilyCount > 1);
+            if (striped != null)
+            {
+                SetError($"{path} is one stripe of a {striped.FamilyCount}-file striped set. " +
+                         "Restoring needs every member, and reading a striped set here is not " +
+                         "supported yet - restore it from the server's own backup history instead, " +
+                         "which knows all the members.");
+                BackupsLoaded = false;
+                return;
+            }
+
+            entries.AddRange(read);
+        }
+
+        var sets = BackupHistoryInventory.ToSets(entries, BackupPathMapping.None);
+
+        _allBackups = sets.SelectMany(s => s.Files).ToList();
+        _allSets = sets;
+        LoadedFrom = location;
+
+        ApplyCachedAudit();
+
+        DiscoveredServers = new ObservableCollection<string>(
+            sets.Select(s => s.ServerDisplay)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+
+        DiscoveredDatabases = new ObservableCollection<string>(
+            sets.Select(s => s.DatabaseName)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+
+        BackupsLoaded = sets.Count > 0;
+
+        // Nothing read from a header arrives unplaced - the header is the authority the
+        // unclassified count exists to flag the absence of.
+        UnclassifiedCount = 0;
+
+        RebuildWorkingSet();
+
+        if (!HasError)
+            SetStatus($"Read {sets.Count} backup(s) from {location.FilePaths.Count} file(s). " +
+                      $"Every detail comes from the files' own headers.");
     }
 
     private async Task LoadFromHistoryAsync(BackupLocation location, CancellationToken ct)

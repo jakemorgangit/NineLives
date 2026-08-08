@@ -170,6 +170,13 @@ public class RestoreScriptGenerator
         }
 
         sb.AppendLine("    WITH");
+
+        // Which backup within the file (#203). Stated whenever it is known, not only when it is
+        // not 1: the default IS 1, but a file that holds several backups is exactly the situation
+        // where the script should say which one it means rather than relying on a default the
+        // reader may not know exists.
+        if (set.Position is int position)
+            sb.AppendLine($"         FILE = {position},");
     }
 
     private static void AppendFileMoves(StringBuilder sb, RestoreOptions options)

@@ -277,6 +277,18 @@ public class BackupFileInfo
 public class BackupSet
 {
     public string SetId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Where this backup sits within its file, when it was read from one (#203).
+    ///
+    /// Drives WITH FILE = n in the generated script. A backup file holds several backup sets
+    /// whenever BACKUP ... NOINIT appended to it, and a restore that does not say which one it
+    /// means silently gets position 1 - the OLDEST backup in the file, presented as a success.
+    ///
+    /// Null everywhere except sets read directly from a file, which is the only source where a
+    /// file position is in play.
+    /// </summary>
+    public int? Position { get; set; }
     public BackupType Type { get; set; }
     public List<BackupFileInfo> Files { get; set; } = [];
     /// <summary>

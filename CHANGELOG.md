@@ -57,6 +57,15 @@ built for.
 
 ### Changed
 
+- **A backup file nobody's msdb knows can now be restored** - the vendor .bak, the file that
+  outlived its server. A third source on the restore screen takes pasted paths, asks a server to
+  read each file's own headers, and hands the result to the same chain, options and script
+  machinery as every other source. A file holding several appended backups yields one restore
+  point per position and the script says WITH FILE = n; a single stripe of a striped set is
+  refused by name, because its header happily describes media it cannot deliver (#203)
+- HEADERONLY, FILELISTONLY and VERIFYONLY statements now name DISK or URL by what each file
+  actually is, instead of assuming blob - which also makes the header audit meaningful for
+  backups discovered through msdb (#203)
 - **The app opens on the mode cards** rather than the container list. The first thing on screen
   says what shape the app is in and offers to change it, instead of the app simply being that shape
   with nothing saying why. Only a question the first time - after that the current mode is marked

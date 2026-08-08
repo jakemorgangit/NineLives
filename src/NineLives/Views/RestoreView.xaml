@@ -113,6 +113,15 @@
                                          Style="{StaticResource DarkRadioButton}"
                                          IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=SharedPath}"
                                          ToolTip="RESTORE FROM DISK against a file share. No credential, no egress, and no waiting on an upload - but both instances have to reach it." />
+
+                            <!-- The backup nobody's msdb knows: a vendor's .bak, a file that
+                                 outlived its server (#203). -->
+                            <RadioButton Content="A backup file I have"
+                                         GroupName="BackupMedium"
+                                         Style="{StaticResource DarkRadioButton}"
+                                         Margin="20,0,0,0"
+                                         IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AdHocFile}"
+                                         ToolTip="RESTORE FROM DISK, identified by its own headers. For a file no configured server took - a vendor's backup, or one that outlived its server." />
                         </StackPanel>
                     </StackPanel>
 
@@ -269,6 +278,57 @@
                                        Foreground="{DynamicResource WarningBrush}"
                                        TextWrapping="Wrap" />
                         </Border>
+                    </StackPanel>
+
+                    <!-- Ad-hoc file: paths and a reader (#203).
+
+                         The file's own headers are the only account of what it holds, so an
+                         instance that can see the path is asked to read them. Usually that is the
+                         target itself - which also has to read the file to restore it. -->
+                    <StackPanel Visibility="{Binding MediumIsAdHocFile, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="BACKUP FILE(S), AS THE SERVER SEES THEM" Style="{StaticResource LabelText}" />
+                        <TextBox Text="{Binding AdHocPathsText, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DarkTextBox}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 MinHeight="52"
+                                 MaxHeight="110"
+                                 FontFamily="Consolas"
+                                 ToolTip="One complete backup file per line - a .bak, .trn or .dif. The path is opened by the SQL Server service account on the server, not by this app, so it must be a path that account can reach." />
+
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   FontSize="11"
+                                   Margin="0,4,0,0"
+                                   Text="One complete backup file per line. A full plus the logs that follow it can be listed together - the chain is assembled from the files' own LSNs. Striped sets are not supported here; restore those from the server's own backup history." />
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="ASK THIS SERVER TO READ THEM" Style="{StaticResource LabelText}" />
+                                <ComboBox ItemsSource="{Binding SourceServers}"
+                                          SelectedItem="{Binding SourceServer}"
+                                          Style="{StaticResource DarkComboBox}"
+                                          ToolTip="RESTORE HEADERONLY runs here, so this instance must be able to open the path. Usually the server the restore will run on.">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="Read the files"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding LoadBackupsCommand}"
+                                    VerticalAlignment="Bottom" />
+                        </Grid>
                     </StackPanel>
 
                     <!-- Server + Database selectors -->
