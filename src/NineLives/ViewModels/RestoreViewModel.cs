@@ -475,6 +475,30 @@ public partial class RestoreViewModel : ViewModelBase
 
     public bool MediumIsBlob => SelectedMedium == BackupMedium.AzureBlob;
     public bool MediumIsSharedPath => SelectedMedium == BackupMedium.SharedPath;
+    public bool MediumIsAdHocFile => SelectedMedium == BackupMedium.AdHocFile;
+
+    /// <summary>
+    /// The pasted paths, one complete backup file per line (#203).
+    ///
+    /// As the READING server sees them, not this machine - the same trust rule as the shared path,
+    /// and the readability preflight enforces it on the target before anything runs.
+    /// </summary>
+    [ObservableProperty]
+    private string _adHocPathsText = string.Empty;
+
+    partial void OnAdHocPathsTextChanged(string value)
+    {
+        // What is loaded came from the PREVIOUS files.
+        ClearLoadedBackups();
+        OnPropertyChanged(nameof(CurrentLocation));
+    }
+
+    /// <summary>One path per non-empty line, in the order given.</summary>
+    public IReadOnlyList<string> AdHocPaths =>
+        AdHocPathsText
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     /// <summary>
     /// Whether the server-side credential means anything here.
@@ -489,6 +513,7 @@ public partial class RestoreViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(MediumIsBlob));
         OnPropertyChanged(nameof(MediumIsSharedPath));
+        OnPropertyChanged(nameof(MediumIsAdHocFile));
         OnPropertyChanged(nameof(CredentialApplies));
         OnPropertyChanged(nameof(ShowCredentialPanel));
 
@@ -539,6 +564,13 @@ public partial class RestoreViewModel : ViewModelBase
             SourceServer == null
                 ? null
                 : BackupLocation.Shared(SourceServer, new BackupPathMapping(SourcePathPrefix, TargetPathPrefix)),
+
+        // The same server picker as the shared path, deliberately: both media mean "an instance I
+        // ask about backups", and for a file the natural reader is the target itself.
+        BackupMedium.AdHocFile =>
+            SourceServer == null || AdHocPaths.Count == 0
+                ? null
+                : BackupLocation.AdHoc(SourceServer, AdHocPaths),
 
         _ => null
     };
@@ -912,7 +944,9 @@ public partial class RestoreViewModel : ViewModelBase
         var location = CurrentLocation;
         if (location == null)
         {
-            SetError(MediumIsSharedPath
+            SetError(MediumIsAdHocFile
+                ? "Enter at least one backup file path, and choose a server that can read it."
+                : MediumIsSharedPath
                 ? "Choose the server the backups were taken on first."
                 : "Please select a container first.");
             return;
@@ -1311,7 +1345,7 @@ public partial class RestoreViewModel : ViewModelBase
             // A null result is an unreadable member rather than a failure of the whole validation:
             // the validator reports it and carries on with the rest.
             var requests = RestoreChain.AllSets
-                .Select(s => (IReadOnlyList<string>)s.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList())
+                .Select(s => (IReadOnlyList<string>)s.Files.Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl)).ToList())
                 .ToList();
 
             var read = await _sqlService.RestoreHeaderOnlyBatchAsync(
@@ -1395,7 +1429,7 @@ public partial class RestoreViewModel : ViewModelBase
                 var set = sets[i];
                 SetStatus($"Verifying {i + 1} of {sets.Count}: {set.TypeDisplay} {set.SetId}...");
 
-                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+                var urls = set.Files.Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 var result = await _sqlService.RestoreVerifyOnlyAsync(
                     ConnectedServer, urls, Options.WithChecksum, fileMoves, ct);
 
@@ -1808,7 +1842,8 @@ public partial class RestoreViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
     private async Task FetchLogicalNamesAsync()
     {
-        if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
+        if (RestoreChain == null || ConnectedServer == null) return;
+        if (SelectedContainer == null && !RestoreChain.FullSet.Files.All(f => f.IsOnDisk)) return;
 
         var ct = _queryCancellation.Begin();
         IsBusy = true;
@@ -1819,7 +1854,11 @@ public partial class RestoreViewModel : ViewModelBase
         // catch below would itself throw, replacing the error explaining why FILELISTONLY failed
         // with a bare "Nine Lives hit an unexpected error".
         // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
 
         try
         {
@@ -1864,7 +1903,10 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     private bool CanFetchLogicalNames() =>
-        IsConnectedToServer && RestoreChain != null && SelectedContainer != null && RestoreChain.FullSet.Files.Count > 0;
+        IsConnectedToServer && RestoreChain != null && RestoreChain.FullSet.Files.Count > 0
+        // A container for blob URLs; a chain on disk needs none - FILELISTONLY reads the path
+        // directly, and demanding a container here kept MOVE defaults blob-only (#203).
+        && (SelectedContainer != null || RestoreChain.FullSet.Files.All(f => f.IsOnDisk));
 
     [RelayCommand(CanExecute = nameof(CanInspectMetadata))]
     private async Task InspectBackupMetadataAsync()
@@ -1876,7 +1918,11 @@ public partial class RestoreViewModel : ViewModelBase
         RefreshCancelState();
         // Captured before the await - see the note on FetchLogicalNamesAsync.
         // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
 
         try
         {
@@ -1922,7 +1968,11 @@ public partial class RestoreViewModel : ViewModelBase
     private void CopyFileListOnlyCommand()
     {
         if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE FILELISTONLY FROM {urlClauses}";
         TryCopyToClipboard(sql, "RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
@@ -1933,7 +1983,11 @@ public partial class RestoreViewModel : ViewModelBase
     private void CopyHeaderOnlyCommand()
     {
         if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE HEADERONLY FROM {urlClauses}";
         TryCopyToClipboard(sql, "RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
@@ -2045,7 +2099,9 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     internal async Task<CredentialPreflight> PreflightAsync(ServerConnection server, Action<string> appendLog)
     {
-        if (MediumIsSharedPath)
+        // Both non-blob media end in FROM DISK on the target, so both need the same answer: can
+        // the instance that will run the RESTORE actually read these files (#203).
+        if (MediumIsSharedPath || MediumIsAdHocFile)
             return await CheckTargetCanReadFilesAsync(server, appendLog);
 
         var primary = await Credential.PrepareForRestoreAsync(server, appendLog);

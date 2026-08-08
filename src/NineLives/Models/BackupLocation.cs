@@ -18,7 +18,17 @@ public enum BackupMedium
     /// A path both instances can see - SMB, NFS, a mount. <c>RESTORE ... FROM DISK</c>, and no
     /// credential at all, because SQL Server reaches it as its own service account.
     /// </summary>
-    SharedPath
+    SharedPath,
+
+    /// <summary>
+    /// A backup file named directly, that no configured instance's msdb knows (#203).
+    ///
+    /// The classic case: a vendor sends a .bak, or the file outlived the server that took it. The
+    /// file's own headers are the only account of what it holds, so that is what gets read -
+    /// HEADERONLY on an instance that can see the path. Restores <c>FROM DISK</c>, no credential,
+    /// same as a shared path.
+    /// </summary>
+    AdHocFile
 }
 
 /// <summary>
@@ -82,6 +92,25 @@ public sealed record BackupLocation
     public static BackupLocation Blob(IReadOnlyList<BlobContainerConfig> containers) =>
         new() { Medium = BackupMedium.AzureBlob, Containers = containers };
 
+    /// <summary>
+    /// The files to read directly, when the medium is AdHocFile (#203).
+    ///
+    /// Each entry is one complete backup file. NOT stripe members of one set - a striped set's
+    /// header says FamilyCount > 1 and is refused with an explanation, because HEADERONLY on a
+    /// single stripe happily describes a set the media cannot deliver.
+    /// </summary>
+    public IReadOnlyList<string> FilePaths { get; init; } = [];
+
+    public static BackupLocation AdHoc(ServerConnection readVia, IReadOnlyList<string> paths) =>
+        new()
+        {
+            Medium = BackupMedium.AdHocFile,
+            // The instance ASKED, not the instance that took the backups - nothing that took them
+            // is known here. It has to be able to read the path, which usually means the target.
+            SourceServer = readVia,
+            FilePaths = paths
+        };
+
     public static BackupLocation Shared(ServerConnection sourceServer, BackupPathMapping? mapping = null) =>
         new()
         {
@@ -92,6 +121,7 @@ public sealed record BackupLocation
 
     public bool IsBlob => Medium == BackupMedium.AzureBlob;
     public bool IsSharedPath => Medium == BackupMedium.SharedPath;
+    public bool IsAdHocFile => Medium == BackupMedium.AdHocFile;
 
     /// <summary>What this location is, for a status line or a history entry.</summary>
     public string Describe() => Medium switch
@@ -105,6 +135,13 @@ public sealed record BackupLocation
         BackupMedium.SharedPath => SourceServer == null
             ? "a shared path"
             : $"{SourceServer.ServerName}'s backup history",
+
+        BackupMedium.AdHocFile => FilePaths.Count switch
+        {
+            0 => "a backup file",
+            1 => System.IO.Path.GetFileName(FilePaths[0]),
+            var n => $"{n} backup files"
+        },
         _ => "an unknown location"
     };
 
@@ -129,6 +166,13 @@ public sealed record BackupLocation
             // chain from the other.
             BackupMedium.SharedPath =>
                 SourceServer?.Id == other.SourceServer?.Id && Mapping == other.Mapping,
+
+            // The reader AND the exact files, in order. The same paths read via a different
+            // instance can resolve to different files - a local drive letter names a different
+            // disk on every machine.
+            BackupMedium.AdHocFile =>
+                SourceServer?.Id == other.SourceServer?.Id
+                && FilePaths.SequenceEqual(other.FilePaths, StringComparer.OrdinalIgnoreCase),
 
             _ => false
         };

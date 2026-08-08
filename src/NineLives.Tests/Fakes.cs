@@ -418,6 +418,25 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Paths the fake target refuses, and why. Anything not listed is readable.</summary>
     public Dictionary<string, BackupFileProblem> UnreadablePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>What each ad-hoc file's headers say, keyed by path (#203).</summary>
+    public Dictionary<string, List<BackupHistoryEntry>> FileHeaders { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every path whose headers were read, in order.</summary>
+    public List<string> HeaderReadPaths { get; } = [];
+
+    public Task<List<BackupHistoryEntry>> ReadBackupFileHeadersAsync(
+        ServerConnection server, string path, CancellationToken ct = default)
+    {
+        HeaderReadPaths.Add(path);
+
+        if (!FileHeaders.TryGetValue(path, out var entries))
+            throw new InvalidOperationException(
+                $"Cannot open backup device '{path}'. Operating system error 2(The system cannot find the file specified.).");
+
+        return Task.FromResult(entries.ToList());
+    }
+
     public Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null, CancellationToken ct = default)
         => Task.FromResult(databaseName == null

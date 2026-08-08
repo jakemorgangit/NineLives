@@ -387,6 +387,25 @@ public class SqlServerService : ISqlServerService
     // keyed off the identity type that CredentialExistsAsync already reports - not off a flag.
 
     /// <summary>RESTORE FILELISTONLY across the files of one backup set, striped or not.</summary>
+    /// <summary>
+    /// The device clause for one backup device - <c>DISK = N'...'</c> for a path,
+    /// <c>URL = N'...'</c> for anything else (#203).
+    ///
+    /// The same rule <see cref="BackupFileInfo.IsOnDisk"/> applies, expressed over the raw string:
+    /// a drive letter or a UNC prefix is a path. These statements were built with URL hardcoded,
+    /// which quietly limited HEADERONLY, FILELISTONLY and VERIFYONLY to blob - the restore itself
+    /// has been device-aware since #149, and the inspection statements should match it.
+    /// </summary>
+    private static string DeviceClause(string device)
+    {
+        var isPath = device.StartsWith(@"\\", StringComparison.Ordinal)
+                     || (device.Length >= 2 && device[1] == ':');
+
+        return isPath
+            ? $"DISK = N'{TSql.EscapeLiteral(device)}'"
+            : $"URL = N'{TSql.EscapeLiteral(device)}'";
+    }
+
     public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
@@ -397,8 +416,8 @@ public class SqlServerService : ISqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
-        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}";
+        var deviceClauses = string.Join(", ", blobUrls.Select(DeviceClause));
+        cmd.CommandText = $"RESTORE FILELISTONLY FROM {deviceClauses}";
 
         return await CancellableAsync(async () =>
         {
@@ -491,6 +510,55 @@ public class SqlServerService : ISqlServerService
         }
 
         return results;
+    }
+
+    public async Task<List<BackupHistoryEntry>> ReadBackupFileHeadersAsync(
+        ServerConnection server, string path, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = $"RESTORE HEADERONLY FROM {DeviceClause(path)}";
+
+        return await CancellableAsync(async () =>
+        {
+            var entries = new List<BackupHistoryEntry>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            // Every row, not the first. Each row is one backup set in the file, and reading only
+            // the first is how a multi-backup file would quietly present its oldest content as
+            // the whole story.
+            while (await reader.ReadAsync(ct))
+            {
+                var typeCode = GetIntFromReader(reader, "BackupType");
+
+                entries.Add(new BackupHistoryEntry
+                {
+                    DatabaseName = GetStringFromReader(reader, "DatabaseName") ?? string.Empty,
+                    ServerName = GetStringFromReader(reader, "ServerName"),
+                    Type = (typeCode ?? 0) switch
+                    {
+                        1 => BackupType.Full,
+                        5 => BackupType.Differential,
+                        2 => BackupType.TransactionLog,
+                        _ => BackupType.Unknown
+                    },
+                    StartedAt = GetDateTimeFromReader(reader, "BackupStartDate") ?? DateTime.MinValue,
+                    FinishedAt = GetDateTimeFromReader(reader, "BackupFinishDate") ?? DateTime.MinValue,
+                    IsCopyOnly = GetIntFromReader(reader, "IsCopyOnly") == 1,
+                    FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
+                    LastLsn = GetDecimalFromReader(reader, "LastLSN"),
+                    CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN"),
+                    DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
+                    Position = GetIntFromReader(reader, "Position"),
+                    FamilyCount = GetIntFromReader(reader, "FamilyCount") ?? 1,
+                    Files = [path]
+                });
+            }
+
+            return entries;
+        }, ct, "Reading the backup file's headers");
     }
 
     public async Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
@@ -596,8 +664,8 @@ public class SqlServerService : ISqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
-        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}";
+        var deviceClauses = string.Join(", ", blobUrls.Select(DeviceClause));
+        cmd.CommandText = $"RESTORE HEADERONLY FROM {deviceClauses}";
 
         return await CancellableAsync<BackupFileInfo?>(async () =>
         {

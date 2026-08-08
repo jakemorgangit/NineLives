@@ -62,6 +62,28 @@ public sealed class BackupHistoryEntry
     public string? ServerName { get; init; }
 
     /// <summary>
+    /// Where this backup sits within its file, when it was read from one (#203).
+    ///
+    /// A backup FILE can hold several backup SETS - every BACKUP ... NOINIT appends another - and
+    /// HEADERONLY reports one row per set with its Position. A restore that wants any but the
+    /// first must say WITH FILE = n, or SQL Server silently restores position 1: the oldest
+    /// backup in the file, presented as a success.
+    ///
+    /// Null for anything read from msdb, where each history row is its own backup and the file
+    /// position is not in play.
+    /// </summary>
+    public int? Position { get; init; }
+
+    /// <summary>
+    /// How many files make up the media set this backup was written across (#203).
+    ///
+    /// More than one means this file is one stripe of a striped set, and restoring needs every
+    /// member. HEADERONLY on a single member happily describes the set, which is exactly why this
+    /// has to be carried and checked - the header looks complete when the media is not.
+    /// </summary>
+    public int FamilyCount { get; init; } = 1;
+
+    /// <summary>
     /// A record with no files cannot be restored from, whatever else it says.
     ///
     /// msdb keeps history for backups whose files have since been deleted, archived or pruned by a
