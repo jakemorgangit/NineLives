@@ -38,26 +38,43 @@ public static class WindowAttention
     /// </summary>
     public static void FlashIfInBackground()
     {
-        var window = Application.Current?.MainWindow;
-        if (window == null) return;
+        // The Windows collection and IsActive are thread-affine, and this is called from the
+        // execution's finally - a worker thread. Marshalled rather than touched directly, and
+        // fire-and-forget: a completion signal must never be able to fail the run it signals.
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null) return;
 
-        // Any of our windows being active counts as "watching" - the execution window is its own
-        // top-level window and is exactly where somebody would be looking.
-        foreach (Window w in Application.Current!.Windows)
-            if (w.IsActive) return;
-
-        var handle = new WindowInteropHelper(window).Handle;
-        if (handle == IntPtr.Zero) return;
-
-        var info = new FLASHWINFO
+        dispatcher.InvokeAsync(() =>
         {
-            cbSize = (uint)Marshal.SizeOf<FLASHWINFO>(),
-            hwnd = handle,
-            dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG,
-            uCount = uint.MaxValue,
-            dwTimeout = 0
-        };
+            try
+            {
+                var app = Application.Current;
+                var window = app?.MainWindow;
+                if (app == null || window == null) return;
 
-        FlashWindowEx(ref info);
+                // Any of our windows being active counts as "watching" - the execution window is
+                // its own top-level window and is exactly where somebody would be looking.
+                foreach (Window w in app.Windows)
+                    if (w.IsActive) return;
+
+                var handle = new WindowInteropHelper(window).Handle;
+                if (handle == IntPtr.Zero) return;
+
+                var info = new FLASHWINFO
+                {
+                    cbSize = (uint)Marshal.SizeOf<FLASHWINFO>(),
+                    hwnd = handle,
+                    dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG,
+                    uCount = uint.MaxValue,
+                    dwTimeout = 0
+                };
+
+                FlashWindowEx(ref info);
+            }
+            catch
+            {
+                // Nothing about a missed flash is worth surfacing.
+            }
+        });
     }
 }
