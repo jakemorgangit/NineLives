@@ -882,7 +882,7 @@ public partial class RestoreViewModel : ViewModelBase
     public bool CanAuditDatabase => Inventory.CanAudit && IsConnectedToServer;
 
     public string AuditBlockedReason =>
-        Inventory.WorkingSet.Count == 0 ? string.Empty
+        Inventory.AuditScope.Count == 0 ? string.Empty
         : IsConnectedToServer ? string.Empty
         : "Connect to a SQL Server instance to audit these backups - it is the server that reads the headers, not this app.";
 
