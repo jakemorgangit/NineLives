@@ -114,17 +114,41 @@ public class AppModeTests
         Assert.Same(main.ModeSelection, main.CurrentView);
     }
 
+    /// <summary>
+    /// The cards are the landing screen, not a first-run gate (#200).
+    ///
+    /// It reads better than opening on the container list: the first thing on screen says what
+    /// shape the app is in and offers to change it. It stays a QUESTION only the first time - after
+    /// that the current mode is marked and there is a way straight past it.
+    /// </summary>
     [Fact]
-    public void OnceChosenTheCardsDoNotComeBack()
+    public void TheCardsAreTheLandingScreenEveryLaunch()
     {
-        var store = new FakeCredentialStore();
-        store.Config.Mode = AppMode.Basic;
+        var main = Chosen(AppMode.Basic);
 
-        var main = new MainViewModel(store);
+        Assert.True(main.IsChoosingMode);
+        Assert.Same(main.ModeSelection, main.CurrentView);
+        Assert.Equal(AppMode.Basic, main.Mode);
+
+        // Not a question this time: it says which one you are on, and lets you carry on.
+        Assert.True(main.ModeSelection.CanCancel);
+        Assert.Equal(AppMode.Basic, main.ModeSelection.Cards.Single(c => c.IsCurrent).Mode);
+    }
+
+    /// <summary>
+    /// Carrying on from the landing screen goes INTO the app, not to the settings page. Somebody
+    /// who has just started it was not heading for Settings.
+    /// </summary>
+    [Fact]
+    public void CarryingOnFromTheLandingScreenGoesIntoTheApp()
+    {
+        var main = Chosen(AppMode.Pro);
+
+        main.ModeSelection.CancelCommand.Execute(null);
 
         Assert.False(main.IsChoosingMode);
-        Assert.Equal(AppMode.Basic, main.Mode);
         Assert.NotSame(main.ModeSelection, main.CurrentView);
+        Assert.NotSame(main.Settings, main.CurrentView);
     }
 
     /// <summary>The choice is remembered, or it would be asked again next time.</summary>
