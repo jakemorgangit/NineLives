@@ -92,6 +92,11 @@ built for.
 
 ### Fixed
 
+- Copy Database never ran the disk-space check the restore screen has had since #182, so the
+  screen where a copy fails after the target is already dropped was the one that never warned. It
+  now checks the source's live file sizes against the target's volumes when the scripts are
+  generated - including a drive the target does not have at all, which without MOVE clauses is
+  exactly where the restore would aim (#206)
 - "Keep what I have" on the launch cards landed on the container list - the exact landing the
   cards exist to avoid. It now lands on Restore, the same place choosing a mode lands (#209)
 - The widest mode drew an empty bordered box under the source picker. The audit card's border was

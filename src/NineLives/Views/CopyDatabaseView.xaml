@@ -197,6 +197,39 @@
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="4. Run it" Style="{StaticResource SubHeaderText}" />
+
+                    <!-- Will it fit (#206). Same check and stance as the restore screen: a warning,
+                         not a block - this app is not the authority on somebody else's storage. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,10,0,0"
+                            Background="{DynamicResource DangerPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource ErrorBrush}"
+                            BorderThickness="1"
+                            Visibility="{Binding HasSpaceWarning, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding SpaceWarning}"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource BodyText}" />
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding VolumeSpace}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Describe}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,0,0,2">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Fits}" Value="False">
+                                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                Text="Both statements are shown together, because what happens to each server is one decision - reading them one at a time is how somebody approves the half they were looking at." />
 
