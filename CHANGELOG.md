@@ -92,6 +92,8 @@ built for.
 
 ### Fixed
 
+- "Keep what I have" on the launch cards landed on the container list - the exact landing the
+  cards exist to avoid. It now lands on Restore, the same place choosing a mode lands (#209)
 - The widest mode drew an empty bordered box under the source picker. The audit card's border was
   gated on the mode while its contents waited on the backups, so between "this mode can audit" and
   "there is something to audit" the chrome outlived its own contents (#195)

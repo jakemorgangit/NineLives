@@ -97,7 +97,7 @@ public partial class MainViewModel : ViewModelBase
     /// app. Sending somebody who has just started the app to the settings page would be a stranger
     /// place to land than the one they were heading for.
     /// </summary>
-    private string _modeCardsReturnTo = Nav.BlobStorage;
+    private string _modeCardsReturnTo = Nav.Restore;
 
     private void OnModeCardsCancelled()
     {
@@ -243,7 +243,11 @@ public partial class MainViewModel : ViewModelBase
             // what shape the app is in and offers to change it, rather than the app simply being
             // that shape with no indication why. It is only a question the first time - after that
             // the current mode is marked and "Keep what I have" carries straight on.
-            ShowModeCards(Nav.BlobStorage);
+            //
+            // Straight on TO RESTORE (#209): the same place choosing a mode lands, because carrying
+            // on and choosing-the-same-thing are the same decision - and the container list is the
+            // landing #200 existed to get away from.
+            ShowModeCards(Nav.Restore);
         }
 
         // Fire and forget - startup must not wait on the network.
