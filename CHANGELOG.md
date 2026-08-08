@@ -57,6 +57,11 @@ built for.
 
 ### Changed
 
+- **Browse Backups can read a server's backup history**, not only a blob container. Backing up and
+  restoring have taken either medium since #165 and this screen did not come along, so the one
+  screen whose whole purpose is looking could not look at half of what the app writes. A share is
+  not walked as a directory - a folder of .bak files says nothing about which database each belongs
+  to - so the instance that took them is asked what it recorded (#197)
 - **The modes are named for the work, not for a rank.** "Restore only", "Back up and restore" and
   "Everything", rather than Basic/Standard/Pro with a column of ticks against a column of features,
   an "everything in Basic" ladder and a "Use Pro" button. They are three views of one application

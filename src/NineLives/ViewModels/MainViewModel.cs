@@ -170,7 +170,7 @@ public partial class MainViewModel : ViewModelBase
 
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
-        BlobBrowser = new BlobBrowserViewModel(_blobService, _credentialStore);
+        BlobBrowser = new BlobBrowserViewModel(_blobService, _sqlService, _credentialStore);
         // One store, shared: the Restore screen writes to it and the History screen reads it back,
         // and two instances pointed at the same file would be a way to lose an entry.
         _historyStore = new RestoreHistoryStore();

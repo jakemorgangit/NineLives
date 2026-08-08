@@ -405,7 +405,7 @@ public class ThemeTests(WpfFixture wpf)
                     new AboutView { DataContext = new AboutViewModel(store) },
                     new BlobConfigView { DataContext = new BlobConfigViewModel(store, new BlobStorageService(store)) },
                     new ServerManagerView { DataContext = new ServerManagerViewModel(store, new SqlServerService(store)) },
-                    new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(store), store) },
+                    new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(store), new FakeSqlServerService(), store) },
                     new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) },
                 ];
 
