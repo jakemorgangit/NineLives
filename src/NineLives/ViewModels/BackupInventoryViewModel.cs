@@ -168,6 +168,32 @@ public partial class BackupInventoryViewModel : ViewModelBase
     partial void OnAuditSummaryChanged(string value) => OnPropertyChanged(nameof(HasAuditSummary));
 
     /// <summary>
+    /// Whether the audit covers the whole container rather than the chosen database (#130).
+    ///
+    /// Off by default, and it should stay that way. At ~2.1s per set a database is a coffee and a
+    /// container can be most of an hour, so the wider scope is something to opt into having read
+    /// what it costs - which is exactly why the estimate is next to the switch.
+    /// </summary>
+    [ObservableProperty]
+    private bool _auditWholeContainer;
+
+    partial void OnAuditWholeContainerChanged(bool value)
+    {
+        OnPropertyChanged(nameof(AuditEstimate));
+        OnPropertyChanged(nameof(CanAudit));
+    }
+
+    /// <summary>
+    /// What the audit would actually read: the chosen database, or everything loaded.
+    ///
+    /// One place that answers it, so the estimate and the run cannot disagree about scope - which
+    /// would be the worst possible way to get this wrong, since the estimate is the only thing
+    /// standing between somebody and an unexpected forty minutes.
+    /// </summary>
+    public IReadOnlyList<BackupSet> AuditScope =>
+        AuditWholeContainer ? AllSets : WorkingSet;
+
+    /// <summary>
     /// What auditing the current selection would cost, said BEFORE it is started.
     ///
     /// A three-minute operation somebody did not expect reads as a hang. The number is not a guess:
@@ -179,14 +205,19 @@ public partial class BackupInventoryViewModel : ViewModelBase
     {
         get
         {
-            if (WorkingSet.Count == 0) return string.Empty;
+            var scope = AuditScope;
+            if (scope.Count == 0) return string.Empty;
 
-            var toRead = BackupAuditor.NotYetAudited(WorkingSet, _cachedAudit).Count;
-            return BackupAuditor.DescribeEstimate(toRead);
+            var toRead = BackupAuditor.NotYetAudited(scope, _cachedAudit).Count;
+            var estimate = BackupAuditor.DescribeEstimate(toRead);
+
+            return AuditWholeContainer
+                ? $"Every database in this container. {estimate}"
+                : estimate;
         }
     }
 
-    public bool CanAudit => WorkingSet.Count > 0 && !IsAuditing;
+    public bool CanAudit => AuditScope.Count > 0 && !IsAuditing;
 
     /// <summary>
     /// Reads every set in the current selection and reports where the headers disagree.
@@ -197,9 +228,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
     /// </summary>
     public async Task AuditAsync(ServerConnection server)
     {
-        if (WorkingSet.Count == 0) return;
-
-        var sets = WorkingSet.ToList();
+        var sets = AuditScope.ToList();
+        if (sets.Count == 0) return;
         var ct = _loadCancellation.Begin();
 
         IsAuditing = true;
@@ -226,9 +256,11 @@ public partial class BackupInventoryViewModel : ViewModelBase
             // The audit just wrote to it, so the estimate for a re-run has to see the new answers.
             _cachedAudit = _auditStore.Load();
 
+            var where = AuditWholeContainer ? " in this container" : string.Empty;
+
             AuditSummary = findings.Count == 0
-                ? $"All {sets.Count:N0} backup set(s) match their headers."
-                : $"{findings.Count:N0} of {sets.Count:N0} backup set(s) do not match their headers.";
+                ? $"All {sets.Count:N0} backup set(s){where} match their headers."
+                : $"{findings.Count:N0} of {sets.Count:N0} backup set(s){where} do not match their headers.";
 
             SetStatus(AuditSummary);
             _log.Info($"[audit] {AuditSummary}");
@@ -415,6 +447,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
         // one. Leaving either up attaches an answer to a question nobody asked.
         AuditFindings = [];
         AuditSummary = string.Empty;
+        OnPropertyChanged(nameof(AuditScope));
         OnPropertyChanged(nameof(AuditEstimate));
         OnPropertyChanged(nameof(CanAudit));
 
