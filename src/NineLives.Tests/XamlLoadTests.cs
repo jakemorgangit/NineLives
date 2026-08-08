@@ -136,7 +136,7 @@ public class XamlLoadTests(WpfFixture wpf)
     [Fact]
     public void BlobBrowserViewLoads()
         => Check("BlobBrowserView", () =>
-            new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(Store()), Store()) });
+            new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(Store()), new FakeSqlServerService(), Store()) });
 
     [Fact]
     public void SettingsViewLoads()
@@ -396,7 +396,7 @@ public class XamlLoadTests(WpfFixture wpf)
     {
         wpf.Invoke(() =>
         {
-            var vm = new BlobBrowserViewModel(new BlobStorageService(Store()), Store())
+            var vm = new BlobBrowserViewModel(new BlobStorageService(Store()), new FakeSqlServerService(), Store())
             {
                 IsBusy = true,
                 CanCancelLoad = true

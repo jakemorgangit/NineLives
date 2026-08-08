@@ -5,6 +5,7 @@
 
     <UserControl.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
         <converters:FileSizeConverter x:Key="FileSize" />
         <converters:BackupTypeToColorConverter x:Key="TypeToColor" />
@@ -23,7 +24,7 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
             <TextBlock Text="Browse Backups"
                        Style="{StaticResource HeaderText}" />
-            <TextBlock Text="View and explore backup files stored in your Azure Blob container."
+            <TextBlock Text="Look at what is in a blob container, or at what a SQL Server has recorded backing up."
                        Style="{StaticResource SecondaryText}"
                        Margin="0,4,0,0" />
         </StackPanel>
@@ -31,6 +32,25 @@
         <!-- Container + Database Selector -->
         <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,12">
             <StackPanel>
+                <!-- Where to look (#197). Same two media as backing up and restoring, in the same
+                     order and with the same radio pair, because it is the same choice. -->
+                <TextBlock Text="WHERE TO LOOK" Style="{StaticResource LabelText}" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                    <RadioButton Content="Azure Blob Storage"
+                                 GroupName="BrowseMedium"
+                                 Style="{StaticResource DarkRadioButton}"
+                                 IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
+                                 Margin="0,0,20,0"
+                                 ToolTip="Lists the container. Everything about each backup is inferred from its path and filename." />
+                    <!-- Not "a path both servers can see": nothing is being restored here, so there
+                         is no second server. What is read is one instance's own record. -->
+                    <RadioButton Content="A server's backup history"
+                                 GroupName="BrowseMedium"
+                                 Style="{StaticResource DarkRadioButton}"
+                                 IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=SharedPath}"
+                                 ToolTip="Reads msdb on the instance that took the backups, so each one's database, type and size are recorded fact rather than inference." />
+                </StackPanel>
+
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -38,12 +58,33 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0"
+                                Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="CONTAINER" Style="{StaticResource LabelText}" />
                         <ComboBox ItemsSource="{Binding Containers}"
                                   SelectedItem="{Binding SelectedContainer}"
                                   DisplayMemberPath="Name"
                                   Style="{StaticResource DarkComboBox}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0"
+                                Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="SERVER" Style="{StaticResource LabelText}" />
+                        <!-- ItemTemplate, not DisplayMemberPath. The combo box's own template
+                             renders the SELECTED item through a plain ContentPresenter, which
+                             ignores DisplayMemberPath and falls back to ToString - and
+                             ServerConnection has no override, so the closed box read
+                             "Blackcat.NineLives.Models.ServerConnection". Every other server picker
+                             in the app already uses an ItemTemplate for exactly this reason. -->
+                        <ComboBox ItemsSource="{Binding Servers}"
+                                  SelectedItem="{Binding SourceServer}"
+                                  Style="{StaticResource DarkComboBox}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                     </StackPanel>
 
                     <Button Grid.Column="1"
@@ -58,7 +99,7 @@
                             Style="{StaticResource SecondaryButton}"
                             Command="{Binding RefreshCommand}"
                             VerticalAlignment="Bottom"
-                            ToolTip="Refresh container list" />
+                            ToolTip="Refresh the container and server lists" />
                 </Grid>
 
                 <!-- Server + Database Filters (shown after loading) -->
@@ -188,10 +229,18 @@
                     <TextBlock Text="No backup files loaded"
                                Style="{StaticResource BodyText}"
                                HorizontalAlignment="Center" />
+                    <!-- Names the thing actually being asked for. Telling somebody who has chosen a
+                         server to select a container is an instruction they cannot follow (#197). -->
                     <TextBlock Text="Select a container and click Load Backups to browse."
                                Style="{StaticResource SecondaryText}"
                                HorizontalAlignment="Center"
-                               Margin="0,4,0,0" />
+                               Margin="0,4,0,0"
+                               Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}" />
+                    <TextBlock Text="Select a server and click Load Backups to read what it has backed up."
+                               Style="{StaticResource SecondaryText}"
+                               HorizontalAlignment="Center"
+                               Margin="0,4,0,0"
+                               Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
 
                 <!-- DataGrid -->
@@ -201,12 +250,20 @@
                           Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
                     <DataGrid.ContextMenu>
                         <ContextMenu>
+                            <!-- A URL and a container path mean nothing for a file read from msdb,
+                                 and copying one would put an empty string on the clipboard (#197). -->
                             <MenuItem Header="Copy path (HTTPS)"
                                       Command="{Binding CopyPathHttpsCommand}"
-                                      CommandParameter="{Binding SelectedFile}" />
+                                      CommandParameter="{Binding SelectedFile}"
+                                      Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}" />
                             <MenuItem Header="Copy path (container)"
                                       Command="{Binding CopyPathContainerCommand}"
-                                      CommandParameter="{Binding SelectedFile}" />
+                                      CommandParameter="{Binding SelectedFile}"
+                                      Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}" />
+                            <MenuItem Header="Copy path"
+                                      Command="{Binding CopyLocalPathCommand}"
+                                      CommandParameter="{Binding SelectedFile}"
+                                      Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}" />
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     <DataGrid.Columns>

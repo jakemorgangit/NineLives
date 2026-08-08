@@ -10,6 +10,7 @@ namespace Blackcat.NineLives.ViewModels;
 public partial class BlobBrowserViewModel : ViewModelBase
 {
     private readonly IBlobStorageService _blobService;
+    private readonly ISqlServerService _sqlService;
     private readonly ICredentialStore _credentialStore;
     private readonly OperationCancellation _loadCancellation = new();
 
@@ -68,18 +69,68 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [ObservableProperty]
     private string _dbSummaryText = string.Empty;
 
-    public BlobBrowserViewModel(IBlobStorageService blobService, ICredentialStore credentialStore)
+    public BlobBrowserViewModel(
+        IBlobStorageService blobService,
+        ISqlServerService sqlService,
+        ICredentialStore credentialStore)
     {
         _blobService = blobService;
+        _sqlService = sqlService;
         _credentialStore = credentialStore;
         RefreshContainers();
     }
 
+    /// <summary>
+    /// Where to look (#197).
+    ///
+    /// This screen could only ever see a container, while backing up and restoring have both taken
+    /// either medium since #165 - so the one screen whose whole purpose is LOOKING was the one that
+    /// could not look at half of what the app writes.
+    /// </summary>
+    [ObservableProperty]
+    private BackupMedium _selectedMedium = BackupMedium.AzureBlob;
+
+    public bool MediumIsBlob => SelectedMedium == BackupMedium.AzureBlob;
+    public bool MediumIsSharedPath => SelectedMedium == BackupMedium.SharedPath;
+
+    partial void OnSelectedMediumChanged(BackupMedium value)
+    {
+        OnPropertyChanged(nameof(MediumIsBlob));
+        OnPropertyChanged(nameof(MediumIsSharedPath));
+
+        // What is on screen came from the other source and no longer belongs to what is selected
+        // above it. Leaving it there would put a container's files under a server's name.
+        Clear();
+    }
+
+    /// <summary>
+    /// The instances whose backup history can be read.
+    ///
+    /// A share is NOT browsed by walking a directory: a folder of .bak files says nothing about
+    /// which database each belongs to, what type it is, or which full a differential was taken
+    /// against - inferring that from filenames is the whole reason #130 exists. The instance that
+    /// TOOK the backups recorded all of it, so that is what gets read.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ServerConnection> _servers = [];
+
+    [ObservableProperty]
+    private ServerConnection? _sourceServer;
+
+    partial void OnSourceServerChanged(ServerConnection? value) => Clear();
+
     public void RefreshContainers()
     {
         var previous = SelectedContainer?.Name;
+        var previousServer = SourceServer?.Id;
         var config = _credentialStore.LoadConfig();
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
+
+        Servers = new ObservableCollection<ServerConnection>(config.Servers);
+        if (previousServer != null)
+            SourceServer = Servers.FirstOrDefault(s => s.Id == previousServer);
+        if (SourceServer == null && Servers.Count > 0)
+            SourceServer = Servers[0];
         foreach (var c in Containers)
         {
             var sas = _credentialStore.GetSasToken(c);
@@ -92,7 +143,15 @@ public partial class BlobBrowserViewModel : ViewModelBase
             SelectedContainer = Containers[0];
     }
 
-    partial void OnSelectedContainerChanged(BlobContainerConfig? value)
+    partial void OnSelectedContainerChanged(BlobContainerConfig? value) => Clear();
+
+    /// <summary>
+    /// Empties the screen. Called whenever the SOURCE changes, whichever part of it changed.
+    ///
+    /// One method rather than three copies: what is listed belongs to the thing named above it, and
+    /// a screen that keeps one source's files under another's name is worse than an empty one.
+    /// </summary>
+    private void Clear()
     {
         _allFiles.Clear();
         _allSets.Clear();
@@ -134,9 +193,15 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [RelayCommand]
     private async Task LoadBackupsAsync()
     {
-        if (SelectedContainer == null)
+        if (MediumIsBlob && SelectedContainer == null)
         {
             SetError("Please select a container first.");
+            return;
+        }
+
+        if (MediumIsSharedPath && SourceServer == null)
+        {
+            SetError("Please select a server first.");
             return;
         }
 
@@ -146,7 +211,13 @@ public partial class BlobBrowserViewModel : ViewModelBase
         ClearStatus();
         try
         {
-            _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer, ct);
+            if (MediumIsSharedPath)
+            {
+                await LoadFromHistoryAsync(ct);
+                return;
+            }
+
+            _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer!, ct);
             _allSets = _blobService.GroupIntoBackupSets(
                 _allFiles, SelectedContainer?.BackupServerTimeZoneId);
             HasFiles = _allFiles.Count > 0;
@@ -183,6 +254,51 @@ public partial class BlobBrowserViewModel : ViewModelBase
             IsBusy = false;
             CanCancelLoad = false;
         }
+    }
+
+    /// <summary>
+    /// Reads what an instance recorded backing up (#197).
+    ///
+    /// The same two calls the restore screen makes, because it is the same question - what backups
+    /// exist and how do they group into sets. No path mapping is applied: nothing is being restored
+    /// here, so the paths worth showing are the ones the source actually wrote.
+    /// </summary>
+    private async Task LoadFromHistoryAsync(CancellationToken ct)
+    {
+        var source = SourceServer!;
+        var history = await _sqlService.ReadBackupHistoryAsync(source, null, ct);
+        var sets = BackupHistoryInventory.ToSets(history, BackupPathMapping.None);
+
+        _allSets = sets;
+        _allFiles = sets.SelectMany(s => s.Files).ToList();
+        HasFiles = _allFiles.Count > 0;
+
+        // Built from the sets rather than from filenames: msdb recorded each backup's database and
+        // server, so there is nothing here to infer.
+        DiscoveredServers = new ObservableCollection<string>(
+            sets.Select(s => s.ServerDisplay)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+
+        DiscoveredDatabases = new ObservableCollection<string>(
+            sets.Select(s => s.DatabaseName)
+                .Where(n => !string.IsNullOrEmpty(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+
+        if (DiscoveredServers.Count > 0)
+            SelectedServer = DiscoveredServers[0];
+        else if (DiscoveredDatabases.Count > 0)
+            SelectedDatabase = DiscoveredDatabases[0];
+
+        ApplyFilter();
+        UpdateFilteredSummary();
+
+        SetStatus(sets.Count == 0
+            ? $"{source.ServerName} has no backup history."
+            : $"Read {_allFiles.Count} file(s) in {sets.Count} backup set(s) from "
+              + $"{source.ServerName} across {DiscoveredDatabases.Count} database(s).");
     }
 
     /// <summary>
@@ -297,4 +413,21 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [RelayCommand]
     private void CopyPathContainer(BackupFileInfo? file)
         => CopyBlobContainerPath(file ?? SelectedFile, SelectedContainer);
+
+    /// <summary>
+    /// The path a file on disk actually has (#197).
+    ///
+    /// The two blob copies mean nothing here - there is no URL and no container - and offering them
+    /// against a file read from msdb would put an empty string on the clipboard, which is worse
+    /// than offering nothing.
+    /// </summary>
+    [RelayCommand]
+    private void CopyLocalPath(BackupFileInfo? file)
+    {
+        var target = file ?? SelectedFile;
+        if (target?.IsOnDisk != true) return;
+
+        Clipboard.SetText(target.RestoreDevice);
+        SetStatus("Path copied to clipboard.");
+    }
 }
