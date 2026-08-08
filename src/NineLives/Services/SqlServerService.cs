@@ -1081,6 +1081,50 @@ public class SqlServerService : ISqlServerService
     /// limitation of this approach - a brand-new drive with nothing on it does not appear, and a
     /// restore aimed there is simply not covered rather than being reported as full.
     /// </summary>
+    public async Task<List<FileMoveOption>> GetDatabaseFilesAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        var files = new List<FileMoveOption>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // size is in 8 KB pages. master_files rather than the database's own sys.database_files,
+        // so this works without access to the database itself - backing up only needs the server
+        // role, and the check should not demand more than the operation does.
+        cmd.CommandText = @"
+            SELECT mf.name          AS LogicalName,
+                   mf.physical_name AS PhysicalName,
+                   mf.type_desc     AS TypeDesc,
+                   CAST(mf.size AS bigint) * 8192 AS SizeBytes
+            FROM sys.master_files AS mf
+            WHERE mf.database_id = DB_ID(@database)";
+        cmd.Parameters.AddWithValue("@database", database);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var physical = reader["PhysicalName"]?.ToString() ?? string.Empty;
+
+            files.Add(new FileMoveOption
+            {
+                LogicalName = reader["LogicalName"]?.ToString() ?? string.Empty,
+                PhysicalName = physical,
+
+                // The copy's restore carries no MOVE clauses, so each file lands at the path the
+                // backup recorded - this one - on the TARGET. Filling NewPhysicalName in is what
+                // lets RestoreSpaceCheck ask about the right volumes.
+                NewPhysicalName = physical,
+
+                Type = reader["TypeDesc"]?.ToString() ?? string.Empty,
+                SizeBytes = reader["SizeBytes"] as long? ?? 0
+            });
+        }
+
+        return files;
+    }
+
     public async Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
         ServerConnection server, CancellationToken ct = default)
     {

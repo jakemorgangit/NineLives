@@ -323,6 +323,65 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             });
 
         SetStatus("Scripts generated.");
+
+        // Fire and forget: the scripts are usable immediately, and the space answer arrives when
+        // the two instances have answered. A generation that had to wait on both would make the
+        // whole screen feel slower for a check that usually says "fine".
+        _ = CheckSpaceAsync();
+    }
+
+    // ── will it fit (#206) ──────────────────────────────────────────────────────
+
+    [ObservableProperty]
+    private ObservableCollection<VolumeSpace> _volumeSpace = [];
+
+    [ObservableProperty]
+    private string _spaceWarning = string.Empty;
+
+    public bool HasSpaceWarning => SpaceWarning.Length > 0;
+
+    partial void OnSpaceWarningChanged(string value) => OnPropertyChanged(nameof(HasSpaceWarning));
+
+    /// <summary>
+    /// Whether the restore half can physically fit on the target, asked BEFORE the copy starts.
+    ///
+    /// The restore screen has had this since #182; the copy - which ends in exactly the same
+    /// RESTORE - did not, so the screen where somebody pays the least attention was the one that
+    /// never warned. A copy that runs out of disk fails in the restore half, with the source's
+    /// backup already taken and the target's database already dropped by WITH REPLACE.
+    ///
+    /// There is no backup to FILELISTONLY yet, and no need: the database is live on the source, so
+    /// its catalog gives the same sizes up front. The copy's restore carries no MOVE clauses, so
+    /// the files land at the paths the source recorded - meaning the volumes to check on the
+    /// target are the source's own drive letters.
+    ///
+    /// Failing to answer is not a warning, same stance as the restore screen: this is a courtesy
+    /// check over somebody else's storage.
+    /// </summary>
+    private async Task CheckSpaceAsync()
+    {
+        VolumeSpace = [];
+        SpaceWarning = string.Empty;
+
+        if (SourceServer == null || TargetServer == null || string.IsNullOrWhiteSpace(SourceDatabase))
+            return;
+
+        try
+        {
+            var files = await _sql.GetDatabaseFilesAsync(SourceServer, SourceDatabase!);
+            var free = await _sql.GetVolumeFreeSpaceAsync(TargetServer);
+            var volumes = RestoreSpaceCheck.Check(files, free);
+
+            VolumeSpace = new ObservableCollection<VolumeSpace>(volumes);
+            SpaceWarning = RestoreSpaceCheck.Warn(volumes);
+
+            if (HasSpaceWarning) _log.Warn($"[space] copy: {SpaceWarning}");
+        }
+        catch
+        {
+            // An instance that will not report its files or volumes has not said the copy will
+            // fail - it has said nothing. Warn on evidence, not on silence.
+        }
     }
 
     /// <summary>

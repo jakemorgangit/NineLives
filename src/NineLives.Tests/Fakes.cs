@@ -229,6 +229,19 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>What the fake instance says it has free, by mount point.</summary>
     public Dictionary<string, long> VolumeFreeSpace { get; set; } = [];
 
+    /// <summary>What GetDatabaseFilesAsync answers - the live files of whatever database is asked about.</summary>
+    public List<FileMoveOption> DatabaseFiles { get; set; } = [];
+
+    /// <summary>Set to make the file listing fail, standing in for a permissions refusal.</summary>
+    public Exception? DatabaseFilesThrows { get; set; }
+
+    public Task<List<FileMoveOption>> GetDatabaseFilesAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        if (DatabaseFilesThrows != null) throw DatabaseFilesThrows;
+        return Task.FromResult(DatabaseFiles.ToList());
+    }
+
     /// <summary>Set to make asking about volumes fail - which must not become a warning (#32).</summary>
     public Exception? VolumeCheckThrows { get; set; }
 

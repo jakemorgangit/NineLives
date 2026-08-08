@@ -26,6 +26,16 @@ public interface ISqlServerService
     /// Asked of the SERVER rather than measured from here: this app's process may not see those
     /// volumes at all, and where it can, what it sees is not what the service account writes to.
     /// </summary>
+    /// <summary>
+    /// The files of a database that exists on this instance now - name, path and current size.
+    ///
+    /// For the copy screen's disk-space check (#206): a copy has no backup to FILELISTONLY until
+    /// the source half has already run, but the database being copied is live on the source, so
+    /// its own catalog answers the same question up front.
+    /// </summary>
+    Task<List<FileMoveOption>> GetDatabaseFilesAsync(
+        ServerConnection server, string database, CancellationToken ct = default);
+
     Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
         ServerConnection server, CancellationToken ct = default);
 
