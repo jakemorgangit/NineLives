@@ -590,7 +590,10 @@ public partial class BackupInventoryViewModel : ViewModelBase
     private List<BackupSet> RegroupPerContainer(List<BackupFileInfo> files, BackupLocation? location = null)
     {
         var from = location ?? LoadedFrom;
-        var zones = from?.Containers.ToDictionary(c => c.Id, c => c.BackupServerTimeZoneId)
+        // Keyed on the same "" fallback the grouping below uses, because a container's Id is
+        // nullable and a null key would throw rather than simply not match.
+        var zones = from?.Containers
+                        .ToDictionary(c => c.Id ?? string.Empty, c => c.BackupServerTimeZoneId)
                     ?? [];
 
         // One container is the overwhelmingly common case and groups exactly as it always did.
