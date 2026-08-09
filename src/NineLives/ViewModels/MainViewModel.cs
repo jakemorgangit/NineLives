@@ -106,6 +106,44 @@ public partial class MainViewModel : ViewModelBase
         NavigateTo(_modeCardsReturnTo);
     }
 
+    /// <summary>
+    /// Where carrying on from the launch cards lands (#211): the last session's screen when it is
+    /// still a screen this mode offers, Restore otherwise. Restore rather than the recorded
+    /// screen's nearest cousin, because a guess about intent is worse than the app's centre.
+    /// </summary>
+    internal string LandingScreen(string? lastScreen) =>
+        lastScreen != null && Nav.Views.Contains(lastScreen) && IsViewAvailable(lastScreen)
+            ? lastScreen
+            : Nav.Restore;
+
+    /// <summary>
+    /// Files everything the next launch wants back: where the window was, and which screen was in
+    /// use (#211). Called once, at close - geometry changes are not worth a disk write each.
+    ///
+    /// Silent on failure, deliberately: the app is shutting down, and there is nobody left to act
+    /// on an error about remembering window positions. The store itself refuses to save over a
+    /// config that failed to load (#7), and that refusal is respected here too.
+    /// </summary>
+    public void SaveShutdownState(WindowGeometry geometry)
+    {
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            if (config.LoadError != null) return;
+
+            config.Window = geometry;
+            config.LastScreen = IsChoosingMode ? null : CurrentViewName;
+            _credentialStore.SaveConfig(config);
+        }
+        catch
+        {
+            // Shutdown. Nothing useful can be done with a failure here.
+        }
+    }
+
+    /// <summary>The geometry the last session saved, for the window to apply before first paint.</summary>
+    public WindowGeometry? SavedGeometry { get; private set; }
+
     /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
     public bool IsViewAvailable(string viewName) => viewName switch
     {
@@ -232,8 +270,13 @@ public partial class MainViewModel : ViewModelBase
         // An unreadable or unrecognised value lands on Pro rather than Basic: hiding features from
         // somebody whose config got mangled is a worse failure than showing too many, because the
         // second is untidy and the first looks like the app has lost a capability.
-        var savedMode = _credentialStore.LoadConfig().Mode;
+        var config = _credentialStore.LoadConfig();
+        var savedMode = config.Mode;
         Mode = savedMode ?? AppMode.Pro;
+
+        // The window applies this before first paint (#211) - read here so the window never
+        // touches the store itself.
+        SavedGeometry = config.Window;
 
         if (savedMode == null)
         {
@@ -253,10 +296,10 @@ public partial class MainViewModel : ViewModelBase
             // that shape with no indication why. It is only a question the first time - after that
             // the current mode is marked and "Keep what I have" carries straight on.
             //
-            // Straight on TO RESTORE (#209): the same place choosing a mode lands, because carrying
-            // on and choosing-the-same-thing are the same decision - and the container list is the
-            // landing #200 existed to get away from.
-            ShowModeCards(Nav.Restore);
+            // Straight on to where the last session WAS (#211), or to Restore - the same place
+            // choosing a mode lands (#209) - when nothing is recorded or the mode no longer
+            // offers it. Carrying on means carrying on.
+            ShowModeCards(LandingScreen(config.LastScreen));
         }
 
         // Fire and forget - startup must not wait on the network.

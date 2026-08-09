@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **The app comes back where it was left**: window size, position and maximised state, and the
+  screen that was in use - carrying on from the launch cards lands there rather than starting
+  again. Geometry is applied only when it still puts a grabbable title bar on a screen, so a
+  monitor unplugged since cannot swallow the window (#211)
 - **The end of a backup stops being a dead end**: a successful run offers "Verify what was
   written" - RESTORE VERIFYONLY over the exact devices the statement wrote - and the backup
   screen gains the same "Copy as Agent job" handover the restore screen has, because backups are
