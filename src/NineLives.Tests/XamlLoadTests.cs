@@ -228,11 +228,10 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.Execution.HasRecoveryActions = true;
             vm.Execution.ExecutionComplete = true;
 
-            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
-            // parent never measures, so its item containers are never generated to be found.
-            vm.Steps.Execute.IsVisible = true;
-            vm.Steps.Execute.IsExpanded = true;
-            var view = new RestoreView { DataContext = vm };
+            // The panel lives in the ExecutionWindow - the restore screen deliberately has no
+            // run surface of its own any more; the window is the only console.
+            var window = new ExecutionWindow(vm);
+            var view = (FrameworkElement)window.Content;
             var listener = BindingErrorListener.Attach();
             try
             {
@@ -411,15 +410,12 @@ public class XamlLoadTests(WpfFixture wpf)
     }
 
     /// <summary>
-    /// The console renders its lines and no longer shares a slot with the generated script - both
-    /// are on screen together.
-    ///
-    /// Checked in the state AFTER a restore, which is when the inline console is the one in use:
-    /// during a restore the console lives in its own window and the inline one is deliberately
-    /// hidden.
+    /// The script pane stays on screen after a run. It used to share a slot with an inline
+    /// console; the console now lives only in the ExecutionWindow, and the script - the thing the
+    /// restore screen is FOR - must not have gone with it.
     /// </summary>
     [Fact]
-    public void TheConsoleAndTheScriptAreBothVisibleTogether()
+    public void TheScriptStaysVisibleAfterARun()
     {
         wpf.Invoke(() =>
         {
@@ -447,12 +443,9 @@ public class XamlLoadTests(WpfFixture wpf)
             {
                 Realise(view);
 
-                var texts = FindAll<TextBlock>(view).Select(t => t.Text).ToList();
-                Assert.Contains(texts, t => t.Contains("50 percent processed", StringComparison.Ordinal));
-                Assert.Contains(texts, t => t.Contains("Beginning restore execution", StringComparison.Ordinal));
-
-                // The script pane used to be hidden the moment execution started, so the two
-                // shared one slot. Both must now be on screen at the same time.
+                // The script pane used to be hidden the moment execution started, so it and
+                // the old inline console shared one slot. The console has moved to its own
+                // window; the script stays.
                 var script = Assert.Single(FindAll<SqlTextBlock>(view));
                 Assert.Contains("RESTORE DATABASE [MyDb]", script.Sql, StringComparison.Ordinal);
 
@@ -471,11 +464,13 @@ public class XamlLoadTests(WpfFixture wpf)
     }
 
     /// <summary>
-    /// The inline console and the execution window are mutually exclusive: while the console is
-    /// showing in its own window the inline one must be gone, not sitting behind it.
+    /// The restore screen has NO console of its own - the run's output lives in the
+    /// ExecutionWindow, and only there. The inline copy used to duplicate every line and panel
+    /// behind the modal; what remains is the button that reopens the window over the same
+    /// viewmodel, shown once a run has produced output.
     /// </summary>
     [Fact]
-    public void TheInlineConsoleHidesWhileTheConsoleIsInItsOwnWindow()
+    public void TheRestoreScreenHasNoConsoleOnlyTheReopenButton()
     {
         wpf.Invoke(() =>
         {
@@ -489,44 +484,16 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.Steps.Execute.IsVisible = true;
             vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
-
-            vm.IsConsoleDetached = false;
-            Realise(view);
-            Assert.True(FindAll<ListBox>(view).Any(IsShown),
-                "The inline console should be visible when it is not shown in its own window.");
-
-            vm.IsConsoleDetached = true;
-            Realise(view);
-            Assert.False(FindAll<ListBox>(view).Any(IsShown),
-                "The inline console is still on screen behind the execution window.");
-        });
-    }
-
-    /// <summary>
-    /// The belt-and-braces half: while a restore is running the console is always in its own
-    /// window, so the inline one must be gone even if the detach flag never got set.
-    /// </summary>
-    [Fact]
-    public void TheInlineConsoleHidesWhileARestoreIsRunning()
-    {
-        wpf.Invoke(() =>
-        {
-            var vm = NewRestoreViewModel();
-            vm.Inventory.BackupsLoaded = true;
-            vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
-            vm.Execution.Console.HasOutput = true;
-            vm.IsConsoleDetached = false;   // as if the wiring failed
-            vm.Execution.IsExecuting = true;
-
-            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
-            // parent never measures, so its item containers are never generated to be found.
-            vm.Steps.Execute.IsVisible = true;
-            vm.Steps.Execute.IsExpanded = true;
-            var view = new RestoreView { DataContext = vm };
             Realise(view);
 
-            Assert.False(FindAll<ListBox>(view).Any(IsShown),
-                "Two consoles would be on screen at once during a restore.");
+            Assert.False(
+                FindAll<ListBox>(view).Any(l => IsShown(l) && ReferenceEquals(l.ItemsSource, vm.Execution.Console.Lines)),
+                "An inline console is on the restore screen - the ExecutionWindow is the only console.");
+
+            var reopen = FindAll<Button>(view).SingleOrDefault(b =>
+                b.Content is string label && label.Contains("last run", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(reopen);
+            Assert.True(IsShown(reopen!), "The reopen button should show once a run has output.");
         });
     }
 
