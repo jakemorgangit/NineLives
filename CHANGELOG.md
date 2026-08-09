@@ -57,6 +57,12 @@ built for.
 
 ### Changed
 
+- **TDE and encrypted backups are checked before the restore, not discovered by error 33111.**
+  The preflight reads both certificate thumbprints from the header it already fetches; a missing
+  certificate refuses by thumbprint - and by certificate NAME when the source instance can be
+  asked - with the BACKUP CERTIFICATE / CREATE CERTIFICATE route spelled out and passwords left
+  to whoever owns them. Copy Database warns before the backup half if the source database is TDE
+  and the target lacks its certificate (#222)
 - **Browse Backups hands over to Restore in one move** - a button once a database is chosen, and
   "Restore this database" on every row. The restore screen arrives with the same source selected,
   the backups loaded and the database landed, so the only thing left is choosing the restore

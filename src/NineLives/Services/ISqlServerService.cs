@@ -36,6 +36,24 @@ public interface ISqlServerService
     Task<List<FileMoveOption>> GetDatabaseFilesAsync(
         ServerConnection server, string database, CancellationToken ct = default);
 
+    /// <summary>
+    /// The name of the certificate in this instance's master with the given thumbprint, or null
+    /// when there is none (#222). The question error 33111 answers too late.
+    /// </summary>
+    Task<string?> FindCertificateByThumbprintAsync(
+        ServerConnection server, byte[] thumbprint, CancellationToken ct = default);
+
+    /// <summary>The thumbprint of a named certificate in this instance's master, or null (#222).</summary>
+    Task<byte[]?> GetCertificateThumbprintAsync(
+        ServerConnection server, string certificateName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether a database on this instance is TDE-encrypted, and by which certificate (#222).
+    /// The certificate name is best effort - it needs VIEW SERVER STATE - and null when unknown.
+    /// </summary>
+    Task<(bool IsEncrypted, string? CertificateName)> GetDatabaseTdeInfoAsync(
+        ServerConnection server, string database, CancellationToken ct = default);
+
     /// <summary>SERVERPROPERTY('ProductMajorVersion') - 16 is SQL Server 2022 - or null if it did not say (#210).</summary>
     Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default);
 

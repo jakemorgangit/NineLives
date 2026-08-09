@@ -216,6 +216,19 @@ public class BackupFileInfo
     public int? BackupTypeCode { get; set; }
 
     /// <summary>
+    /// The TDE certificate's thumbprint when the backed-up database is TDE-encrypted, from
+    /// HEADERONLY (#222). The target must hold a certificate with this thumbprint or the restore
+    /// fails with error 33111 - the failure people discover mid-DR.
+    /// </summary>
+    public byte[]? TdeThumbprint { get; set; }
+
+    /// <summary>
+    /// The encrypting certificate's thumbprint when the backup FILE was taken WITH ENCRYPTION,
+    /// from HEADERONLY (#222). Same rule, same error number, different certificate.
+    /// </summary>
+    public byte[]? EncryptorThumbprint { get; set; }
+
+    /// <summary>
     /// The major version of the SQL Server that TOOK this backup, from HEADERONLY (#210).
     ///
     /// The one-directional law of RESTORE hangs on it: a backup from a newer major can never be

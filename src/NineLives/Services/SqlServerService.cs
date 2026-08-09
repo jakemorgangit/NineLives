@@ -690,7 +690,9 @@ public class SqlServerService : ISqlServerService
             LastLsn = GetDecimalFromReader(reader, "LastLSN"),
             DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
             CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN"),
-            SoftwareVersionMajor = GetIntFromReader(reader, "SoftwareVersionMajor")
+            SoftwareVersionMajor = GetIntFromReader(reader, "SoftwareVersionMajor"),
+            TdeThumbprint = GetBytesFromReader(reader, "TDEThumbprint"),
+            EncryptorThumbprint = GetBytesFromReader(reader, "EncryptorThumbprint")
         };
         }, ct, "Reading the backup header");
     }
@@ -894,6 +896,27 @@ public class SqlServerService : ISqlServerService
             double db => (long)db,
             _ => null
         };
+    }
+
+    /// <summary>
+    /// A varbinary column, or null when it is NULL, empty, or absent - the encryption columns
+    /// arrived over several SQL Server versions, and a header from an old instance simply does
+    /// not have them (#222).
+    /// </summary>
+    private static byte[]? GetBytesFromReader(SqlDataReader reader, string columnName)
+    {
+        try
+        {
+            var ordinal = reader.GetOrdinal(columnName);
+            if (reader.IsDBNull(ordinal)) return null;
+
+            var value = reader.GetValue(ordinal) as byte[];
+            return value is { Length: > 0 } ? value : null;
+        }
+        catch (IndexOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     private static int? GetIntFromReader(SqlDataReader reader, string columnName)
@@ -1192,6 +1215,66 @@ public class SqlServerService : ISqlServerService
         }
 
         return files;
+    }
+
+    public async Task<string?> FindCertificateByThumbprintAsync(
+        ServerConnection server, byte[] thumbprint, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = "SELECT name FROM master.sys.certificates WHERE thumbprint = @thumbprint";
+        cmd.Parameters.AddWithValue("@thumbprint", thumbprint);
+
+        return await cmd.ExecuteScalarAsync(ct) as string;
+    }
+
+    public async Task<byte[]?> GetCertificateThumbprintAsync(
+        ServerConnection server, string certificateName, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = "SELECT thumbprint FROM master.sys.certificates WHERE name = @name";
+        cmd.Parameters.AddWithValue("@name", certificateName);
+
+        return await cmd.ExecuteScalarAsync(ct) as byte[];
+    }
+
+    public async Task<(bool IsEncrypted, string? CertificateName)> GetDatabaseTdeInfoAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT is_encrypted FROM sys.databases WHERE name = @database";
+            cmd.Parameters.AddWithValue("@database", database);
+
+            if (await cmd.ExecuteScalarAsync(ct) is not true) return (false, null);
+        }
+
+        // Which certificate, best effort: dm_database_encryption_keys needs VIEW SERVER STATE,
+        // and "TDE, certificate unknown" is still worth warning about.
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT c.name
+                FROM sys.dm_database_encryption_keys AS dek
+                JOIN master.sys.certificates AS c ON c.thumbprint = dek.encryptor_thumbprint
+                WHERE dek.database_id = DB_ID(@database)";
+            cmd.Parameters.AddWithValue("@database", database);
+
+            return (true, await cmd.ExecuteScalarAsync(ct) as string);
+        }
+        catch
+        {
+            return (true, null);
+        }
     }
 
     public async Task<int?> GetProductMajorVersionAsync(
