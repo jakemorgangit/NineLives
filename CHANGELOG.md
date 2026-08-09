@@ -8,7 +8,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.4.0] - 2026-08-09
 
 Nine Lives stops being a blob restore tool. It backs up and restores, to and from Azure Blob
 Storage or a path both servers can see - and it can do both in one action.
