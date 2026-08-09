@@ -38,3 +38,6 @@ desktop.ini
 
 ## Publish
 publish/
+
+# Local staging for the publish/ swap while the app holds the exe lock - never shipped
+publish-staging/
