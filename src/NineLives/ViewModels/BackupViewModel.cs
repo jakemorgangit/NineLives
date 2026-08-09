@@ -94,6 +94,19 @@ public partial class BackupViewModel : ViewModelBase
 
             Databases = new ObservableCollection<string>(names);
 
+            // The certificates ride along with the database list - same instance, same moment.
+            // Best effort: an instance that will not list them still backs up unencrypted.
+            try
+            {
+                EncryptionCertificates = new ObservableCollection<string>(
+                    await _sql.ListBackupCertificatesAsync(Server, ct));
+            }
+            catch
+            {
+                EncryptionCertificates = [];
+            }
+            OnPropertyChanged(nameof(EncryptWantedButNoCertificate));
+
             // Nothing is chosen for the user, the same rule the Restore screen learned - and here
             // the wrong choice means a production database read at full speed for several minutes.
             SelectedDatabase = null;
@@ -190,6 +203,38 @@ public partial class BackupViewModel : ViewModelBase
     [ObservableProperty]
     private string _description = string.Empty;
 
+    // ── encryption (#222) ───────────────────────────────────────────────────────
+
+    /// <summary>Whether to take the backup WITH ENCRYPTION. Off by default - it is a real choice.</summary>
+    [ObservableProperty]
+    private bool _encrypt;
+
+    /// <summary>Certificates on the source that can encrypt a backup, loaded with the databases.</summary>
+    [ObservableProperty]
+    private ObservableCollection<string> _encryptionCertificates = [];
+
+    [ObservableProperty]
+    private string? _selectedEncryptionCertificate;
+
+    /// <summary>
+    /// Encryption asked for on a server that offered no usable certificate - the checkbox is
+    /// honest about why the script is not appearing.
+    /// </summary>
+    public bool EncryptWantedButNoCertificate =>
+        Encrypt && EncryptionCertificates.Count == 0;
+
+    partial void OnEncryptChanged(bool value)
+    {
+        // The obvious default when there is exactly one thing to choose.
+        if (value && SelectedEncryptionCertificate == null && EncryptionCertificates.Count == 1)
+            SelectedEncryptionCertificate = EncryptionCertificates[0];
+
+        OnPropertyChanged(nameof(EncryptWantedButNoCertificate));
+        Invalidate();
+    }
+
+    partial void OnSelectedEncryptionCertificateChanged(string? value) => Invalidate();
+
     partial void OnCopyOnlyChanged(bool value) => Invalidate();
     partial void OnCompressionChanged(bool value) => Invalidate();
     partial void OnChecksumChanged(bool value) => Invalidate();
@@ -219,7 +264,10 @@ public partial class BackupViewModel : ViewModelBase
     public bool CanGenerate =>
         Server != null &&
         !string.IsNullOrWhiteSpace(SelectedDatabase) &&
-        (MediumIsBlob ? Container != null : !string.IsNullOrWhiteSpace(SharedPathRoot));
+        (MediumIsBlob ? Container != null : !string.IsNullOrWhiteSpace(SharedPathRoot)) &&
+        // Encryption asked for needs a certificate chosen - a statement without one is not a
+        // weaker statement, it is a different one.
+        (!Encrypt || !string.IsNullOrWhiteSpace(SelectedEncryptionCertificate));
 
     /// <summary>
     /// Rebuilds the script from the current options, or clears it.
@@ -263,6 +311,7 @@ public partial class BackupViewModel : ViewModelBase
             CopyOnly = CopyOnly,
             Compression = Compression,
             Checksum = Checksum,
+            EncryptionCertificate = Encrypt ? SelectedEncryptionCertificate : null,
             Description = string.IsNullOrWhiteSpace(Description) ? null : Description
         });
 

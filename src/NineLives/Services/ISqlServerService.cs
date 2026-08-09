@@ -43,6 +43,13 @@ public interface ISqlServerService
     Task<string?> FindCertificateByThumbprintAsync(
         ServerConnection server, byte[] thumbprint, CancellationToken ct = default);
 
+    /// <summary>
+    /// Certificates in this instance's master that can encrypt a backup (#222): private key held
+    /// and protected by the database master key. System certificates (##...##) are not offered.
+    /// </summary>
+    Task<List<string>> ListBackupCertificatesAsync(
+        ServerConnection server, CancellationToken ct = default);
+
     /// <summary>The thumbprint of a named certificate in this instance's master, or null (#222).</summary>
     Task<byte[]?> GetCertificateThumbprintAsync(
         ServerConnection server, string certificateName, CancellationToken ct = default);
