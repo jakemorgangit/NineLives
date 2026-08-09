@@ -311,6 +311,12 @@ public class AppConfig
     /// </summary>
     public AppMode? Mode { get; set; }
 
+    /// <summary>
+    /// Where run notifications go (#242): Teams, Slack, or any JSON endpoint. The URLs are
+    /// secrets in all but name and never leave this machine in an export (#213).
+    /// </summary>
+    public List<WebhookEndpoint> Webhooks { get; set; } = [];
+
     /// <summary>Where the window was when the app closed, or null before the first close (#211).</summary>
     public WindowGeometry? Window { get; set; }
 
