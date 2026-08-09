@@ -1230,6 +1230,35 @@ public class SqlServerService : ISqlServerService
         return await cmd.ExecuteScalarAsync(ct) as string;
     }
 
+    public async Task<List<string>> ListBackupCertificatesAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        var names = new List<string>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // BACKUP ... WITH ENCRYPTION needs the certificate's private key, protected by the
+        // database master key - a certificate without one (or with a password-protected key)
+        // fails at backup time, so it is not offered at all.
+        cmd.CommandText = @"
+            SELECT name
+            FROM master.sys.certificates
+            WHERE pvt_key_encryption_type = 'MK'
+              AND name NOT LIKE '##%'
+            ORDER BY name";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var name = reader["name"]?.ToString();
+            if (!string.IsNullOrEmpty(name)) names.Add(name);
+        }
+
+        return names;
+    }
+
     public async Task<byte[]?> GetCertificateThumbprintAsync(
         ServerConnection server, string certificateName, CancellationToken ct = default)
     {
