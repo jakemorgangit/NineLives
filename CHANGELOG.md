@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **Several databases can be backed up in one run** - tick them (or "All user databases"), one
+  BACKUP per database sharing the same options, run database-at-a-time so a failure on the sixth
+  names the sixth and the rest still run. The verify offer afterwards covers exactly what
+  succeeded. "A copy-only of everything before we patch" is now one screen, once (#208)
 - **The download is 55% smaller** - 71 MB instead of 157 MB - by compressing the single-file
   bundle. Measured before enabling: time-to-first-window is unchanged, hidden entirely inside the
   splash dwell (#212)
