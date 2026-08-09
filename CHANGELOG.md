@@ -57,6 +57,9 @@ built for.
 
 ### Changed
 
+- **The download is 55% smaller** - 71 MB instead of 157 MB - by compressing the single-file
+  bundle. Measured before enabling: time-to-first-window is unchanged, hidden entirely inside the
+  splash dwell (#212)
 - **The app comes back where it was left**: window size, position and maximised state, and the
   screen that was in use - carrying on from the launch cards lands there rather than starting
   again. Geometry is applied only when it still puts a grabbable title bar on a screen, so a
