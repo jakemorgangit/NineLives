@@ -8,6 +8,15 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Changed
+
+- **One console, not two.** The restore screen no longer keeps an inline copy of the run's
+  output behind the execution window - every line and panel was rendered twice. The window is
+  the console; a "View the last run's output" button reopens it over the same record, and the
+  History screen keeps the permanent copy
+
 ## [1.4.1] - 2026-08-09
 
 ### Fixed

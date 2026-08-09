@@ -167,16 +167,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     // ── Execution console ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// True while the console is showing in its own window.
-    ///
-    /// The inline console hides itself for the duration, so the output is only ever in one place.
-    /// It comes back when the window closes, so the record of what happened is still reachable
-    /// from the main view afterwards.
-    /// </summary>
-    [ObservableProperty]
-    private bool _isConsoleDetached;
-
     /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
     private void RefreshCancelState()
     {
