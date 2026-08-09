@@ -665,6 +665,15 @@ public partial class BackupViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// The dispatcher of whatever thread constructed this screen - the UI thread in the app,
+    /// nothing in a test. Captured at construction, the same rule ConsoleBuffer documents: the
+    /// console belongs to the thread that made it. NOT Application.Current, which is process-wide
+    /// state another component (the WPF test fixture, a future second window) can own.
+    /// </summary>
+    private readonly System.Windows.Threading.Dispatcher? _consoleDispatcher =
+        System.Windows.Threading.Dispatcher.FromThread(Thread.CurrentThread);
+
+    /// <summary>
     /// The console is bound to the UI, and lines arrive off it: SQL Server's progress callbacks
     /// fire on the connection's worker thread, and adding to a bound collection there tore the
     /// ItemsControl two seconds into a real copy (#233). The restore screen has carried this rule
@@ -673,8 +682,7 @@ public partial class BackupViewModel : ViewModelBase
     /// </summary>
     private void Append(string line)
     {
-        var dispatcher = System.Windows.Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess()) Console.Add(line);
-        else dispatcher.InvokeAsync(() => Console.Add(line));
+        if (_consoleDispatcher == null || _consoleDispatcher.CheckAccess()) Console.Add(line);
+        else _consoleDispatcher.InvokeAsync(() => Console.Add(line));
     }
 }
