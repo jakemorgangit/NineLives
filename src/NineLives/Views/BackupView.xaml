@@ -72,11 +72,50 @@
                     </Grid>
 
                     <StackPanel Margin="0,12,0,0">
-                        <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
-                        <ComboBox ItemsSource="{Binding Databases}"
-                                  SelectedItem="{Binding SelectedDatabase}"
-                                  Style="{StaticResource DarkComboBox}"
-                                  Margin="0,4,0,0" />
+                        <StackPanel Visibility="{Binding SingleSelect, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                            <ComboBox ItemsSource="{Binding Databases}"
+                                      SelectedItem="{Binding SelectedDatabase}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <!-- More than one, for the patch-night request (#208): "a copy-only of
+                             everything before we patch" is N statements sharing one set of
+                             options, and ticking them here beats running the screen N times. -->
+                        <CheckBox Content="Back up more than one database"
+                                  IsChecked="{Binding MultiSelect}"
+                                  Style="{StaticResource DarkCheckBox}"
+                                  Margin="0,10,0,0" />
+
+                        <StackPanel Visibility="{Binding MultiSelect, Converter={StaticResource BoolToVis}}"
+                                    Margin="0,8,0,0">
+                            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                    CornerRadius="4" Padding="8" MaxHeight="180">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding DatabasePicks}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <CheckBox Content="{Binding Name}"
+                                                          IsChecked="{Binding IsPicked}"
+                                                          Style="{StaticResource DarkCheckBox}"
+                                                          Margin="0,2,0,2" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button Content="All user databases"
+                                        Command="{Binding PickAllCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5" Margin="0,0,8,0" />
+                                <Button Content="None"
+                                        Command="{Binding PickNoneCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5" />
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
                 </StackPanel>
             </Border>

@@ -74,6 +74,69 @@ public partial class BackupViewModel : ViewModelBase
         }
     }
 
+    /// <summary>One database in the multi-select list (#208), with its tick.</summary>
+    public partial class DatabasePick : ObservableObject
+    {
+        public DatabasePick(string name, Action changed)
+        {
+            Name = name;
+            _changed = changed;
+        }
+
+        private readonly Action _changed;
+
+        public string Name { get; }
+
+        [ObservableProperty]
+        private bool _isPicked;
+
+        partial void OnIsPickedChanged(bool value) => _changed();
+    }
+
+    /// <summary>
+    /// Backing up more than one database in one run (#208).
+    ///
+    /// "Take a copy-only of everything before we patch" is a completely ordinary request, and the
+    /// script for it is just N BACKUP statements sharing the same destination and options. Off by
+    /// default: one database is still the common case, and the single picker should not become a
+    /// checklist for it.
+    /// </summary>
+    [ObservableProperty]
+    private bool _multiSelect;
+
+    /// <summary>The single picker hides while the list is up - two answers to one question otherwise.</summary>
+    public bool SingleSelect => !MultiSelect;
+
+    partial void OnMultiSelectChanged(bool value)
+    {
+        OnPropertyChanged(nameof(SingleSelect));
+        Invalidate();
+    }
+
+    /// <summary>The tickable list, rebuilt whenever the databases load.</summary>
+    [ObservableProperty]
+    private ObservableCollection<DatabasePick> _databasePicks = [];
+
+    /// <summary>The ticked names, in the order the instance listed them.</summary>
+    public List<string> PickedDatabases =>
+        DatabasePicks.Where(p => p.IsPicked).Select(p => p.Name).ToList();
+
+    /// <summary>
+    /// Ticks everything the instance listed. The list is already user databases only - system
+    /// databases are excluded at the query - so "all" means what the patch-night request means.
+    /// </summary>
+    [RelayCommand]
+    private void PickAll()
+    {
+        foreach (var pick in DatabasePicks) pick.IsPicked = true;
+    }
+
+    [RelayCommand]
+    private void PickNone()
+    {
+        foreach (var pick in DatabasePicks) pick.IsPicked = false;
+    }
+
     /// <summary>Asks the chosen instance what it has, rather than making somebody type a name.</summary>
     [RelayCommand]
     private async Task LoadDatabasesAsync()
@@ -93,6 +156,8 @@ public partial class BackupViewModel : ViewModelBase
             var names = await _sql.GetDatabaseListAsync(Server, ct);
 
             Databases = new ObservableCollection<string>(names);
+            DatabasePicks = new ObservableCollection<DatabasePick>(
+                names.Select(n => new DatabasePick(n, Invalidate)));
 
             // The certificates ride along with the database list - same instance, same moment.
             // Best effort: an instance that will not list them still backs up unencrypted.
@@ -263,7 +328,7 @@ public partial class BackupViewModel : ViewModelBase
     /// </summary>
     public bool CanGenerate =>
         Server != null &&
-        !string.IsNullOrWhiteSpace(SelectedDatabase) &&
+        (MultiSelect ? DatabasePicks.Any(p => p.IsPicked) : !string.IsNullOrWhiteSpace(SelectedDatabase)) &&
         (MediumIsBlob ? Container != null : !string.IsNullOrWhiteSpace(SharedPathRoot)) &&
         // Encryption asked for needs a certificate chosen - a statement without one is not a
         // weaker statement, it is a different one.
@@ -288,24 +353,26 @@ public partial class BackupViewModel : ViewModelBase
         if (HasScript) Generate();
     }
 
-    [RelayCommand(CanExecute = nameof(CanGenerate))]
-    private void Generate()
+    /// <summary>
+    /// One database's statement and files, at one shared moment.
+    ///
+    /// The single seam both paths go through (#208): the single-database screen is the one-item
+    /// case, and the multi-select run executes exactly these per-database scripts - so what is on
+    /// screen (their concatenation) is always what runs.
+    /// </summary>
+    private (string Script, List<string> Destinations) GenerateFor(string database, DateTime takenAt)
     {
-        if (!CanGenerate) return;
-
-        var takenAt = DateTime.Now;
-
         var destinations = MediumIsBlob
             ? BackupDestinationBuilder.ForContainer(
-                Container!, Server!.ServerName, SelectedDatabase!, BackupType.Full,
+                Container!, Server!.ServerName, database, BackupType.Full,
                 takenAt, Math.Max(1, Stripes), CopyOnly)
             : BackupDestinationBuilder.ForSharedPath(
-                SharedPathRoot, SelectedDatabase!, BackupType.Full,
+                SharedPathRoot, database, BackupType.Full,
                 takenAt, Math.Max(1, Stripes), CopyOnly);
 
-        GeneratedScript = _generator.Generate(new BackupOptions
+        var script = _generator.Generate(new BackupOptions
         {
-            DatabaseName = SelectedDatabase!,
+            DatabaseName = database,
             Medium = Medium,
             Destinations = destinations,
             CopyOnly = CopyOnly,
@@ -315,8 +382,36 @@ public partial class BackupViewModel : ViewModelBase
             Description = string.IsNullOrWhiteSpace(Description) ? null : Description
         });
 
-        Destinations = new ObservableCollection<string>(destinations);
-        SetStatus("Script generated.");
+        return (script, destinations);
+    }
+
+    /// <summary>What the last generation produced, per database - the multi run executes these.</summary>
+    private List<(string Database, string Script, List<string> Destinations)> _generated = [];
+
+    [RelayCommand(CanExecute = nameof(CanGenerate))]
+    private void Generate()
+    {
+        if (!CanGenerate) return;
+
+        var takenAt = DateTime.Now;
+
+        var databases = MultiSelect ? PickedDatabases : [SelectedDatabase!];
+
+        _generated = databases
+            .Select(db =>
+            {
+                var (script, destinations) = GenerateFor(db, takenAt);
+                return (db, script, destinations);
+            })
+            .ToList();
+
+        GeneratedScript = string.Join(Environment.NewLine + Environment.NewLine,
+            _generated.Select(g => g.Script));
+        Destinations = new ObservableCollection<string>(_generated.SelectMany(g => g.Destinations));
+
+        SetStatus(_generated.Count == 1
+            ? "Script generated."
+            : $"Script generated - {_generated.Count} databases, in order.");
     }
 
     /// <summary>Where the files will land, so it can be read before anything is written.</summary>
@@ -375,27 +470,79 @@ public partial class BackupViewModel : ViewModelBase
         var ct = _cancellation.Begin();
         var started = DateTime.Now;
 
+        // Database-at-a-time, deliberately (#208): a failure on the sixth database names the
+        // sixth database and the rest still run - the patch-night semantics. One database is the
+        // one-item case of the same loop.
+        var run = _generated.Count > 0
+            ? _generated
+            : [(SelectedDatabase!, GeneratedScript, Destinations.ToList())];
+
+        var succeededDevices = new List<string>();
+        var failed = new List<string>();
+        string? lastFailureMessage = null;
+
         try
         {
-            Append($"Backing up {SelectedDatabase} on {Server.ServerName}...");
             if (!CopyOnly)
-                Append("This is NOT a copy-only backup - the differential base on this database is moving.");
+                Append(run.Count == 1
+                    ? "This is NOT a copy-only backup - the differential base on this database is moving."
+                    : "These are NOT copy-only backups - every database's differential base is moving.");
 
-            _log.Info($"Backup started: {SelectedDatabase} on {Server.ServerName}, " +
+            _log.Info($"Backup started: {run.Count} database(s) on {Server.ServerName}, " +
                       $"copyOnly={CopyOnly}, files={Destinations.Count}");
 
-            await _sql.ExecuteWithProgressAsync(Server, GeneratedScript, Append, ct);
+            foreach (var (database, script, destinations) in run)
+            {
+                ct.ThrowIfCancellationRequested();
+                Append($"Backing up {database} on {Server.ServerName}...");
+
+                try
+                {
+                    await _sql.ExecuteWithProgressAsync(Server, script, Append, ct);
+                    Append($"{database}: done.");
+                    succeededDevices.AddRange(destinations);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Named, and NOT fatal to the rest: the whole point of backing up everything
+                    // before the patch is that everything gets backed up.
+                    Append($"{database}: FAILED - {ex.Message}");
+                    failed.Add(database);
+                    lastFailureMessage = ex.Message;
+                    _log.Error($"Backup failed: {database}: {ex.Message}");
+                }
+            }
 
             var elapsed = DateTime.Now - started;
-            Append($"Finished in {elapsed.TotalSeconds:N0}s.");
-            SetStatus($"Backed up {SelectedDatabase} in {elapsed.TotalSeconds:N0}s.");
-            _log.Info($"Backup finished: {SelectedDatabase} in {elapsed.TotalSeconds:N0}s");
 
-            // What was just written is now the thing to verify (#207) - captured from the
-            // statement's own devices, not re-derived, so the verify reads exactly what the
-            // backup wrote even after the options change.
-            _lastWrittenDevices = Destinations.ToList();
-            CanVerifyLastBackup = true;
+            if (failed.Count == 0)
+            {
+                Append($"Finished in {elapsed.TotalSeconds:N0}s.");
+                SetStatus(run.Count == 1
+                    ? $"Backed up {run[0].Database} in {elapsed.TotalSeconds:N0}s."
+                    : $"Backed up {run.Count} databases in {elapsed.TotalSeconds:N0}s.");
+                _log.Info($"Backup finished: {run.Count} database(s) in {elapsed.TotalSeconds:N0}s");
+            }
+            else if (run.Count == 1)
+            {
+                // One database keeps the direct report - "1 of 1" and "the others finished" would
+                // be the multi-run's phrasing wearing the wrong trousers.
+                SetError($"The backup did not complete: {lastFailureMessage}");
+            }
+            else
+            {
+                SetError($"{failed.Count} of {run.Count} did not complete: {string.Join(", ", failed)}. " +
+                         "The others finished and are real backups - see the console for each failure.");
+            }
+
+            // What was just written is the thing to verify (#207) - only what actually succeeded,
+            // captured from the statements' own devices.
+            _lastWrittenDevices = succeededDevices;
+            CanVerifyLastBackup = succeededDevices.Count > 0;
         }
         catch (OperationCanceledException)
         {
@@ -403,13 +550,11 @@ public partial class BackupViewModel : ViewModelBase
             // is not a backup, and it will sit there looking like one.
             Append("Cancelled. Any file already written is incomplete and cannot be restored from.");
             SetStatus("Backup cancelled.");
-            _log.Info($"Backup cancelled: {SelectedDatabase}");
-        }
-        catch (Exception ex)
-        {
-            Append(ex.Message);
-            SetError($"The backup did not complete: {ex.Message}");
-            _log.Error($"Backup failed: {SelectedDatabase}: {ex.Message}");
+            _log.Info("Backup cancelled");
+
+            // What finished before the stop is still real.
+            _lastWrittenDevices = succeededDevices;
+            CanVerifyLastBackup = succeededDevices.Count > 0;
         }
         finally
         {
