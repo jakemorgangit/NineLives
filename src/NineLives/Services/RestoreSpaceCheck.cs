@@ -6,9 +6,15 @@ namespace Blackcat.NineLives.Services;
 /// <param name="Volume">The mount point as SQL Server reports it, e.g. <c>D:\</c>.</param>
 /// <param name="RequiredBytes">The size of the database files landing there.</param>
 /// <param name="FreeBytes">What the volume has left, as the SQL Server service account sees it.</param>
-public sealed record VolumeSpace(string Volume, long RequiredBytes, long FreeBytes)
+/// <param name="WasReported">
+/// Whether the target reported this volume at all. dm_os_volume_stats only describes volumes that
+/// host database files, so "not reported" routinely means the drive does not exist there - and
+/// "has only 0.0 B free" was the wrong sentence for that, because the fix is not freeing space,
+/// it is a MOVE clause or a different target (#233's screenshot).
+/// </param>
+public sealed record VolumeSpace(string Volume, long RequiredBytes, long FreeBytes, bool WasReported = true)
 {
-    public bool Fits => FreeBytes >= RequiredBytes;
+    public bool Fits => WasReported && FreeBytes >= RequiredBytes;
 
     public long ShortfallBytes => Math.Max(0, RequiredBytes - FreeBytes);
 
@@ -17,10 +23,14 @@ public sealed record VolumeSpace(string Volume, long RequiredBytes, long FreeByt
     /// nothing when asked to - which shipped as an empty panel once already this week (#130).
     /// </summary>
     public string Describe =>
-        Fits
-            ? $"{Volume} needs {ByteSize.Format(RequiredBytes)} and has {ByteSize.Format(FreeBytes)} free."
-            : $"{Volume} needs {ByteSize.Format(RequiredBytes)} and has only " +
-              $"{ByteSize.Format(FreeBytes)} free - short by {ByteSize.Format(ShortfallBytes)}.";
+        !WasReported
+            ? $"{Volume} needs {ByteSize.Format(RequiredBytes)}, and the target reported no " +
+              $"{Volume} volume at all - it may not have that drive. Relocate the files (MOVE) " +
+              "or they will be written to a path that does not exist."
+            : Fits
+                ? $"{Volume} needs {ByteSize.Format(RequiredBytes)} and has {ByteSize.Format(FreeBytes)} free."
+                : $"{Volume} needs {ByteSize.Format(RequiredBytes)} and has only " +
+                  $"{ByteSize.Format(FreeBytes)} free - short by {ByteSize.Format(ShortfallBytes)}.";
 }
 
 /// <summary>
@@ -64,12 +74,14 @@ public static class RestoreSpaceCheck
         }
 
         return required
-            .Select(pair => new VolumeSpace(
-                pair.Key,
-                pair.Value,
-                // A volume the target did not report on is treated as having nothing, so it is
-                // reported rather than silently passing. Not knowing is not the same as fitting.
-                MatchVolume(freeByVolume, pair.Key)))
+            .Select(pair =>
+            {
+                // A volume the target did not report on is surfaced rather than silently passing
+                // - not knowing is not the same as fitting - and it is surfaced as ABSENT, not as
+                // full, because those have different fixes.
+                var free = MatchVolume(freeByVolume, pair.Key);
+                return new VolumeSpace(pair.Key, pair.Value, free ?? 0, free != null);
+            })
             .OrderBy(v => v.Volume, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -90,7 +102,7 @@ public static class RestoreSpaceCheck
         return path[..2].ToUpperInvariant() + @"\";
     }
 
-    private static long MatchVolume(IReadOnlyDictionary<string, long> freeByVolume, string volume)
+    private static long? MatchVolume(IReadOnlyDictionary<string, long> freeByVolume, string volume)
     {
         if (freeByVolume.TryGetValue(volume, out var free)) return free;
 
@@ -102,7 +114,9 @@ public static class RestoreSpaceCheck
             if (string.Equals(key.TrimEnd('\\'), trimmed, StringComparison.OrdinalIgnoreCase))
                 return value;
 
-        return 0;
+        // Genuinely absent, and said as such - null is "no such volume", which has a different
+        // fix from "a volume with nothing free".
+        return null;
     }
 
     /// <summary>

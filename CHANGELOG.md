@@ -12,6 +12,9 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- A drive the target does not have was described as having "0.0 B free". Absent is now said as
+  absent, with the actual fix named: relocate the files (MOVE) or pick a different target -
+  freeing space on a drive that does not exist was never the answer (#233)
 - **Copy Database crashed mid-run** - "An ItemsControl is inconsistent with its items source" -
   when SQL Server's progress messages, which arrive on the connection's worker thread, were added
   to the bound console straight from that thread. The copy and backup screens now marshal the way
