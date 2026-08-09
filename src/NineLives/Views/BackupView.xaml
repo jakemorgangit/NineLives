@@ -219,7 +219,14 @@
                                 Command="{Binding GenerateCommand}"
                                 Style="{StaticResource PrimaryButton}"
                                 Padding="16,8" Margin="0,0,8,8" />
-                        <Button Content="Copy to clipboard"
+                        <Button Content="Copy as Agent job"
+                            Command="{Binding CopyAsAgentJobCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,0"
+                            Visibility="{Binding ShowAgentJob, Converter={StaticResource BoolToVis}}"
+                            ToolTip="The same statement wrapped as a SQL Server Agent job - created disabled and unscheduled, one step per batch. Backups are the thing people actually schedule." />
+
+                    <Button Content="Copy to clipboard"
                                 Command="{Binding CopyScriptCommand}"
                                 IsEnabled="{Binding HasScript}"
                                 Style="{StaticResource SecondaryButton}"
@@ -234,6 +241,12 @@
                                 Style="{StaticResource SecondaryButton}"
                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
                                 Padding="16,8" Margin="0,0,8,8" />
+                        <Button Content="Verify what was written"
+                                Command="{Binding VerifyLastBackupCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Visibility="{Binding CanVerifyLastBackup, Converter={StaticResource BoolToVis}}"
+                                Padding="16,8" Margin="0,0,8,8"
+                                ToolTip="RESTORE VERIFYONLY over the files the last run wrote. A backup nobody has verified is a hope, not a backup." />
                     </WrapPanel>
 
                     <!-- Where the files will land, readable before anything is written. -->
