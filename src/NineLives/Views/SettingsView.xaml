@@ -105,6 +105,28 @@
                 </StackPanel>
             </Border>
 
+            <!-- Moving machines (#213). The boundary is the feature: the file holds shapes,
+                 never secrets. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,16,0,0">
+                <StackPanel>
+                    <TextBlock Text="Moving to another machine" Style="{StaticResource SubHeaderText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,10"
+                               Text="Export writes the containers, servers and settings to a file that holds NO secrets - SAS tokens and SQL passwords stay in this machine's Windows Credential Manager, and each connection asks for its credential again on the new machine. Import adds and updates; it never deletes." />
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Export configuration..."
+                                Command="{Binding ExportConfigCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0" />
+                        <Button Content="Import configuration..."
+                                Command="{Binding ImportConfigCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
     </ScrollViewer>
 </UserControl>

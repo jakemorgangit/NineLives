@@ -57,6 +57,11 @@ built for.
 
 ### Changed
 
+- **The configuration can move to another machine without moving a single secret** - export
+  writes containers, servers and settings to a file that is safe on a share or in a ticket (SAS
+  tokens and SQL passwords stay in Windows Credential Manager; a SAS pasted into a container URL
+  is stripped on the way out), and import adds and updates but never deletes. Each connection
+  asks for its credential again on the new machine (#213)
 - **Several databases can be backed up in one run** - tick them (or "All user databases"), one
   BACKUP per database sharing the same options, run database-at-a-time so a failure on the sixth
   names the sixth and the rest still run. The verify offer afterwards covers exactly what
