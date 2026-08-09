@@ -26,6 +26,17 @@ public class BackupOptions
     public List<string> Destinations { get; set; } = [];
 
     /// <summary>
+    /// The server certificate to encrypt the backup with, or null for none (#222).
+    ///
+    /// Always AES_256 when set - offering the weaker algorithms SQL Server still accepts would
+    /// be a menu of mistakes. An encrypted backup can only be restored where this certificate
+    /// exists, which is the point, and also the caution the UI states: a TDE database's backups
+    /// are already encrypted regardless, so this is for everything else - the plain database
+    /// whose stolen blob would otherwise be restorable by whoever holds the SAS.
+    /// </summary>
+    public string? EncryptionCertificate { get; set; }
+
+    /// <summary>
     /// COPY_ONLY, and on by default.
     ///
     /// A plain full backup resets the differential base on the source. Doing that to a production

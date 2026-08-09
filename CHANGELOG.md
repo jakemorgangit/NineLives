@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **Backups can be taken WITH ENCRYPTION** - AES-256 against a server certificate picked from
+  the source's own list (only certificates whose private key the backup can actually use are
+  offered). The caution is stated where the choice is made: every future restore target needs
+  that certificate first, so export it and keep it with the DR kit (#222)
 - **TDE and encrypted backups are checked before the restore, not discovered by error 33111.**
   The preflight reads both certificate thumbprints from the header it already fetches; a missing
   certificate refuses by thumbprint - and by certificate NAME when the source instance can be

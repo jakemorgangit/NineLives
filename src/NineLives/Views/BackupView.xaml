@@ -157,6 +157,34 @@
                                       IsChecked="{Binding Checksum}"
                                       Style="{StaticResource DarkCheckBox}"
                                       ToolTip="What makes a later RESTORE VERIFYONLY mean anything. Without it, verifying can only confirm the file is readable." />
+
+                            <!-- WITH ENCRYPTION (#222). AES_256 always - the weaker algorithms
+                                 SQL Server still accepts would be a menu of mistakes. -->
+                            <CheckBox Content="ENCRYPTION (AES-256, server certificate)"
+                                      IsChecked="{Binding Encrypt}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,8,0,0"
+                                      ToolTip="Encrypts the backup itself. It can then only be restored on a server holding this certificate - which is the point. A TDE database's backups are already encrypted regardless; this is for everything else." />
+
+                            <StackPanel Visibility="{Binding Encrypt, Converter={StaticResource BoolToVis}}"
+                                        Margin="24,6,0,0">
+                                <TextBlock Text="CERTIFICATE" Style="{StaticResource LabelText}" />
+                                <ComboBox ItemsSource="{Binding EncryptionCertificates}"
+                                          SelectedItem="{Binding SelectedEncryptionCertificate}"
+                                          Style="{StaticResource DarkComboBox}" />
+                                <TextBlock Style="{StaticResource SecondaryText}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"
+                                           Text="Every future restore target needs this certificate in its master first - export it with BACKUP CERTIFICATE and keep the files with your DR kit, or the backup is only as recoverable as this one server." />
+                                <TextBlock Style="{StaticResource SecondaryText}"
+                                           Foreground="{DynamicResource WarningBrush}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"
+                                           Visibility="{Binding EncryptWantedButNoCertificate, Converter={StaticResource BoolToVis}}"
+                                           Text="This server offered no usable certificate - one whose private key is protected by the database master key. Create one in master, or untick encryption." />
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">

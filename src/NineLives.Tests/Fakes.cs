@@ -271,6 +271,13 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.FromResult<byte[]?>(null);
     }
 
+    /// <summary>What ListBackupCertificatesAsync answers (#222).</summary>
+    public List<string> BackupCertificates { get; set; } = [];
+
+    public Task<List<string>> ListBackupCertificatesAsync(
+        ServerConnection server, CancellationToken ct = default)
+        => Task.FromResult(BackupCertificates.ToList());
+
     /// <summary>TDE state per database name (#222).</summary>
     public Dictionary<string, (bool IsEncrypted, string? CertificateName)> TdeByDatabase { get; } =
         new(StringComparer.OrdinalIgnoreCase);

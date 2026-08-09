@@ -90,6 +90,10 @@ public class BackupScriptGenerator
         if (options.Compression) with.Add("COMPRESSION");
         if (options.Checksum) with.Add("CHECKSUM");
 
+        if (!string.IsNullOrWhiteSpace(options.EncryptionCertificate))
+            with.Add("ENCRYPTION (ALGORITHM = AES_256, " +
+                     $"SERVER CERTIFICATE = {TSql.QuoteName(options.EncryptionCertificate)})");
+
         // FORMAT implies INIT, and naming both is noise at best. FORMAT also discards whatever the
         // media set already held, so it is never inferred - only ever asked for.
         if (options.Format) with.Add("FORMAT");
