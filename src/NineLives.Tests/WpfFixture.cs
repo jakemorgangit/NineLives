@@ -60,6 +60,9 @@ public sealed class WpfFixture : IDisposable
         ready.Wait(TimeSpan.FromSeconds(30));
     }
 
+    /// <summary>The fixture's dispatcher, for tests that gate or queue against it directly.</summary>
+    public Dispatcher Dispatcher => _dispatcher;
+
     /// <summary>Runs on the UI thread and rethrows anything it threw, with its stack intact.</summary>
     public void Invoke(Action action)
     {
