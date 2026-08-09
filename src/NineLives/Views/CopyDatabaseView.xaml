@@ -198,6 +198,19 @@
                 <StackPanel>
                     <TextBlock Text="4. Run it" Style="{StaticResource SubHeaderText}" />
 
+                    <!-- Will the target be able to READ it (#222). TDE rides along inside every
+                         backup, and a copy of an encrypted database is only as good as the
+                         target's certificate - warned here, before the backup half runs. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,10,0,0"
+                            Background="{DynamicResource DangerPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource ErrorBrush}"
+                            BorderThickness="1"
+                            Visibility="{Binding HasEncryptionWarning, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding EncryptionWarning}"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource BodyText}" />
+                    </Border>
+
                     <!-- Will it fit (#206). Same check and stance as the restore screen: a warning,
                          not a block - this app is not the authority on somebody else's storage. -->
                     <Border CornerRadius="4" Padding="10,8" Margin="0,10,0,0"

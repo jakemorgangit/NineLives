@@ -2156,6 +2156,65 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Refuses a restore whose certificate is missing from the target (#222).
+    ///
+    /// Two thumbprints can appear in a header, and both mean the same thing: TDEThumbprint says
+    /// the database inside the backup is TDE-encrypted, EncryptorThumbprint says the backup file
+    /// itself was taken WITH ENCRYPTION. Either way the target must hold a certificate with that
+    /// thumbprint in master, or the restore fails with error 33111.
+    ///
+    /// When the source instance is known (the shared path knows it), the refusal also NAMES the
+    /// certificate there - BACKUP CERTIFICATE takes a name, not a thumbprint, and mid-incident is
+    /// the wrong time to go looking for which one. Null return means no objection.
+    /// </summary>
+    private async Task<CredentialPreflight?> CheckCertificatesAsync(
+        ServerConnection server, BackupFileInfo? header, Action<string> appendLog)
+    {
+        if (header == null) return null;
+
+        foreach (var (thumbprint, isTde) in new[]
+                 {
+                     (header.TdeThumbprint, true),
+                     (header.EncryptorThumbprint, false)
+                 })
+        {
+            if (thumbprint == null) continue;
+
+            appendLog(EncryptionGuidance.DescribeProtection(
+                isTde ? thumbprint : null, isTde ? null : thumbprint));
+
+            var onTarget = await _sqlService.FindCertificateByThumbprintAsync(server, thumbprint);
+            if (onTarget != null)
+            {
+                appendLog(EncryptionGuidance.ExplainPresent(isTde, onTarget, server.ServerName));
+                continue;
+            }
+
+            // Name the certificate on the source when an instance is there to ask - best effort,
+            // and only meaningful for media that HAVE a source instance.
+            string? sourceCertName = null;
+            var sourceServer = MediumIsBlob ? null : SourceServer;
+            if (sourceServer != null && sourceServer.Id != server.Id)
+            {
+                try
+                {
+                    sourceCertName =
+                        await _sqlService.FindCertificateByThumbprintAsync(sourceServer, thumbprint);
+                }
+                catch
+                {
+                    // The refusal stands on the thumbprint alone.
+                }
+            }
+
+            return CredentialPreflight.Stop(EncryptionGuidance.ExplainMissingCertificate(
+                isTde, thumbprint, server.ServerName, sourceCertName, sourceServer?.ServerName));
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Refuses a newer version's backup before anything is touched (#210).
     ///
     /// The one-directional law of RESTORE: a backup taken on a newer major version can never be
@@ -2201,6 +2260,11 @@ public partial class RestoreViewModel : ViewModelBase
                     appendLog("Versions are compatible.");
                     break;
             }
+
+            // The same header answers the certificate question (#222) - the failure that
+            // otherwise arrives as error 33111, mid-DR, with the source server possibly gone.
+            var certVerdict = await CheckCertificatesAsync(server, header, appendLog);
+            if (certVerdict is { } certificateStop) return certificateStop;
         }
         catch (Exception ex)
         {

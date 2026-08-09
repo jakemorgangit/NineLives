@@ -324,10 +324,74 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         SetStatus("Scripts generated.");
 
-        // Fire and forget: the scripts are usable immediately, and the space answer arrives when
-        // the two instances have answered. A generation that had to wait on both would make the
-        // whole screen feel slower for a check that usually says "fine".
+        // Fire and forget: the scripts are usable immediately, and the answers arrive when the
+        // two instances have answered. A generation that had to wait on them would make the whole
+        // screen feel slower for checks that usually say "fine".
         _ = CheckSpaceAsync();
+        _ = CheckEncryptionAsync();
+    }
+
+    // ── will the target be able to READ it (#222) ───────────────────────────────
+
+    [ObservableProperty]
+    private string _encryptionWarning = string.Empty;
+
+    public bool HasEncryptionWarning => EncryptionWarning.Length > 0;
+
+    partial void OnEncryptionWarningChanged(string value) => OnPropertyChanged(nameof(HasEncryptionWarning));
+
+    /// <summary>
+    /// Whether the source database's TDE certificate exists on the target, asked BEFORE the
+    /// backup half runs (#222).
+    ///
+    /// TDE rides along inside every backup of an encrypted database, so a copy of one is only as
+    /// good as the target's ability to decrypt it - and without this check that is discovered by
+    /// the restore half, with the backup already taken and error 33111 on screen. The copy knows
+    /// its source, so sys.databases answers in one column.
+    ///
+    /// A warning rather than a block, same stance as the space check: certificates can be created
+    /// between generating and running, and this app is not the authority on somebody else's
+    /// security estate. Failing to answer raises nothing - warn on evidence, not on silence.
+    /// </summary>
+    private async Task CheckEncryptionAsync()
+    {
+        EncryptionWarning = string.Empty;
+
+        if (SourceServer == null || TargetServer == null || string.IsNullOrWhiteSpace(SourceDatabase))
+            return;
+
+        try
+        {
+            var (isEncrypted, certName) = await _sql.GetDatabaseTdeInfoAsync(SourceServer, SourceDatabase!);
+            if (!isEncrypted) return;
+
+            // The certificate itself, by thumbprint, when the source will say which it is - the
+            // name alone cannot be checked on the target, because names are not identity.
+            if (certName != null)
+            {
+                try
+                {
+                    var thumbprint = await _sql.GetCertificateThumbprintAsync(SourceServer, certName);
+                    if (thumbprint != null &&
+                        await _sql.FindCertificateByThumbprintAsync(TargetServer, thumbprint) != null)
+                        return;
+                }
+                catch
+                {
+                    // Fall through to the warning - TDE is confirmed even when the certificate
+                    // comparison could not be completed.
+                }
+            }
+
+            EncryptionWarning = EncryptionGuidance.ExplainCopyOfTdeDatabase(
+                SourceDatabase!, TargetServer.ServerName, certName);
+
+            _log.Warn($"[tde] copy: {EncryptionWarning}");
+        }
+        catch
+        {
+            // An instance that will not say has not said the database is encrypted.
+        }
     }
 
     // ── will it fit (#206) ──────────────────────────────────────────────────────

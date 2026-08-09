@@ -245,6 +245,40 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make asking about volumes fail - which must not become a warning (#32).</summary>
     public Exception? VolumeCheckThrows { get; set; }
 
+    /// <summary>Certificates on each server, keyed by server name then hex thumbprint (#222).</summary>
+    public Dictionary<string, Dictionary<string, string>> CertificatesByThumbprint { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<string?> FindCertificateByThumbprintAsync(
+        ServerConnection server, byte[] thumbprint, CancellationToken ct = default)
+    {
+        var hex = Convert.ToHexString(thumbprint);
+        return Task.FromResult(
+            CertificatesByThumbprint.TryGetValue(server.ServerName, out var certs) &&
+            certs.TryGetValue(hex, out var name)
+                ? name
+                : (string?)null);
+    }
+
+    public Task<byte[]?> GetCertificateThumbprintAsync(
+        ServerConnection server, string certificateName, CancellationToken ct = default)
+    {
+        if (CertificatesByThumbprint.TryGetValue(server.ServerName, out var certs))
+            foreach (var (hex, name) in certs)
+                if (string.Equals(name, certificateName, StringComparison.OrdinalIgnoreCase))
+                    return Task.FromResult<byte[]?>(Convert.FromHexString(hex));
+
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <summary>TDE state per database name (#222).</summary>
+    public Dictionary<string, (bool IsEncrypted, string? CertificateName)> TdeByDatabase { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<(bool IsEncrypted, string? CertificateName)> GetDatabaseTdeInfoAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+        => Task.FromResult(TdeByDatabase.TryGetValue(database, out var info) ? info : (false, null));
+
     /// <summary>What GetProductMajorVersionAsync answers - 16 is SQL Server 2022 (#210).</summary>
     public int? ProductMajorVersion { get; set; } = 16;
 
@@ -374,7 +408,9 @@ public sealed class FakeSqlServerService : ISqlServerService
         LastLsn = source.LastLsn,
         CheckpointLsn = source.CheckpointLsn,
         DatabaseBackupLsn = source.DatabaseBackupLsn,
-        SoftwareVersionMajor = source.SoftwareVersionMajor
+        SoftwareVersionMajor = source.SoftwareVersionMajor,
+        TdeThumbprint = source.TdeThumbprint,
+        EncryptorThumbprint = source.EncryptorThumbprint
     };
 
     /// <summary>Called with the token the viewmodel supplied, so a test can see it was cancellable.</summary>
