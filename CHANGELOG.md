@@ -57,6 +57,10 @@ built for.
 
 ### Changed
 
+- **The end of a backup stops being a dead end**: a successful run offers "Verify what was
+  written" - RESTORE VERIFYONLY over the exact devices the statement wrote - and the backup
+  screen gains the same "Copy as Agent job" handover the restore screen has, because backups are
+  the thing people actually schedule (#207)
 - **Backups can be taken WITH ENCRYPTION** - AES-256 against a server certificate picked from
   the source's own list (only certificates whose private key the backup can actually use are
   offered). The caution is stated where the choice is made: every future restore target needs
