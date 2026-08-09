@@ -664,5 +664,17 @@ public partial class BackupViewModel : ViewModelBase
         }
     }
 
-    private void Append(string line) => Console.Add(line);
+    /// <summary>
+    /// The console is bound to the UI, and lines arrive off it: SQL Server's progress callbacks
+    /// fire on the connection's worker thread, and adding to a bound collection there tore the
+    /// ItemsControl two seconds into a real copy (#233). The restore screen has carried this rule
+    /// since its console was built; this screen now carries it too. InvokeAsync, not Invoke - a
+    /// blocked connection thread is how "live" output arrives in bursts.
+    /// </summary>
+    private void Append(string line)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) Console.Add(line);
+        else dispatcher.InvokeAsync(() => Console.Add(line));
+    }
 }
