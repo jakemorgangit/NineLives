@@ -39,6 +39,7 @@ public sealed record RestoreRun(
 /// </summary>
 public partial class RestoreExecutionViewModel : ViewModelBase
 {
+    private readonly IRunNotifier _notifier;
     private readonly ISqlServerService _sql;
     private readonly IRestoreHistoryStore _history;
     private readonly OperationLog _log;
@@ -57,8 +58,10 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         ISqlServerService sql,
         IRestoreHistoryStore history,
         OperationLog log,
-        OperationCancellation queryCancellation)
+        OperationCancellation queryCancellation,
+        IRunNotifier? notifier = null)
     {
+        _notifier = notifier ?? NullRunNotifier.Instance;
         _sql = sql;
         _history = history;
         _log = log;
@@ -226,6 +229,12 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             AppendLog("Beginning restore execution...\n");
 
+            // Announced AFTER the preflights: a run the preflight refused never started, and
+            // "started" messages for runs that went nowhere teach people to ignore the channel.
+            _notifier.Notify(new RunNotification(
+                RunPhase.Started, "Restore", run.TargetDatabase, run.Server.ServerName,
+                run.ChainSummary));
+
             await _sql.ExecuteWithProgressAsync(
                 run.Server,
                 run.Script,
@@ -262,6 +271,10 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
 
+            _notifier.Notify(new RunNotification(
+                RunPhase.Succeeded, "Restore", run.TargetDatabase, run.Server.ServerName,
+                run.ChainSummary, DateTime.Now - startedAt));
+
             // The restore is not the end of the job (#205): nobody has verified the data yet, and
             // on a different server every SQL-auth user is orphaned. Reported while the outcome is
             // on screen, in the same shape as the recovery panel - read, then run.
@@ -285,6 +298,11 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             SetError("Restore cancelled. The target database has been left mid-restore - see below.");
 
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Restore", run.TargetDatabase, run.Server.ServerName,
+                "Cancelled part-way through the chain - the target is left mid-restore.",
+                DateTime.Now - startedAt));
+
             await ReportRecoveryStateAsync(run.Server, run.TargetDatabase);
         }
         catch (Exception ex)
@@ -294,6 +312,10 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             failure = ex.Message;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
+
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Restore", run.TargetDatabase, run.Server.ServerName,
+                ex.Message, DateTime.Now - startedAt));
 
             // The restore has stopped part-way and the target is almost certainly not usable. Find
             // out exactly how, and say so, while the connection is still open (#14).

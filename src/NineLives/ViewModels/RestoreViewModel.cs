@@ -714,7 +714,8 @@ public partial class RestoreViewModel : ViewModelBase
         ICredentialStore credentialStore,
         OperationLog? log = null,
         IRestoreHistoryStore? history = null,
-        IBackupAuditStore? auditStore = null)
+        IBackupAuditStore? auditStore = null,
+        IRunNotifier? notifier = null)
     {
         _history = history ?? new RestoreHistoryStore();
 
@@ -794,7 +795,7 @@ public partial class RestoreViewModel : ViewModelBase
             }
         };
 
-        Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation);
+        Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation, notifier);
 
         // The run reports through the same status line as the rest of the screen, and its cancel
         // state feeds the one Stop button that covers every server call here.

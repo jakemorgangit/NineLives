@@ -20,14 +20,18 @@ namespace Blackcat.NineLives.ViewModels;
 /// </summary>
 public partial class BackupViewModel : ViewModelBase
 {
+    private readonly IRunNotifier _notifier;
     private readonly ICredentialStore _store;
     private readonly ISqlServerService _sql;
     private readonly BackupScriptGenerator _generator = new();
     private readonly OperationCancellation _cancellation = new();
     private readonly OperationLog _log;
 
-    public BackupViewModel(ICredentialStore store, ISqlServerService sql, OperationLog? log = null)
+    public BackupViewModel(
+        ICredentialStore store, ISqlServerService sql, OperationLog? log = null,
+        IRunNotifier? notifier = null)
     {
+        _notifier = notifier ?? NullRunNotifier.Instance;
         _store = store;
         _sql = sql;
         _log = log ?? App.Log;
@@ -491,6 +495,11 @@ public partial class BackupViewModel : ViewModelBase
             _log.Info($"Backup started: {run.Count} database(s) on {Server.ServerName}, " +
                       $"copyOnly={CopyOnly}, files={Destinations.Count}");
 
+            _notifier.Notify(new RunNotification(
+                RunPhase.Started, "Backup",
+                run.Count == 1 ? run[0].Database : $"{run.Count} databases",
+                Server.ServerName));
+
             foreach (var (database, script, destinations) in run)
             {
                 ct.ThrowIfCancellationRequested();
@@ -514,6 +523,12 @@ public partial class BackupViewModel : ViewModelBase
                     failed.Add(database);
                     lastFailureMessage = ex.Message;
                     _log.Error($"Backup failed: {database}: {ex.Message}");
+
+                    // At the moment of the problem, not minutes later in the summary (#242): the
+                    // rest of the run continues, and whoever is off watching something else can
+                    // decide NOW whether this failure changes their evening.
+                    _notifier.Notify(new RunNotification(
+                        RunPhase.Problem, "Backup", database, Server.ServerName, ex.Message));
                 }
             }
 
@@ -526,6 +541,11 @@ public partial class BackupViewModel : ViewModelBase
                     ? $"Backed up {run[0].Database} in {elapsed.TotalSeconds:N0}s."
                     : $"Backed up {run.Count} databases in {elapsed.TotalSeconds:N0}s.");
                 _log.Info($"Backup finished: {run.Count} database(s) in {elapsed.TotalSeconds:N0}s");
+
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Succeeded, "Backup",
+                    run.Count == 1 ? run[0].Database : $"{run.Count} databases",
+                    Server.ServerName, Duration: elapsed));
             }
             else if (run.Count == 1)
             {
@@ -535,8 +555,15 @@ public partial class BackupViewModel : ViewModelBase
             }
             else
             {
-                SetError($"{failed.Count} of {run.Count} did not complete: {string.Join(", ", failed)}. " +
-                         "The others finished and are real backups - see the console for each failure.");
+                var summary = $"{failed.Count} of {run.Count} did not complete: {string.Join(", ", failed)}. " +
+                              "The others finished and are real backups - see the console for each failure.";
+                SetError(summary);
+
+                // The per-database problems already fired as they happened; this is the close of
+                // the run, so the channel shows it ENDED and how it ended.
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Backup", $"{run.Count} databases", Server.ServerName,
+                    summary, elapsed));
             }
 
             // What was just written is the thing to verify (#207) - only what actually succeeded,
@@ -551,6 +578,12 @@ public partial class BackupViewModel : ViewModelBase
             Append("Cancelled. Any file already written is incomplete and cannot be restored from.");
             SetStatus("Backup cancelled.");
             _log.Info("Backup cancelled");
+
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Backup",
+                run.Count == 1 ? run[0].Database : $"{run.Count} databases",
+                Server.ServerName,
+                "Cancelled. Any file already written is incomplete and cannot be restored from."));
 
             // What finished before the stop is still real.
             _lastWrittenDevices = succeededDevices;

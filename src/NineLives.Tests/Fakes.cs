@@ -187,6 +187,14 @@ public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
 /// <summary>
 /// A SQL Server that records what it was asked to do. Nothing opens a connection.
 /// </summary>
+/// <summary>Records every notification a screen fires (#242), in order.</summary>
+public sealed class FakeRunNotifier : IRunNotifier
+{
+    public List<RunNotification> Sent { get; } = [];
+
+    public void Notify(RunNotification notification) => Sent.Add(notification);
+}
+
 public sealed class FakeSqlServerService : ISqlServerService
 {
     /// <summary>Every server instance handed to an execute call, in order.</summary>

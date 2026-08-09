@@ -24,6 +24,54 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ICredentialStore _credentialStore;
     private readonly OperationLog _log;
 
+    // ── notifications (#242) ────────────────────────────────────────────────────
+
+    /// <summary>The rows on screen. Each edits its model object; Save persists the lot.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<WebhookEndpointViewModel> Webhooks { get; } = [];
+
+    /// <summary>What the last webhook test said, per the whole card - "sent" or the error.</summary>
+    [ObservableProperty]
+    private string _webhookTestResult = string.Empty;
+
+    private void LoadWebhooks(AppConfig config)
+    {
+        Webhooks.Clear();
+        foreach (var endpoint in config.Webhooks)
+            Webhooks.Add(new WebhookEndpointViewModel(endpoint, SaveWebhooks, TestWebhookAsync));
+    }
+
+    [RelayCommand]
+    private void AddWebhook()
+    {
+        var endpoint = new WebhookEndpoint { Name = $"Endpoint {Webhooks.Count + 1}" };
+        Webhooks.Add(new WebhookEndpointViewModel(endpoint, SaveWebhooks, TestWebhookAsync));
+        SaveWebhooks();
+    }
+
+    [RelayCommand]
+    private void RemoveWebhook(WebhookEndpointViewModel? row)
+    {
+        if (row == null) return;
+        Webhooks.Remove(row);
+        SaveWebhooks();
+    }
+
+    /// <summary>The whole list, rewritten from what is on screen - additive edits, no merging.</summary>
+    private void SaveWebhooks() =>
+        Save(config =>
+        {
+            config.Webhooks = Webhooks.Select(w => w.Model).ToList();
+        }, "The notification settings could not be saved");
+
+    private async Task TestWebhookAsync(WebhookEndpointViewModel row)
+    {
+        WebhookTestResult = $"Sending a test to {row.Name}...";
+        var error = await new WebhookNotifier().SendTestAsync(row.Model);
+        WebhookTestResult = error == null
+            ? $"Test sent to {row.Name} - check the channel."
+            : $"{row.Name}: {error}";
+    }
+
     // ── moving machines (#213) ──────────────────────────────────────────────────
 
     /// <summary>
@@ -113,6 +161,7 @@ public partial class SettingsViewModel : ViewModelBase
         _loading = true;
         try
         {
+            LoadWebhooks(_credentialStore.LoadConfig());
             var config = _credentialStore.LoadConfig();
             _selectedTheme = ThemeManager.Current;
             _currentMode = config.Mode ?? AppMode.Pro;

@@ -27,6 +27,7 @@ namespace Blackcat.NineLives.ViewModels;
 /// </summary>
 public partial class CopyDatabaseViewModel : ViewModelBase
 {
+    private readonly IRunNotifier _notifier;
     private readonly ICredentialStore _store;
     private readonly ISqlServerService _sql;
     private readonly BackupScriptGenerator _backupGenerator = new();
@@ -34,8 +35,11 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     private readonly OperationCancellation _cancellation = new();
     private readonly OperationLog _log;
 
-    public CopyDatabaseViewModel(ICredentialStore store, ISqlServerService sql, OperationLog? log = null)
+    public CopyDatabaseViewModel(
+        ICredentialStore store, ISqlServerService sql, OperationLog? log = null,
+        IRunNotifier? notifier = null)
     {
+        _notifier = notifier ?? NullRunNotifier.Instance;
         _store = store;
         _sql = sql;
         _log = log ?? App.Log;
@@ -594,6 +598,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         _log.Info($"Copy started: {SourceDatabase} from {SourceServer.ServerName} " +
                   $"to {TargetServer!.ServerName} as {TargetDatabaseName}");
 
+        var copyStartedAt = DateTime.Now;
+        var copyRoute = $"{SourceServer.ServerName} \u2192 {TargetServer.ServerName}";
+
+        _notifier.Notify(new RunNotification(
+            RunPhase.Started, "Copy", SourceDatabase!, copyRoute, $"as {TargetDatabaseName}"));
+
         try
         {
             await _sql.ExecuteWithProgressAsync(SourceServer, BackupScript, Append, ct);
@@ -602,6 +612,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         {
             Append("Cancelled during the backup.");
             Outcome = CopyOutcome.BackupFailed;
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                "Cancelled during the backup half.", DateTime.Now - copyStartedAt));
             return;
         }
         catch (Exception ex)
@@ -609,6 +622,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             Append(ex.Message);
             Outcome = CopyOutcome.BackupFailed;
             _log.Error($"Copy failed during backup: {ex.Message}");
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                $"The backup half failed: {ex.Message}", DateTime.Now - copyStartedAt));
             return;
         }
 
@@ -624,6 +640,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         if (MediumIsSharedPath && !await TargetCanReadAsync(ct))
         {
             Outcome = CopyOutcome.BackupTakenRestoreFailed;
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                "The backup was taken, but the target cannot read it - usually a share " +
+                "permission for the target's service account.", DateTime.Now - copyStartedAt));
             return;
         }
 
@@ -638,6 +658,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         {
             Append("Cancelled during the restore.");
             Outcome = CopyOutcome.BackupTakenRestoreFailed;
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                "Cancelled during the restore half - the backup exists, the target is mid-restore.",
+                DateTime.Now - copyStartedAt));
             return;
         }
         catch (Exception ex)
@@ -645,12 +669,20 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             Append(ex.Message);
             Outcome = CopyOutcome.BackupTakenRestoreFailed;
             _log.Error($"Copy failed during restore: {ex.Message}");
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                $"The restore half failed: {ex.Message}", DateTime.Now - copyStartedAt));
             return;
         }
 
         Append("Restore complete.");
         Outcome = CopyOutcome.Copied;
         _log.Info($"Copy finished: {TargetDatabaseName} on {TargetServer.ServerName}");
+
+        _notifier.Notify(new RunNotification(
+            RunPhase.Succeeded, "Copy", SourceDatabase!, copyRoute,
+            $"Now on {TargetServer.ServerName} as {TargetDatabaseName}.",
+            DateTime.Now - copyStartedAt));
     }
 
     /// <summary>

@@ -110,6 +110,94 @@
                 </StackPanel>
             </Border>
 
+            <!-- Notifications (#242): Teams, Slack, or any JSON endpoint - started, finished,
+                 problems. For everyone whose focus is rightly NOT on this application while a
+                 40-minute restore runs. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,16,0,0">
+                <StackPanel>
+                    <TextBlock Text="Notifications" Style="{StaticResource SubHeaderText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,10"
+                               Text="Push a message to Teams (incoming webhook or Power Automate), Slack, or any endpoint that accepts JSON when a backup, restore or copy starts, finishes, or hits a problem. Webhook URLs are secrets - they stay on this machine and are never included in a configuration export." />
+
+                    <ItemsControl ItemsSource="{Binding Webhooks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource InputBackgroundBrush}"
+                                        CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="2*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="3*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBox Grid.Column="0"
+                                                     Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                                     Style="{StaticResource DarkTextBox}"
+                                                     Margin="0,0,8,0"
+                                                     ToolTip="What this endpoint is called in the log." />
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding Formats}"
+                                                      SelectedItem="{Binding Format}"
+                                                      Style="{StaticResource DarkComboBox}"
+                                                      MinWidth="110"
+                                                      Margin="0,0,8,0" />
+                                            <TextBox Grid.Column="2"
+                                                     Text="{Binding Url, UpdateSourceTrigger=LostFocus}"
+                                                     Style="{StaticResource DarkTextBox}"
+                                                     Margin="0,0,8,0"
+                                                     FontFamily="Consolas"
+                                                     ToolTip="The webhook URL. Treated as a secret: never exported, only ever posted to." />
+                                            <Button Grid.Column="3" Content="Test"
+                                                    Command="{Binding TestCommand}"
+                                                    Style="{StaticResource SecondaryButton}"
+                                                    Padding="10,5" Margin="0,0,8,0" />
+                                            <Button Grid.Column="4" Content="Remove"
+                                                    Command="{Binding DataContext.RemoveWebhookCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource SecondaryButton}"
+                                                    Padding="10,5" />
+                                        </Grid>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <CheckBox Content="When a run starts"
+                                                      IsChecked="{Binding NotifyStarted}"
+                                                      Style="{StaticResource DarkCheckBox}"
+                                                      Margin="0,0,16,0" />
+                                            <CheckBox Content="When it finishes"
+                                                      IsChecked="{Binding NotifyFinished}"
+                                                      Style="{StaticResource DarkCheckBox}"
+                                                      Margin="0,0,16,0" />
+                                            <CheckBox Content="When there is a problem"
+                                                      IsChecked="{Binding NotifyProblems}"
+                                                      Style="{StaticResource DarkCheckBox}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                        <Button Content="Add endpoint"
+                                Command="{Binding AddWebhookCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" />
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding WebhookTestResult}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+
             <!-- Moving machines (#213). The boundary is the feature: the file holds shapes,
                  never secrets. -->
             <Border Style="{StaticResource CardBorder}" Margin="0,16,0,0">

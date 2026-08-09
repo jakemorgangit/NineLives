@@ -226,15 +226,19 @@ public partial class MainViewModel : ViewModelBase
         // and two instances pointed at the same file would be a way to lose an entry.
         _historyStore = new RestoreHistoryStore();
 
+        // One notifier for every screen that runs things (#242) - reads the endpoint list fresh
+        // per event, so a webhook added in Settings works without a restart.
+        var notifier = new WebhookRunNotifier(_credentialStore, App.Log);
+
         Restore = new RestoreViewModel(
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
-            log: null, history: _historyStore);
+            log: null, history: _historyStore, notifier: notifier);
         ModeSelection = new ModeSelectionViewModel(_credentialStore);
         ModeSelection.Chosen += OnModeChosen;
         ModeSelection.Cancelled += OnModeCardsCancelled;
 
-        Backup = new BackupViewModel(_credentialStore, _sqlService);
-        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService);
+        Backup = new BackupViewModel(_credentialStore, _sqlService, notifier: notifier);
+        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService, notifier: notifier);
         History = new HistoryViewModel(_historyStore);
         Settings = new SettingsViewModel(_credentialStore);
         About = new AboutViewModel();

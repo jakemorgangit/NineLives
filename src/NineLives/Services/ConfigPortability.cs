@@ -20,6 +20,9 @@ public sealed class ExportedConfig
     public List<BlobContainerConfig> BlobContainers { get; set; } = [];
     public List<ServerConnection> Servers { get; set; } = [];
 
+    /// <summary>Endpoints travel as shapes - name, format, toggles - with their URLs stripped.</summary>
+    public List<WebhookEndpoint> Webhooks { get; set; } = [];
+
     public AppMode? Mode { get; set; }
     public AppTheme Theme { get; set; }
     public bool CheckForUpdates { get; set; } = true;
@@ -76,6 +79,12 @@ public static class ConfigPortability
             ExportedAt = DateTime.Now,
             BlobContainers = config.BlobContainers.Select(Sanitise).ToList(),
             Servers = config.Servers.Select(Clone).ToList(),
+
+            // A Teams or Slack webhook URL carries its signature in the path - anyone holding it
+            // can post as the integration. The entry travels; the secret stays.
+            Webhooks = config.Webhooks
+                .Select(w => { var c = CloneViaJson(w); c.Url = string.Empty; return c; })
+                .ToList(),
             Mode = config.Mode,
             Theme = config.Theme,
             CheckForUpdates = config.CheckForUpdates,
@@ -147,6 +156,24 @@ public static class ConfigPortability
                 var index = target.Servers.IndexOf(existing);
                 target.Servers[index] = clone;
                 serversUpdated++;
+            }
+        }
+
+        foreach (var incoming in imported.Webhooks)
+        {
+            var clone = CloneViaJson(incoming);
+            var existing = target.Webhooks.FirstOrDefault(w => w.Id == clone.Id);
+
+            if (existing == null)
+            {
+                target.Webhooks.Add(clone);
+                if (!clone.IsUsable) needCredentials.Add($"webhook {clone.Name}");
+            }
+            else
+            {
+                // The URL never travels, so an update must not blank the one this machine holds.
+                clone.Url = existing.Url;
+                target.Webhooks[target.Webhooks.IndexOf(existing)] = clone;
             }
         }
 
