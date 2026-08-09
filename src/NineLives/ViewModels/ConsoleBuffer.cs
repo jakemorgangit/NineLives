@@ -87,6 +87,19 @@ public partial class ConsoleBuffer : ObservableObject
     /// </summary>
     public void Append(string message)
     {
+        // The buffer belongs to one thread, and messages do not arrive on it: SQL Server's
+        // progress callbacks fire on the connection's worker thread, and feeding _pending and the
+        // blank-line logic (which reads Lines) from there while the flush timer drains on the UI
+        // thread tore the ItemsControl mid-copy (#233). Queued rather than locked - InvokeAsync
+        // keeps the connection thread unblocked (the restore screen's old rule, now enforced
+        // where it cannot be forgotten) and the dispatcher queue preserves arrival order.
+        // Headless there is no dispatcher and no other thread to race.
+        if (_dispatcher != null && !_dispatcher.CheckAccess())
+        {
+            _dispatcher.InvokeAsync(() => Append(message));
+            return;
+        }
+
         foreach (var raw in message.Split('\n'))
         {
             var line = raw.TrimEnd('\r');
@@ -109,6 +122,16 @@ public partial class ConsoleBuffer : ObservableObject
     /// <summary>Moves everything buffered onto the bound collection now.</summary>
     public void Flush()
     {
+        // Synchronous marshalling, unlike Append: callers flush in order to READ - "flush, then
+        // record Console.Text" - and an async hop would hand them the text from before the flush.
+        if (_dispatcher != null && !_dispatcher.CheckAccess())
+        {
+            // Background, not the default Send: Send jumps the dispatcher queue, and a flush that
+            // overtakes the appends queued before it would hand the caller text from before them.
+            _dispatcher.Invoke(Flush, System.Windows.Threading.DispatcherPriority.Background);
+            return;
+        }
+
         if (_pending.Count == 0)
         {
             // Nothing arriving and nothing running - stop ticking rather than spin forever.
@@ -128,6 +151,12 @@ public partial class ConsoleBuffer : ObservableObject
     /// <summary>Empties the console, for the start of a run.</summary>
     public void Clear()
     {
+        if (_dispatcher != null && !_dispatcher.CheckAccess())
+        {
+            _dispatcher.Invoke(Clear, System.Windows.Threading.DispatcherPriority.Background);
+            return;
+        }
+
         _pending.Clear();
         Lines.Clear();
         HasOutput = false;

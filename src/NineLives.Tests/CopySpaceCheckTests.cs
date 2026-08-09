@@ -150,5 +150,10 @@ public class CopySpaceCheckTests
 
         Assert.True(vm.HasSpaceWarning);
         Assert.Contains(@"L:\", vm.SpaceWarning);
+
+        // Absent is said as absent - "0.0 B free" was the wrong sentence, because the fix is a
+        // MOVE clause or a different target, not freeing space.
+        Assert.Contains(@"no L:\ volume", vm.SpaceWarning);
+        Assert.Contains("MOVE", vm.SpaceWarning);
     }
 }

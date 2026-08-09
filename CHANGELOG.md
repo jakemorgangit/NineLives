@@ -8,6 +8,19 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.4.1] - 2026-08-09
+
+### Fixed
+
+- A drive the target does not have was described as having "0.0 B free". Absent is now said as
+  absent, with the actual fix named: relocate the files (MOVE) or pick a different target -
+  freeing space on a drive that does not exist was never the answer (#233)
+- **Copy Database crashed mid-run** - "An ItemsControl is inconsistent with its items source" -
+  when SQL Server's progress messages, which arrive on the connection's worker thread, were added
+  to the bound console straight from that thread. The copy and backup screens now marshal the way
+  the restore screen always has, and the batching console buffer owns its thread-affinity outright
+  so no future screen can reintroduce the race (#233)
+
 ## [1.4.0] - 2026-08-09
 
 Nine Lives stops being a blob restore tool. It backs up and restores, to and from Azure Blob
