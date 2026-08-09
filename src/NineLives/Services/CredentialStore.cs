@@ -311,6 +311,16 @@ public class AppConfig
     /// </summary>
     public AppMode? Mode { get; set; }
 
+    /// <summary>Where the window was when the app closed, or null before the first close (#211).</summary>
+    public WindowGeometry? Window { get; set; }
+
+    /// <summary>
+    /// The screen in use when the app closed (#211). Carrying on from the launch cards lands here
+    /// - carrying on means carrying ON, not starting again - falling back to Restore when the
+    /// screen is unknown or the current mode no longer offers it.
+    /// </summary>
+    public string? LastScreen { get; set; }
+
     /// <summary>Check GitHub for a newer release at startup. Turn off for offline installs.</summary>
     public bool CheckForUpdates { get; set; } = true;
 
