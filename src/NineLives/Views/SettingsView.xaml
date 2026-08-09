@@ -84,6 +84,11 @@
 
                     <!-- The logs are what someone attaches to a bug report, so there has to be a
                          way to find them that is not "know where LocalAppData lives" (#40). -->
+                    <Button Content="View the log"
+                            Command="{Binding ViewLogCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="14,7" Margin="0,0,8,0"
+                            ToolTip="Today's operation log, inside the app - filter, copy, refresh." />
                     <Button Content="Open log folder"
                             Command="{Binding OpenLogFolderCommand}"
                             Style="{StaticResource SecondaryButton}"

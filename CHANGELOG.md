@@ -57,6 +57,9 @@ built for.
 
 ### Changed
 
+- **The operation log is readable inside the app that wrote it** - today's file with a filter,
+  copy and refresh, from Settings. The support conversation is "what does the log say about X?",
+  not "navigate to this folder" (#214)
 - **The configuration can move to another machine without moving a single secret** - export
   writes containers, servers and settings to a file that is safe on a share or in a ticket (SAS
   tokens and SQL passwords stay in Windows Credential Manager; a SAS pasted into a container URL

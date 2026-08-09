@@ -231,6 +231,20 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Today's log, inside the app that wrote it (#214) - the support conversation is "what does
+    /// the log say about X?", not "navigate to this folder".
+    /// </summary>
+    [RelayCommand]
+    private void ViewLog()
+    {
+        var window = new Views.LogViewerWindow(new LogViewerViewModel(_log))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    /// <summary>
     /// Opens the log folder in Explorer. The logs are what someone attaches to a bug report, so
     /// there needs to be a way to find them that is not "know where LocalAppData is" (#40).
     /// </summary>
