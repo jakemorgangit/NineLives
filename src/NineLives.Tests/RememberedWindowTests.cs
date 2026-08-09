@@ -59,7 +59,7 @@ public class RememberedWindowTests
 
     // ── the landing screen ──────────────────────────────────────────────────────
 
-    private static MainViewModel Main(AppMode mode = AppMode.Pro, string? lastScreen = null)
+    private static MainViewModel Shell(AppMode mode = AppMode.Pro, string? lastScreen = null)
     {
         var store = new FakeCredentialStore();
         store.Config.Mode = mode;
@@ -71,7 +71,7 @@ public class RememberedWindowTests
     [Fact]
     public void CarryingOnLandsOnTheLastScreen()
     {
-        var main = Main(lastScreen: MainViewModel.Nav.History);
+        var main = Shell(lastScreen: MainViewModel.Nav.History);
 
         main.ModeSelection.CancelCommand.Execute(null);
 
@@ -82,7 +82,7 @@ public class RememberedWindowTests
     [Fact]
     public void NothingRecordedLandsOnRestore()
     {
-        var main = Main();
+        var main = Shell();
 
         main.ModeSelection.CancelCommand.Execute(null);
 
@@ -96,7 +96,7 @@ public class RememberedWindowTests
     [Fact]
     public void AScreenTheModeDoesNotOfferFallsBackToRestore()
     {
-        var main = Main(AppMode.Basic, MainViewModel.Nav.CopyDatabase);
+        var main = Shell(AppMode.Basic, MainViewModel.Nav.CopyDatabase);
 
         main.ModeSelection.CancelCommand.Execute(null);
 
@@ -106,7 +106,7 @@ public class RememberedWindowTests
     [Fact]
     public void GarbageInTheConfigFallsBackToRestore()
     {
-        Assert.Equal(MainViewModel.Nav.Restore, Main().LandingScreen("No Such Screen"));
+        Assert.Equal(MainViewModel.Nav.Restore, Shell().LandingScreen("No Such Screen"));
     }
 
     // ── saving at shutdown ──────────────────────────────────────────────────────
