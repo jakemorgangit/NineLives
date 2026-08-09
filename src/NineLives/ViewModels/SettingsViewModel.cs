@@ -24,6 +24,84 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ICredentialStore _credentialStore;
     private readonly OperationLog _log;
 
+    // ── moving machines (#213) ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Writes the configuration to a file that holds shapes rather than secrets - SAS tokens and
+    /// SQL passwords live in Windows Credential Manager and stay there, and a SAS pasted into a
+    /// container URL is stripped on the way out.
+    /// </summary>
+    [RelayCommand]
+    private void ExportConfig()
+    {
+        try
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Export configuration (no secrets)",
+                FileName = $"NineLives-config-{DateTime.Now:yyyyMMdd}.json",
+                Filter = "JSON configuration|*.json",
+                DefaultExt = ".json"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            var config = _credentialStore.LoadConfig();
+            System.IO.File.WriteAllText(dialog.FileName, ConfigPortability.Export(config));
+
+            SetStatus($"Exported to {dialog.FileName}. The file holds no secrets - credentials " +
+                      "are re-entered on the importing machine.");
+            _log.Info($"[config] exported to {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Export failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Folds an exported file in: adds what is new, updates what matches, never deletes -
+    /// an import is additive or it is a trap.
+    /// </summary>
+    [RelayCommand]
+    private void ImportConfig()
+    {
+        try
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Import configuration",
+                Filter = "JSON configuration|*.json|All files|*.*"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            var imported = ConfigPortability.Read(System.IO.File.ReadAllText(dialog.FileName));
+            if (imported == null)
+            {
+                SetError("That file is not a Nine Lives configuration export.");
+                return;
+            }
+
+            var config = _credentialStore.LoadConfig();
+            if (config.LoadError != null)
+            {
+                SetError($"The local configuration could not be read, so nothing was imported: {config.LoadError}");
+                return;
+            }
+
+            var summary = ConfigPortability.Merge(config, imported);
+            _credentialStore.SaveConfig(config);
+
+            SetStatus(summary.Describe() + " Restart screens that list servers or containers to see them.");
+            _log.Info($"[config] imported from {dialog.FileName}: {summary.Describe()}");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Import failed: {ex.Message}");
+        }
+    }
+
     /// <summary>True while the constructor is filling the properties from config.</summary>
     private readonly bool _loading;
 
