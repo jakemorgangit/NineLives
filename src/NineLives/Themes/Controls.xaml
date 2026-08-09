@@ -949,5 +949,140 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- The error surface, one definition for every screen (#117 item 6).
+
+         Four views each had their own bare TextBlock bound to ErrorMessage, which is why an error
+         read as ordinary body text on some screens, and why none of them offered any way to clear
+         one. Now that an error persists until it is superseded or dismissed, it has to be both
+         visibly an error and closeable.
+
+         Usage: <ContentControl Style="{StaticResource ErrorBanner}" /> - it binds itself to the
+         ViewModelBase members on the inherited DataContext. -->
+    <Style x:Key="ErrorBanner" TargetType="ContentControl">
+        <Setter Property="Visibility" Value="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Border Background="{DynamicResource DangerPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource ErrorBrush}"
+                            BorderThickness="1" CornerRadius="4" Padding="10,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding ErrorMessage}"
+                                       Foreground="{DynamicResource ErrorBrush}"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding DismissErrorCommand}"
+                                    Content="&#x2715;"
+                                    ToolTip="Dismiss this error"
+                                    Margin="10,0,0,0"
+                                    VerticalAlignment="Top"
+                                    Foreground="{DynamicResource ErrorBrush}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="6,2"
+                                    Cursor="Hand"
+                                    FontSize="12" />
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A collapsible step heading on the Restore screen (#117 item 3).
+
+         The step's own state object is the DataContext, so one template serves all of them:
+         Title, Summary, IsComplete, IsExpanded and ToggleCommand come from RestoreStep.
+
+         The whole heading is the hit target rather than just a chevron - a heading that collapses
+         when you click the words is what people try first. -->
+    <Style x:Key="StepHeader" TargetType="Button" BasedOn="{x:Null}">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Command" Value="{Binding ToggleCommand}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="Transparent" Padding="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- A tick and a green title once the step is answered, so the state
+                                 of the whole screen reads at a glance (#117 item 3). -->
+                            <TextBlock Grid.Column="0"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"
+                                       FontSize="13"
+                                       Text="&#x2713;"
+                                       Foreground="{DynamicResource SuccessBrush}"
+                                       Visibility="{Binding IsComplete, Converter={StaticResource BoolToVis}}" />
+
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Title}"
+                                       VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SubHeaderText}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsComplete}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- Only when collapsed: expanded, the contents say it better. -->
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding Summary}"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"
+                                       Margin="12,0,12,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <TextBlock Grid.Column="3"
+                                       VerticalAlignment="Center"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource SecondaryTextBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="&#x25B2;" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsExpanded}" Value="False">
+                                                <Setter Property="Text" Value="&#x25BC;" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
 </ResourceDictionary>

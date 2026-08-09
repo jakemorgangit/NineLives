@@ -230,3 +230,36 @@ public class RestoreHistoryTests : IDisposable
         Assert.Single(store.Load());
     }
 }
+
+/// <summary>
+/// The saved-file affordance on the History screen (#117 item 8).
+///
+/// "Save as file" existed; opening what it wrote did not, so the record of a restore was written
+/// and then had to be gone and found.
+/// </summary>
+public class HistorySavedFileTests
+{
+    private static HistoryViewModel New() => new(new FakeRestoreHistoryStore());
+
+    [Fact]
+    public void NothingIsOfferedToOpenUntilSomethingHasBeenSaved()
+    {
+        var vm = New();
+
+        Assert.Null(vm.LastSavedPath);
+    }
+
+    /// <summary>
+    /// Asked to open nothing, it does nothing - rather than throwing out of a command, which on a
+    /// synchronous handler takes the process with it (#13).
+    /// </summary>
+    [Fact]
+    public void OpeningWithNothingSavedIsHarmless()
+    {
+        var vm = New();
+
+        vm.OpenSavedFileCommand.Execute(null);
+
+        Assert.False(vm.HasError);
+    }
+}

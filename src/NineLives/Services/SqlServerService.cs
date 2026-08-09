@@ -232,6 +232,138 @@ public class SqlServerService : ISqlServerService
         return databases;
     }
 
+    /// <summary>
+    /// What this instance recorded backing up, read from msdb (#149).
+    ///
+    /// The first half of restoring from a shared backup location: there is no container to list,
+    /// but the instance that took the backups knows exactly what it took, when, to which files and
+    /// at which LSNs.
+    ///
+    /// Ordered newest first, and capped, because msdb on a busy instance holds years of history and
+    /// a restore is almost always from the recent end of it. A cap is honest about what it returns -
+    /// see BackupHistoryLimit.
+    ///
+    /// It reports what msdb SAYS. Whether those files still exist is a different question, asked
+    /// separately and on the target, because msdb keeps history for backups whose files were
+    /// deleted, archived or pruned by a retention job long ago.
+    /// </summary>
+    public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
+        ServerConnection server, string? databaseName = null, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+
+        // backupset holds one row per backup; backupmediafamily one per FILE it was written to, so
+        // a striped backup is several rows and family_sequence_number is the stripe order. Grouping
+        // in the app rather than with STRING_AGG keeps this readable on every supported version.
+        cmd.CommandText = $@"
+            SELECT TOP ({BackupHistoryLimit})
+                   bs.backup_set_id,
+                   bs.database_name,
+                   bs.type,
+                   bs.backup_start_date,
+                   bs.backup_finish_date,
+                   bs.is_copy_only,
+                   bs.first_lsn,
+                   bs.last_lsn,
+                   bs.checkpoint_lsn,
+                   bs.database_backup_lsn,
+                   bs.backup_size,
+                   bs.server_name,
+                   bmf.physical_device_name,
+                   bmf.family_sequence_number
+            FROM msdb.dbo.backupset AS bs
+            JOIN msdb.dbo.backupmediafamily AS bmf
+              ON bmf.media_set_id = bs.media_set_id
+            WHERE (@database IS NULL OR bs.database_name = @database)
+              AND bmf.device_type IN (2, 102)   -- disk, including logical disk devices
+            ORDER BY bs.backup_start_date DESC, bs.backup_set_id DESC, bmf.family_sequence_number";
+
+        cmd.Parameters.AddWithValue("@database", (object?)databaseName ?? DBNull.Value);
+
+        // One row per FILE, gathered back into one entry per backup set.
+        var files = new Dictionary<int, List<(int Sequence, string Path)>>();
+        var sets = new Dictionary<int, BackupHistoryEntry>();
+        var order = new List<int>();
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id = reader.GetInt32(0);
+
+            if (!sets.ContainsKey(id))
+            {
+                order.Add(id);
+                sets[id] = new BackupHistoryEntry
+                {
+                    DatabaseName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    Type = TypeFromMsdb(reader.IsDBNull(2) ? null : reader.GetString(2)),
+                    StartedAt = reader.GetDateTime(3),
+                    FinishedAt = reader.IsDBNull(4) ? reader.GetDateTime(3) : reader.GetDateTime(4),
+                    IsCopyOnly = !reader.IsDBNull(5) && reader.GetBoolean(5),
+                    FirstLsn = reader.IsDBNull(6) ? null : reader.GetDecimal(6),
+                    LastLsn = reader.IsDBNull(7) ? null : reader.GetDecimal(7),
+                    CheckpointLsn = reader.IsDBNull(8) ? null : reader.GetDecimal(8),
+                    DatabaseBackupLsn = reader.IsDBNull(9) ? null : reader.GetDecimal(9),
+                    BackupSizeBytes = reader.IsDBNull(10) ? null : (long)reader.GetDecimal(10),
+                    ServerName = reader.IsDBNull(11) ? null : reader.GetString(11)
+                };
+                files[id] = [];
+            }
+
+            // family_sequence_number is tinyint, not int - GetInt32 throws an InvalidCastException
+            // on it. Found by running this against a real instance rather than by reading the docs.
+            if (!reader.IsDBNull(12))
+                files[id].Add((
+                    reader.IsDBNull(13) ? 1 : Convert.ToInt32(reader.GetValue(13)),
+                    reader.GetString(12)));
+        }
+
+        return order
+            .Select(id => CloneWithFiles(sets[id],
+                files[id].OrderBy(f => f.Sequence).Select(f => f.Path).ToList()))
+            .ToList();
+    }
+
+    /// <summary>
+    /// How far back to read. msdb on a busy instance holds years of history, and a restore is
+    /// almost always from the recent end of it - but the number is stated here rather than left
+    /// implicit, because silently returning "the newest 500" while looking like "everything" is
+    /// how somebody concludes a backup is missing when it is simply older than the cap.
+    /// </summary>
+    public const int BackupHistoryLimit = 500;
+
+    private static BackupHistoryEntry CloneWithFiles(BackupHistoryEntry entry, List<string> files) => new()
+    {
+        DatabaseName = entry.DatabaseName,
+        Type = entry.Type,
+        StartedAt = entry.StartedAt,
+        FinishedAt = entry.FinishedAt,
+        IsCopyOnly = entry.IsCopyOnly,
+        FirstLsn = entry.FirstLsn,
+        LastLsn = entry.LastLsn,
+        CheckpointLsn = entry.CheckpointLsn,
+        DatabaseBackupLsn = entry.DatabaseBackupLsn,
+        BackupSizeBytes = entry.BackupSizeBytes,
+        ServerName = entry.ServerName,
+        Files = files
+    };
+
+    /// <summary>
+    /// msdb's one-letter backup type. D is a full, I a differential, L a log; the rest - file and
+    /// filegroup backups, partial backups - are not chain members this app restores, and are
+    /// reported as Unknown rather than guessed at.
+    /// </summary>
+    internal static BackupType TypeFromMsdb(string? type) => type switch
+    {
+        "D" => BackupType.Full,
+        "I" => BackupType.Differential,
+        "L" => BackupType.TransactionLog,
+        _ => BackupType.Unknown
+    };
+
     // These two read backup metadata off blob URLs, and neither takes a credential name any more.
     //
     // They used to, and passing one could never work. SQL Server rejects WITH CREDENTIAL against a
@@ -255,6 +387,25 @@ public class SqlServerService : ISqlServerService
     // keyed off the identity type that CredentialExistsAsync already reports - not off a flag.
 
     /// <summary>RESTORE FILELISTONLY across the files of one backup set, striped or not.</summary>
+    /// <summary>
+    /// The device clause for one backup device - <c>DISK = N'...'</c> for a path,
+    /// <c>URL = N'...'</c> for anything else (#203).
+    ///
+    /// The same rule <see cref="BackupFileInfo.IsOnDisk"/> applies, expressed over the raw string:
+    /// a drive letter or a UNC prefix is a path. These statements were built with URL hardcoded,
+    /// which quietly limited HEADERONLY, FILELISTONLY and VERIFYONLY to blob - the restore itself
+    /// has been device-aware since #149, and the inspection statements should match it.
+    /// </summary>
+    private static string DeviceClause(string device)
+    {
+        var isPath = device.StartsWith(@"\\", StringComparison.Ordinal)
+                     || (device.Length >= 2 && device[1] == ':');
+
+        return isPath
+            ? $"DISK = N'{TSql.EscapeLiteral(device)}'"
+            : $"URL = N'{TSql.EscapeLiteral(device)}'";
+    }
+
     public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
@@ -265,8 +416,8 @@ public class SqlServerService : ISqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
-        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        cmd.CommandText = $"RESTORE FILELISTONLY FROM {urlClauses}";
+        var deviceClauses = string.Join(", ", blobUrls.Select(DeviceClause));
+        cmd.CommandText = $"RESTORE FILELISTONLY FROM {deviceClauses}";
 
         return await CancellableAsync(async () =>
         {
@@ -279,7 +430,11 @@ public class SqlServerService : ISqlServerService
                     LogicalName = reader.GetString(reader.GetOrdinal("LogicalName")),
                     PhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
                     Type = reader.GetString(reader.GetOrdinal("Type")),
-                    NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName"))
+                    NewPhysicalName = reader.GetString(reader.GetOrdinal("PhysicalName")),
+
+                    // Already in the result set and previously discarded. It is what makes a
+                    // disk-space preflight possible without a second round trip (#32).
+                    SizeBytes = GetLongFromReader(reader, "Size") ?? 0
                 });
             }
             return files;
@@ -287,6 +442,125 @@ public class SqlServerService : ISqlServerService
     }
 
     /// <summary>RESTORE HEADERONLY across the files of one backup set, striped or not.</summary>
+    /// <summary>
+    /// Asks the TARGET instance whether it can read a backup file, and says why not (#149).
+    ///
+    /// The reason this is a server round trip rather than File.Exists: the app's own process can
+    /// see a share the SQL Server service account cannot, and the RESTORE runs as that account on
+    /// that host. Checking locally would say yes and the restore would then fail with
+    /// "Operating system error 5(Access is denied)" - so the question is asked where it will be
+    /// answered.
+    ///
+    /// RESTORE HEADERONLY is the cheapest statement that proves all three things at once: the path
+    /// resolves, the account may read it, and what is there is a backup. It reads the header only,
+    /// not the backup.
+    /// </summary>
+    public async Task<BackupFileCheck> CheckBackupFileAsync(
+        ServerConnection server, string path, CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = CreateConnection(server);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+
+            // Short. A file that is not reachable should fail quickly - this runs once per file and
+            // the whole point is to find that out BEFORE a restore starts, not to wait as long as
+            // one would.
+            cmd.CommandTimeout = 30;
+            cmd.CommandText = $"RESTORE HEADERONLY FROM DISK = N'{TSql.EscapeLiteral(path)}'";
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            return await reader.ReadAsync(ct)
+                ? BackupFileCheck.Ok(path)
+                : BackupFileCheck.From(path, "The file was read but contained no backup header.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Its own words, classified but never replaced: the numbered error is what somebody
+            // searches for when the explanation does not match their situation.
+            return BackupFileCheck.From(path, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Checks every file a chain needs, stopping at the first that cannot be read.
+    ///
+    /// Stops early on purpose. One unreadable file means the restore cannot run, and the usual
+    /// cause - the service account having no access to the share - fails every file identically,
+    /// so carrying on would produce a page of the same message.
+    /// </summary>
+    public async Task<List<BackupFileCheck>> CheckBackupFilesAsync(
+        ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default)
+    {
+        var results = new List<BackupFileCheck>();
+
+        foreach (var path in paths)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var check = await CheckBackupFileAsync(server, path, ct);
+            results.Add(check);
+
+            if (!check.CanBeRestored) break;
+        }
+
+        return results;
+    }
+
+    public async Task<List<BackupHistoryEntry>> ReadBackupFileHeadersAsync(
+        ServerConnection server, string path, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = $"RESTORE HEADERONLY FROM {DeviceClause(path)}";
+
+        return await CancellableAsync(async () =>
+        {
+            var entries = new List<BackupHistoryEntry>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            // Every row, not the first. Each row is one backup set in the file, and reading only
+            // the first is how a multi-backup file would quietly present its oldest content as
+            // the whole story.
+            while (await reader.ReadAsync(ct))
+            {
+                var typeCode = GetIntFromReader(reader, "BackupType");
+
+                entries.Add(new BackupHistoryEntry
+                {
+                    DatabaseName = GetStringFromReader(reader, "DatabaseName") ?? string.Empty,
+                    ServerName = GetStringFromReader(reader, "ServerName"),
+                    Type = (typeCode ?? 0) switch
+                    {
+                        1 => BackupType.Full,
+                        5 => BackupType.Differential,
+                        2 => BackupType.TransactionLog,
+                        _ => BackupType.Unknown
+                    },
+                    StartedAt = GetDateTimeFromReader(reader, "BackupStartDate") ?? DateTime.MinValue,
+                    FinishedAt = GetDateTimeFromReader(reader, "BackupFinishDate") ?? DateTime.MinValue,
+                    IsCopyOnly = GetIntFromReader(reader, "IsCopyOnly") == 1,
+                    FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
+                    LastLsn = GetDecimalFromReader(reader, "LastLSN"),
+                    CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN"),
+                    DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
+                    Position = GetIntFromReader(reader, "Position"),
+                    FamilyCount = GetIntFromReader(reader, "FamilyCount") ?? 1,
+                    Files = [path]
+                });
+            }
+
+            return entries;
+        }, ct, "Reading the backup file's headers");
+    }
+
     public async Task<BackupFileInfo?> RestoreHeaderOnlyMultiAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
     {
@@ -294,11 +568,104 @@ public class SqlServerService : ISqlServerService
 
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
+
+        return await ReadHeaderAsync(conn, blobUrls, ct);
+    }
+
+    /// <summary>
+    /// Reads several headers over ONE connection, and reports where the time went (#130).
+    ///
+    /// The measurement that prompted this: three statements over nine striped files took 17.4s on a
+    /// real container. Every one of them opened its own connection first, so what was reported as a
+    /// per-file cost was partly a per-CONNECTION one - and a read that is about to happen a hundred
+    /// times should pay that once rather than each time.
+    ///
+    /// The timing is split into connecting and reading rather than given as a total, because the
+    /// two lead to different conclusions about what an audit over a whole database would cost, and
+    /// a total cannot tell them apart.
+    /// </summary>
+    public async Task<List<BackupFileInfo?>> RestoreHeaderOnlyBatchAsync(
+        ServerConnection server,
+        IReadOnlyList<IReadOnlyList<string>> requests,
+        IProgress<int>? progress = null,
+        Action<string>? timing = null,
+        CancellationToken ct = default)
+    {
+        var results = new List<BackupFileInfo?>();
+        if (requests.Count == 0) return results;
+
+        var connectTimer = System.Diagnostics.Stopwatch.StartNew();
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        connectTimer.Stop();
+
+        var readTimer = System.Diagnostics.Stopwatch.StartNew();
+        var files = 0;
+
+        foreach (var urls in requests)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                results.Add(await ReadHeaderAsync(conn, urls, ct));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // A container legitimately holds things that are not backups. One unreadable member
+                // must not abort the rest - it comes back null and the caller reports it.
+                results.Add(null);
+            }
+
+            files += urls.Count;
+            progress?.Report(results.Count);
+        }
+
+        readTimer.Stop();
+        timing?.Invoke(DescribeBatchTiming(requests.Count, files, connectTimer.Elapsed, readTimer.Elapsed));
+
+        return results;
+    }
+
+    /// <summary>
+    /// What the reads cost, in the terms #130 needs to settle its design.
+    ///
+    /// Per STATEMENT as well as per file, because the earlier per-file figure was the wrong unit: a
+    /// striped set is ONE statement covering several files, so dividing by files understated what
+    /// each read costs by the stripe count - a nine-file, three-set measurement read as 1.9s per
+    /// file when the reads were actually about 5.8s each.
+    ///
+    /// And connecting separately from reading, because only the reading part scales with the size
+    /// of an audit.
+    /// </summary>
+    internal static string DescribeBatchTiming(
+        int statements, int files, TimeSpan connecting, TimeSpan reading)
+    {
+        if (statements == 0) return string.Empty;
+
+        var perStatement = reading.TotalMilliseconds / statements;
+        var perFile = files == 0 ? 0 : reading.TotalMilliseconds / files;
+
+        return $"{statements} statement(s) over {files} file(s): " +
+               $"{connecting.TotalMilliseconds:N0} ms connecting, " +
+               $"{reading.TotalMilliseconds:N0} ms reading " +
+               $"({perStatement:N0} ms per statement, {perFile:N0} ms per file).";
+    }
+
+    private static async Task<BackupFileInfo?> ReadHeaderAsync(
+        SqlConnection conn, IReadOnlyList<string> blobUrls, CancellationToken ct)
+    {
+        if (blobUrls.Count == 0) return null;
+
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 120;
 
-        var urlClauses = string.Join(", ", blobUrls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
-        cmd.CommandText = $"RESTORE HEADERONLY FROM {urlClauses}";
+        var deviceClauses = string.Join(", ", blobUrls.Select(DeviceClause));
+        cmd.CommandText = $"RESTORE HEADERONLY FROM {deviceClauses}";
 
         return await CancellableAsync<BackupFileInfo?>(async () =>
         {
@@ -322,7 +689,10 @@ public class SqlServerService : ISqlServerService
             FirstLsn = GetDecimalFromReader(reader, "FirstLSN"),
             LastLsn = GetDecimalFromReader(reader, "LastLSN"),
             DatabaseBackupLsn = GetDecimalFromReader(reader, "DatabaseBackupLSN"),
-            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN")
+            CheckpointLsn = GetDecimalFromReader(reader, "CheckpointLSN"),
+            SoftwareVersionMajor = GetIntFromReader(reader, "SoftwareVersionMajor"),
+            TdeThumbprint = GetBytesFromReader(reader, "TDEThumbprint"),
+            EncryptorThumbprint = GetBytesFromReader(reader, "EncryptorThumbprint")
         };
         }, ct, "Reading the backup header");
     }
@@ -504,6 +874,51 @@ public class SqlServerService : ISqlServerService
     }
 
     /// <summary>RESTORE HEADERONLY returns BackupType as tinyint/smallint; avoid invalid cast.</summary>
+    /// <summary>
+    /// A whole number that may arrive as any width SQL Server felt like.
+    ///
+    /// FILELISTONLY's Size is numeric(20,0) and dm_os_volume_stats' available_bytes is bigint, so
+    /// neither fits an int and both can arrive as decimal - which is what caught the
+    /// family_sequence_number tinyint before this pattern existed.
+    /// </summary>
+    private static long? GetLongFromReader(SqlDataReader reader, string columnName)
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        if (reader.IsDBNull(ordinal)) return null;
+
+        return reader.GetValue(ordinal) switch
+        {
+            long l => l,
+            int i => i,
+            short sh => sh,
+            byte b => b,
+            decimal d => (long)d,
+            double db => (long)db,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// A varbinary column, or null when it is NULL, empty, or absent - the encryption columns
+    /// arrived over several SQL Server versions, and a header from an old instance simply does
+    /// not have them (#222).
+    /// </summary>
+    private static byte[]? GetBytesFromReader(SqlDataReader reader, string columnName)
+    {
+        try
+        {
+            var ordinal = reader.GetOrdinal(columnName);
+            if (reader.IsDBNull(ordinal)) return null;
+
+            var value = reader.GetValue(ordinal) as byte[];
+            return value is { Length: > 0 } ? value : null;
+        }
+        catch (IndexOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
     private static int? GetIntFromReader(SqlDataReader reader, string columnName)
     {
         var ordinal = reader.GetOrdinal(columnName);
@@ -553,7 +968,7 @@ public class SqlServerService : ISqlServerService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task ExecuteRestoreWithProgressAsync(
+    public async Task ExecuteWithProgressAsync(
         ServerConnection server, string sql,
         Action<string>? messageCallback = null, CancellationToken ct = default)
     {
@@ -595,7 +1010,7 @@ public class SqlServerService : ISqlServerService
                 // propagates as the failure it is.
                 messageCallback?.Invoke(
                     $"Cancelled during statement {i + 1} of {executable.Count}: {Summarize(statement)}");
-                throw new OperationCanceledException("The restore was cancelled.", ct);
+                throw new OperationCanceledException("Cancelled.", ct);
             }
             catch (SqlException)
             {
@@ -689,10 +1104,10 @@ public class SqlServerService : ISqlServerService
     // leaves create_date intact, which is how the tests tell the two apart.
     public async Task<CredentialChange> EnsureCredentialExistsAsync(
         ServerConnection server, string credentialName, string storageAccountUrl, string sasToken,
+        BlobCredentialIdentity identity = BlobCredentialIdentity.SharedAccessSignature,
         CancellationToken ct = default)
     {
         TSql.ValidateIdentifier(credentialName, nameof(credentialName));
-        var quotedName = TSql.QuoteName(credentialName);
 
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
@@ -710,15 +1125,294 @@ public class SqlServerService : ISqlServerService
         // no longer calls this to "fix" an identity it does not recognise - it stops and says what
         // it found, because the identity it would have replaced could be a managed identity the
         // instance genuinely restores with (#145).
-        var cleanSas = sasToken.TrimStart('?');
         await using var writeCmd = conn.CreateCommand();
-        writeCmd.CommandText = $@"
-            {(exists ? "ALTER" : "CREATE")} CREDENTIAL {quotedName}
-            WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
-            SECRET = '{TSql.EscapeLiteral(cleanSas)}'";
+        writeCmd.CommandText = BlobCredentialStatement.Build(credentialName, identity, sasToken, exists);
         await writeCmd.ExecuteNonQueryAsync(ct);
 
         return exists ? CredentialChange.Updated : CredentialChange.Created;
+    }
+
+    /// <summary>
+    /// Whether this instance can authenticate to blob storage with a managed identity (#147).
+    ///
+    /// Asked before the option is offered, because CREATE CREDENTIAL takes its identity as free
+    /// TEXT on every version: an ungated app writes a credential that looks perfectly fine, sits in
+    /// sys.credentials, reads back correctly, and fails at restore time. Everything says yes until
+    /// the moment it matters.
+    /// </summary>
+    public async Task<ManagedIdentitySupport> SupportsManagedIdentityCredentialAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"SELECT
+            CONVERT(int, SERVERPROPERTY('ProductMajorVersion')) AS ProductMajorVersion,
+            CONVERT(int, SERVERPROPERTY('EngineEdition')) AS EngineEdition";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return new ManagedIdentitySupport(false, null, null);
+
+        var version = reader["ProductMajorVersion"] as int?;
+        var edition = reader["EngineEdition"] as int?;
+
+        return new ManagedIdentitySupport(
+            BlobCredentialStatement.SupportsManagedIdentity(version, edition), version, edition);
+    }
+
+    /// <summary>
+    /// What each volume on the target has left, keyed by mount point (#32).
+    ///
+    /// Asked of the TARGET rather than measured from here, for the same reason the shared-path
+    /// readability check is: this app's process may not be able to see those volumes at all, and
+    /// where it can, what it sees is not necessarily what the SQL Server service account can write
+    /// to. sys.dm_os_volume_stats reports what the engine itself can see.
+    ///
+    /// Only volumes the instance already has a database file on are visible to it, which is the
+    /// limitation of this approach - a brand-new drive with nothing on it does not appear, and a
+    /// restore aimed there is simply not covered rather than being reported as full.
+    /// </summary>
+    public async Task<List<FileMoveOption>> GetDatabaseFilesAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        var files = new List<FileMoveOption>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // size is in 8 KB pages. master_files rather than the database's own sys.database_files,
+        // so this works without access to the database itself - backing up only needs the server
+        // role, and the check should not demand more than the operation does.
+        cmd.CommandText = @"
+            SELECT mf.name          AS LogicalName,
+                   mf.physical_name AS PhysicalName,
+                   mf.type_desc     AS TypeDesc,
+                   CAST(mf.size AS bigint) * 8192 AS SizeBytes
+            FROM sys.master_files AS mf
+            WHERE mf.database_id = DB_ID(@database)";
+        cmd.Parameters.AddWithValue("@database", database);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var physical = reader["PhysicalName"]?.ToString() ?? string.Empty;
+
+            files.Add(new FileMoveOption
+            {
+                LogicalName = reader["LogicalName"]?.ToString() ?? string.Empty,
+                PhysicalName = physical,
+
+                // The copy's restore carries no MOVE clauses, so each file lands at the path the
+                // backup recorded - this one - on the TARGET. Filling NewPhysicalName in is what
+                // lets RestoreSpaceCheck ask about the right volumes.
+                NewPhysicalName = physical,
+
+                Type = reader["TypeDesc"]?.ToString() ?? string.Empty,
+                SizeBytes = reader["SizeBytes"] as long? ?? 0
+            });
+        }
+
+        return files;
+    }
+
+    public async Task<string?> FindCertificateByThumbprintAsync(
+        ServerConnection server, byte[] thumbprint, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = "SELECT name FROM master.sys.certificates WHERE thumbprint = @thumbprint";
+        cmd.Parameters.AddWithValue("@thumbprint", thumbprint);
+
+        return await cmd.ExecuteScalarAsync(ct) as string;
+    }
+
+    public async Task<List<string>> ListBackupCertificatesAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        var names = new List<string>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // BACKUP ... WITH ENCRYPTION needs the certificate's private key, protected by the
+        // database master key - a certificate without one (or with a password-protected key)
+        // fails at backup time, so it is not offered at all.
+        cmd.CommandText = @"
+            SELECT name
+            FROM master.sys.certificates
+            WHERE pvt_key_encryption_type = 'MK'
+              AND name NOT LIKE '##%'
+            ORDER BY name";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var name = reader["name"]?.ToString();
+            if (!string.IsNullOrEmpty(name)) names.Add(name);
+        }
+
+        return names;
+    }
+
+    public async Task<byte[]?> GetCertificateThumbprintAsync(
+        ServerConnection server, string certificateName, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = "SELECT thumbprint FROM master.sys.certificates WHERE name = @name";
+        cmd.Parameters.AddWithValue("@name", certificateName);
+
+        return await cmd.ExecuteScalarAsync(ct) as byte[];
+    }
+
+    public async Task<(bool IsEncrypted, string? CertificateName)> GetDatabaseTdeInfoAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT is_encrypted FROM sys.databases WHERE name = @database";
+            cmd.Parameters.AddWithValue("@database", database);
+
+            if (await cmd.ExecuteScalarAsync(ct) is not true) return (false, null);
+        }
+
+        // Which certificate, best effort: dm_database_encryption_keys needs VIEW SERVER STATE,
+        // and "TDE, certificate unknown" is still worth warning about.
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT c.name
+                FROM sys.dm_database_encryption_keys AS dek
+                JOIN master.sys.certificates AS c ON c.thumbprint = dek.encryptor_thumbprint
+                WHERE dek.database_id = DB_ID(@database)";
+            cmd.Parameters.AddWithValue("@database", database);
+
+            return (true, await cmd.ExecuteScalarAsync(ct) as string);
+        }
+        catch
+        {
+            return (true, null);
+        }
+    }
+
+    public async Task<int?> GetProductMajorVersionAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT CONVERT(int, SERVERPROPERTY('ProductMajorVersion'))";
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is int major ? major : null;
+    }
+
+    public async Task<DatabaseOverview?> GetDatabaseOverviewAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"
+            SELECT d.compatibility_level,
+                   d.recovery_model_desc,
+                   SUSER_SNAME(d.owner_sid) AS OwnerName
+            FROM sys.databases AS d
+            WHERE d.name = @database";
+        cmd.Parameters.AddWithValue("@database", database);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+
+        return new DatabaseOverview(
+            Convert.ToInt32(reader["compatibility_level"]),
+            reader["recovery_model_desc"]?.ToString() ?? "UNKNOWN",
+            reader["OwnerName"] as string);
+    }
+
+    public async Task<List<OrphanedUser>> FindOrphanedUsersAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        var orphans = new List<OrphanedUser>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // Three-part naming rather than USE, so the connection state never changes. The database
+        // name is our own restore target and is quoted, not parameterised - object names cannot
+        // be parameters.
+        //
+        // SQL-auth users only (authentication_type 1): a Windows or Entra principal resolves by
+        // directory identity, so a SID mismatch there is not the orphaning this looks for.
+        // principal_id > 4 skips dbo, guest, sys and INFORMATION_SCHEMA.
+        cmd.CommandText = $@"
+            SELECT dp.name AS UserName,
+                   CASE WHEN same_named.name IS NOT NULL THEN 1 ELSE 0 END AS HasSameNamedLogin
+            FROM {TSql.QuoteName(database)}.sys.database_principals AS dp
+            LEFT JOIN sys.server_principals AS by_sid
+                   ON by_sid.sid = dp.sid
+            LEFT JOIN sys.server_principals AS same_named
+                   ON same_named.name = dp.name AND same_named.type = 'S'
+            WHERE dp.type = 'S'
+              AND dp.authentication_type = 1
+              AND dp.principal_id > 4
+              AND by_sid.sid IS NULL
+            ORDER BY dp.name";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            orphans.Add(new OrphanedUser(
+                reader["UserName"]?.ToString() ?? string.Empty,
+                Convert.ToInt32(reader["HasSameNamedLogin"]) == 1));
+        }
+
+        return orphans;
+    }
+
+    public async Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        var free = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"
+            SELECT DISTINCT
+                vs.volume_mount_point AS MountPoint,
+                vs.available_bytes    AS AvailableBytes
+            FROM sys.master_files AS mf
+            CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) AS vs";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var mount = reader["MountPoint"]?.ToString();
+            if (string.IsNullOrWhiteSpace(mount)) continue;
+
+            // Largest wins on a duplicate: the same mount point can be reported more than once, and
+            // understating free space would produce a warning that is not true.
+            var available = GetLongFromReader(reader, "AvailableBytes") ?? 0;
+            if (!free.TryGetValue(mount, out var existing) || available > existing)
+                free[mount] = available;
+        }
+
+        return free;
     }
 
     public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(

@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -59,6 +59,9 @@ public class QueryCancellationTests
         };
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // The app no longer chooses a database or a restore point for anybody.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
 
         vm.IsConnectedToServer = true;
         vm.ConnectedServer = new ServerConnection

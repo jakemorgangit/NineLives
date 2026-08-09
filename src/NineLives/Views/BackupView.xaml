@@ -1,0 +1,358 @@
+<UserControl x:Class="Blackcat.NineLives.Views.BackupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:Blackcat.NineLives.Converters"
+             xmlns:views="clr-namespace:Blackcat.NineLives.Views">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <!-- Header -->
+            <StackPanel Margin="0,0,0,20">
+                <TextBlock Text="Back Up a Database" Style="{StaticResource HeaderText}" />
+                <TextBlock Text="Take a backup to Azure Blob Storage or to a path the server can write to. Copy-only by default, so a production differential schedule is left alone."
+                           Style="{StaticResource SecondaryText}"
+                           TextWrapping="Wrap"
+                           Margin="0,4,0,0" />
+            </StackPanel>
+
+            <!-- What is about to happen to the SOURCE.
+                 At the top rather than beside the checkbox: a restore destroys the target and
+                 everybody expects it, but a backup looks harmless right up until it moves a
+                 production database's differential base. -->
+            <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                    Background="{DynamicResource WarningPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource WarningBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding WillResetTheDifferentialBase, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="THIS WILL CHANGE THE SOURCE DATABASE"
+                               Style="{StaticResource LabelText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap" LineHeight="22"
+                               Text="This is not a copy-only backup, so it resets the differential base. Every differential this database's schedule takes afterwards will be based on THIS file rather than on the last scheduled full - so restoring from the scheduled fulls will need this file too." />
+                </StackPanel>
+            </Border>
+
+            <!-- 1. What to back up -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="1. What to back up" Style="{StaticResource SubHeaderText}" />
+
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <TextBlock Text="SERVER" Style="{StaticResource LabelText}" />
+                            <ComboBox ItemsSource="{Binding Servers}"
+                                      SelectedItem="{Binding Server}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      Margin="0,4,0,0">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="List databases"
+                                Command="{Binding LoadDatabasesCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="16,8"
+                                VerticalAlignment="Bottom" />
+                    </Grid>
+
+                    <StackPanel Margin="0,12,0,0">
+                        <StackPanel Visibility="{Binding SingleSelect, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                            <ComboBox ItemsSource="{Binding Databases}"
+                                      SelectedItem="{Binding SelectedDatabase}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <!-- More than one, for the patch-night request (#208): "a copy-only of
+                             everything before we patch" is N statements sharing one set of
+                             options, and ticking them here beats running the screen N times. -->
+                        <CheckBox Content="Back up more than one database"
+                                  IsChecked="{Binding MultiSelect}"
+                                  Style="{StaticResource DarkCheckBox}"
+                                  Margin="0,10,0,0" />
+
+                        <StackPanel Visibility="{Binding MultiSelect, Converter={StaticResource BoolToVis}}"
+                                    Margin="0,8,0,0">
+                            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                    CornerRadius="4" Padding="8" MaxHeight="180">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding DatabasePicks}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <CheckBox Content="{Binding Name}"
+                                                          IsChecked="{Binding IsPicked}"
+                                                          Style="{StaticResource DarkCheckBox}"
+                                                          Margin="0,2,0,2" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button Content="All user databases"
+                                        Command="{Binding PickAllCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5" Margin="0,0,8,0" />
+                                <Button Content="None"
+                                        Command="{Binding PickNoneCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="10,5" />
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 2. Where it goes -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="2. Where it goes" Style="{StaticResource SubHeaderText}" />
+
+                    <TextBlock Text="WRITE IT TO" Style="{StaticResource LabelText}" Margin="0,10,0,0" />
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <RadioButton Content="Azure Blob Storage"
+                                     GroupName="BackupMedium"
+                                     Style="{StaticResource DarkRadioButton}"
+                                     IsChecked="{Binding Medium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
+                                     Margin="0,0,20,0"
+                                     ToolTip="BACKUP TO URL. Needs a credential on the server, and needs no network path between hosts." />
+                        <RadioButton Content="A path the server can write to"
+                                     GroupName="BackupMedium"
+                                     Style="{StaticResource DarkRadioButton}"
+                                     IsChecked="{Binding Medium, Converter={StaticResource EnumToBool}, ConverterParameter=SharedPath}"
+                                     ToolTip="BACKUP TO DISK. Faster, no egress - but the SQL Server service account has to be able to write there." />
+                    </StackPanel>
+
+                    <StackPanel Margin="0,12,0,0"
+                                Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="CONTAINER" Style="{StaticResource LabelText}" />
+                        <ComboBox ItemsSource="{Binding Containers}"
+                                  SelectedItem="{Binding Container}"
+                                  Style="{StaticResource DarkComboBox}"
+                                  Margin="0,4,0,0">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,12,0,0"
+                                Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="FOLDER" Style="{StaticResource LabelText}" />
+                        <TextBox Text="{Binding SharedPathRoot, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DarkTextBox}"
+                                 Margin="0,4,0,0"
+                                 ToolTip="For example \\nas01\sql" />
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,6,0,0"
+                                   Text="The server writes this as its own SQL Server service account, so it has to be somewhere THAT account can write - which is not the same as somewhere you can see from here." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 3. How -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="3. How" Style="{StaticResource SubHeaderText}" />
+
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <CheckBox Content="COPY_ONLY (leave the differential schedule alone)"
+                                      IsChecked="{Binding CopyOnly}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,8"
+                                      ToolTip="On by default. Turning this off resets the differential base on the source database." />
+                            <CheckBox Content="COMPRESSION"
+                                      IsChecked="{Binding Compression}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,0,0,8" />
+                            <CheckBox Content="CHECKSUM"
+                                      IsChecked="{Binding Checksum}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      ToolTip="What makes a later RESTORE VERIFYONLY mean anything. Without it, verifying can only confirm the file is readable." />
+
+                            <!-- WITH ENCRYPTION (#222). AES_256 always - the weaker algorithms
+                                 SQL Server still accepts would be a menu of mistakes. -->
+                            <CheckBox Content="ENCRYPTION (AES-256, server certificate)"
+                                      IsChecked="{Binding Encrypt}"
+                                      Style="{StaticResource DarkCheckBox}"
+                                      Margin="0,8,0,0"
+                                      ToolTip="Encrypts the backup itself. It can then only be restored on a server holding this certificate - which is the point. A TDE database's backups are already encrypted regardless; this is for everything else." />
+
+                            <StackPanel Visibility="{Binding Encrypt, Converter={StaticResource BoolToVis}}"
+                                        Margin="24,6,0,0">
+                                <TextBlock Text="CERTIFICATE" Style="{StaticResource LabelText}" />
+                                <ComboBox ItemsSource="{Binding EncryptionCertificates}"
+                                          SelectedItem="{Binding SelectedEncryptionCertificate}"
+                                          Style="{StaticResource DarkComboBox}" />
+                                <TextBlock Style="{StaticResource SecondaryText}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"
+                                           Text="Every future restore target needs this certificate in its master first - export it with BACKUP CERTIFICATE and keep the files with your DR kit, or the backup is only as recoverable as this one server." />
+                                <TextBlock Style="{StaticResource SecondaryText}"
+                                           Foreground="{DynamicResource WarningBrush}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"
+                                           Visibility="{Binding EncryptWantedButNoCertificate, Converter={StaticResource BoolToVis}}"
+                                           Text="This server offered no usable certificate - one whose private key is protected by the database master key. Create one in master, or untick encryption." />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="FILES TO WRITE" Style="{StaticResource LabelText}" />
+                            <TextBox Text="{Binding Stripes, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Width="80" HorizontalAlignment="Left"
+                                     Margin="0,4,0,8"
+                                     ToolTip="More than one stripes the backup. Faster on a large database, and for blob it is the only way past the 195 GB per-blob limit." />
+
+                            <TextBlock Text="DESCRIPTION" Style="{StaticResource LabelText}" />
+                            <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DarkTextBox}"
+                                     Margin="0,4,0,0"
+                                     ToolTip="Written into the backup header, for whoever finds this file later." />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 4. The script, and running it -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="4. Run it" Style="{StaticResource SubHeaderText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,12"
+                               Text="Nothing runs that was not on screen first. Generate the script, read what it says, then run it - the button arms on the first press and runs on the second." />
+
+                    <WrapPanel>
+                        <Button Content="Generate script"
+                                Command="{Binding GenerateCommand}"
+                                Style="{StaticResource PrimaryButton}"
+                                Padding="16,8" Margin="0,0,8,8" />
+                        <Button Content="Copy as Agent job"
+                            Command="{Binding CopyAsAgentJobCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,0"
+                            Visibility="{Binding ShowAgentJob, Converter={StaticResource BoolToVis}}"
+                            ToolTip="The same statement wrapped as a SQL Server Agent job - created disabled and unscheduled, one step per batch. Backups are the thing people actually schedule." />
+
+                    <Button Content="Copy to clipboard"
+                                Command="{Binding CopyScriptCommand}"
+                                IsEnabled="{Binding HasScript}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="16,8" Margin="0,0,8,8" />
+                        <Button Content="{Binding ButtonText}"
+                                Command="{Binding ExecuteCommand}"
+                                Style="{StaticResource DangerButton}"
+                                Padding="16,8" Margin="0,0,8,8"
+                                MinWidth="180" />
+                        <Button Content="Stop"
+                                Command="{Binding CancelCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
+                                Padding="16,8" Margin="0,0,8,8" />
+                        <Button Content="Verify what was written"
+                                Command="{Binding VerifyLastBackupCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Visibility="{Binding CanVerifyLastBackup, Converter={StaticResource BoolToVis}}"
+                                Padding="16,8" Margin="0,0,8,8"
+                                ToolTip="RESTORE VERIFYONLY over the files the last run wrote. A backup nobody has verified is a hope, not a backup." />
+                    </WrapPanel>
+
+                    <!-- Where the files will land, readable before anything is written. -->
+                    <StackPanel Margin="0,8,0,0"
+                                Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="WRITING TO" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                        <ItemsControl ItemsSource="{Binding Destinations}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               TextWrapping="Wrap"
+                                               FontFamily="{StaticResource ConsoleFont}"
+                                               FontSize="12"
+                                               Margin="0,0,0,2" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <Border Background="{DynamicResource ConsoleBackgroundBrush}"
+                            BorderBrush="{DynamicResource ConsoleBorderBrush}"
+                            BorderThickness="1" CornerRadius="4"
+                            Margin="0,12,0,0"
+                            Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer MaxHeight="260"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      Padding="12,10,12,10">
+                            <views:SqlTextBlock Sql="{Binding GeneratedScript}"
+                                                FontFamily="{StaticResource ConsoleFont}"
+                                                FontSize="12"
+                                                TextWrapping="NoWrap"
+                                                Foreground="{DynamicResource ConsoleTextBrush}" />
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- What the server said, as it said it. -->
+                    <Border Background="{DynamicResource ConsoleBackgroundBrush}"
+                            BorderBrush="{DynamicResource ConsoleBorderBrush}"
+                            BorderThickness="1" CornerRadius="4"
+                            Margin="0,12,0,0"
+                            Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer MaxHeight="220"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Padding="12,10,12,10">
+                            <ItemsControl ItemsSource="{Binding Console}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}"
+                                                   TextWrapping="Wrap"
+                                                   FontFamily="{StaticResource ConsoleFont}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource ConsoleTextBrush}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <ContentControl Style="{StaticResource ErrorBanner}" />
+
+            <TextBlock Text="{Binding StatusMessage}"
+                       Style="{StaticResource SecondaryText}"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,16" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

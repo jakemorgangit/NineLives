@@ -117,10 +117,73 @@ public static class BackupTime
             : value.ToString("yyyy-MM-dd HH:mm:ss");
 }
 
+/// <summary>Whether a backup has been checked against its own header (#130).</summary>
+public enum BackupAuditState
+{
+    /// <summary>Nobody has read this backup's header, so what it is remains an inference.</summary>
+    Unaudited,
+
+    /// <summary>The header agreed with what the path and filename claimed.</summary>
+    Passed,
+
+    /// <summary>The header disagreed, or could not be read at all.</summary>
+    Failed
+}
+
 public class BackupFileInfo
 {
     public string BlobName { get; set; } = string.Empty;
     public string BlobUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Azure's identity for this blob's CONTENT, when it gave one.
+    ///
+    /// The key an audit result is cached against. A backup header never changes, so the only reason
+    /// to read one twice is that the blob is a different blob - and the ETag is exactly what Azure
+    /// changes when that happens (#130).
+    /// </summary>
+    public string? ETag { get; set; }
+
+    /// <summary>
+    /// Whether this backup has been checked against its own header.
+    ///
+    /// Worth showing on the file rather than only in a findings list: a chain built from inference
+    /// and a chain confirmed by the backups themselves look identical otherwise, and the difference
+    /// is exactly what somebody wants to know before restoring from it.
+    /// </summary>
+    public BackupAuditState AuditState { get; set; } = BackupAuditState.Unaudited;
+
+    public bool AuditPassed => AuditState == BackupAuditState.Passed;
+    public bool AuditFailed => AuditState == BackupAuditState.Failed;
+
+    /// <summary>
+    /// Where this backup lives on disk, when it was never in blob storage at all (#149).
+    ///
+    /// Set for backups discovered through a source instance's msdb rather than by listing a
+    /// container. It is what decides how the restore addresses the file - a file with a local path
+    /// is restored FROM DISK, everything else FROM URL - so the data says where it lives rather
+    /// than a flag somewhere else having to agree with it.
+    /// </summary>
+    public string? LocalPath { get; set; }
+
+    /// <summary>The device clause a RESTORE should name this file by.</summary>
+    public string RestoreDevice => string.IsNullOrWhiteSpace(LocalPath) ? BlobUrl : LocalPath!;
+
+    /// <summary>True when this is a file on a path rather than a blob.</summary>
+    public bool IsOnDisk => !string.IsNullOrWhiteSpace(LocalPath);
+
+    /// <summary>
+    /// Which container this was listed from (#32).
+    ///
+    /// Carried on the FILE rather than on the working set as a whole, because a chain can span
+    /// containers - and each container means a separate credential on the instance and a separate
+    /// URL prefix. Without it, a restore reaching across two containers has no way to say which
+    /// container a missing credential is about.
+    ///
+    /// Null for anything read from an instance's msdb, which has no container.
+    /// </summary>
+    public string? ContainerId { get; set; }
+
     public BackupType Type { get; set; } = BackupType.Unknown;
     public long SizeBytes { get; set; }
     public DateTimeOffset LastModified { get; set; }
@@ -151,6 +214,28 @@ public class BackupFileInfo
     public DateTime? BackupStartDate { get; set; }
     public DateTime? BackupFinishDate { get; set; }
     public int? BackupTypeCode { get; set; }
+
+    /// <summary>
+    /// The TDE certificate's thumbprint when the backed-up database is TDE-encrypted, from
+    /// HEADERONLY (#222). The target must hold a certificate with this thumbprint or the restore
+    /// fails with error 33111 - the failure people discover mid-DR.
+    /// </summary>
+    public byte[]? TdeThumbprint { get; set; }
+
+    /// <summary>
+    /// The encrypting certificate's thumbprint when the backup FILE was taken WITH ENCRYPTION,
+    /// from HEADERONLY (#222). Same rule, same error number, different certificate.
+    /// </summary>
+    public byte[]? EncryptorThumbprint { get; set; }
+
+    /// <summary>
+    /// The major version of the SQL Server that TOOK this backup, from HEADERONLY (#210).
+    ///
+    /// The one-directional law of RESTORE hangs on it: a backup from a newer major can never be
+    /// restored onto an older one, and without reading this the refusal arrives from the server
+    /// mid-restore - after WITH REPLACE has dropped the target.
+    /// </summary>
+    public int? SoftwareVersionMajor { get; set; }
     public decimal? FirstLsn { get; set; }
     public decimal? LastLsn { get; set; }
 
@@ -214,6 +299,18 @@ public class BackupFileInfo
 public class BackupSet
 {
     public string SetId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Where this backup sits within its file, when it was read from one (#203).
+    ///
+    /// Drives WITH FILE = n in the generated script. A backup file holds several backup sets
+    /// whenever BACKUP ... NOINIT appended to it, and a restore that does not say which one it
+    /// means silently gets position 1 - the OLDEST backup in the file, presented as a success.
+    ///
+    /// Null everywhere except sets read directly from a file, which is the only source where a
+    /// file position is in play.
+    /// </summary>
+    public int? Position { get; set; }
     public BackupType Type { get; set; }
     public List<BackupFileInfo> Files { get; set; } = [];
     /// <summary>
@@ -266,6 +363,53 @@ public class BackupSet
     /// differential base - so it can never be the base for a differential restore.
     /// </summary>
     public bool IsCopyOnly { get; set; }
+
+    // ── LSNs, when the source knew them ─────────────────────────────────────────
+    //
+    // Null for a set discovered by listing a container: a blob name carries a type and a time and
+    // nothing else, which is the whole of #130's complaint. An instance's own msdb hands these
+    // over directly, so a set read from there can be paired definitively rather than by proximity
+    // in time. Anything reading them has to cope with their absence.
+
+    /// <summary>The checkpoint a full was taken at. A differential's <see cref="DatabaseBackupLsn"/> matches it.</summary>
+    public decimal? CheckpointLsn { get; set; }
+
+    /// <summary>
+    /// Which full this set belongs to. Matched against a full's <see cref="CheckpointLsn"/>, this
+    /// is the definitive test of whether a differential belongs to that full - timestamps only
+    /// suggest it, and a copy-only full taken in between makes the suggestion wrong.
+    /// </summary>
+    public decimal? DatabaseBackupLsn { get; set; }
+
+    public decimal? FirstLsn { get; set; }
+    public decimal? LastLsn { get; set; }
+
+    /// <summary>True when this set can be paired by LSN rather than by time.</summary>
+    public bool HasLsns => CheckpointLsn.HasValue || DatabaseBackupLsn.HasValue;
+
+    // ── whether this set has been checked against its own header (#130) ─────────
+    //
+    // Derived from the files rather than stored, so there is one answer and it cannot drift from
+    // what the audit actually marked. A striped set is audited as a whole - one HEADERONLY covering
+    // every stripe - so its files always agree.
+
+    /// <summary>Every file checked, and every one of them matched.</summary>
+    public bool AuditPassed =>
+        Files.Count > 0 && Files.All(f => f.AuditState == BackupAuditState.Passed);
+
+    /// <summary>The header disagreed with what the path claimed, or could not be read.</summary>
+    public bool AuditFailed => Files.Any(f => f.AuditState == BackupAuditState.Failed);
+
+    /// <summary>
+    /// What to show in a grid column.
+    ///
+    /// Blank rather than "no" when nothing has been checked: not having asked is not a finding
+    /// about the backup, and a column full of crosses would say the opposite.
+    /// </summary>
+    public string AuditDisplay =>
+        AuditFailed ? "\u2717 mismatch"
+        : AuditPassed ? "\u2713 audited"
+        : string.Empty;
 
     /// <summary>Server as the filter dropdowns present it: <c>HOST\INSTANCE</c> or <c>HOST</c>.</summary>
     public string? ServerDisplay => ServerIdentity.Format(ServerName, InstanceName);
@@ -379,6 +523,38 @@ public class RestorePoint
             : $"Full + {RequiredLogSets.Count} Log(s)",
         _ => "Unknown"
     };
+
+    /// <summary>Every set this restore point needs, in the order a restore applies them.</summary>
+    public IEnumerable<BackupSet> AllRequiredSets
+    {
+        get
+        {
+            yield return RequiredFullSet;
+            foreach (var diff in RequiredDiffSets) yield return diff;
+            foreach (var log in RequiredLogSets) yield return log;
+        }
+    }
+
+    // ── whether this whole point has been checked against its headers (#130) ────
+    //
+    // Per POINT rather than per set, because that is the decision being made in this grid: this is
+    // the moment somebody is about to restore to, and what they want to know is whether every
+    // backup needed to get there has been confirmed - not whether some of them have.
+
+    /// <summary>Every set needed to reach this moment has been read and matched.</summary>
+    public bool AuditPassed => AllRequiredSets.All(s => s.AuditPassed);
+
+    /// <summary>At least one set needed to reach this moment did not match its header.</summary>
+    public bool AuditFailed => AllRequiredSets.Any(s => s.AuditFailed);
+
+    /// <summary>
+    /// Blank until something has been checked. Not having asked is not a finding about the backup,
+    /// and a column full of crosses would say the opposite.
+    /// </summary>
+    public string AuditDisplay =>
+        AuditFailed ? "✗ mismatch"
+        : AuditPassed ? "✓ audited"
+        : string.Empty;
 
     public int TotalFiles
     {

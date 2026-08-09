@@ -1,4 +1,5 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -111,11 +112,35 @@ public partial class HistoryViewModel : ViewModelBase
         try
         {
             File.WriteAllText(dialog.FileName, Format(SelectedEntry));
+            LastSavedPath = dialog.FileName;
             SetStatus($"Saved to {dialog.FileName}");
         }
         catch (Exception ex)
         {
             SetError($"Could not save: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The file the last save wrote, so it can be opened without going and finding it (#117 item 8).
+    /// Saving the record of a restore and then having to hunt for it is a strange place to stop.
+    /// </summary>
+    [ObservableProperty]
+    private string? _lastSavedPath;
+
+    [RelayCommand]
+    private void OpenSavedFile()
+    {
+        if (string.IsNullOrEmpty(LastSavedPath)) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(LastSavedPath) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            // Whatever is registered for .txt failing is not this app's problem to crash over.
+            SetError($"Could not open {LastSavedPath}: {ex.Message}");
         }
     }
 

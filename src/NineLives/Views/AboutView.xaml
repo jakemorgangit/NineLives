@@ -54,40 +54,7 @@
                     </Hyperlink>
                 </TextBlock>
 
-                <Border Height="1" Background="{DynamicResource CardBorderBrush}" Margin="0,0,0,20" />
-
-                <TextBlock Text="APPEARANCE" Style="{StaticResource LabelText}" HorizontalAlignment="Center" />
-                <ComboBox ItemsSource="{Binding Themes}"
-                          DisplayMemberPath="Name"
-                          SelectedValuePath="Value"
-                          SelectedValue="{Binding SelectedTheme}"
-                          Style="{StaticResource DarkComboBox}"
-                          Width="200"
-                          HorizontalAlignment="Center"
-                          Margin="0,0,0,6"
-                          ToolTip="Dark is the default. High contrast is pure black and white with saturated status colours, for anyone who needs it." />
-                <TextBlock Text="Applies straight away, and is remembered."
-                           Style="{StaticResource SecondaryText}"
-                           FontSize="11"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,20" />
-
-                <!-- The logs are what someone attaches to a bug report, so there has to be a way
-                     to find them that is not "know where LocalAppData lives" (#40). -->
-                <Button Content="Open log folder"
-                        Command="{Binding OpenLogFolderCommand}"
-                        Style="{StaticResource SecondaryButton}"
-                        Padding="10,6"
-                        HorizontalAlignment="Center"
-                        Margin="0,0,0,12"
-                        ToolTip="{Binding LogFolder}" />
-
-                <TextBlock Text="{Binding ErrorMessage}"
-                           Style="{StaticResource SecondaryText}"
-                           TextWrapping="Wrap"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,12"
-                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+                <ContentControl Style="{StaticResource ErrorBanner}" />
 
                 <TextBlock HorizontalAlignment="Center"
                            Style="{StaticResource SecondaryText}">

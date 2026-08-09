@@ -144,7 +144,7 @@ public class SqlCancellationTests
         var messages = new List<string>();
 
         var started = Stopwatch.StartNew();
-        var run = Service().ExecuteRestoreWithProgressAsync(
+        var run = Service().ExecuteWithProgressAsync(
             TestServer(),
             "WAITFOR DELAY '00:00:30'",
             messages.Add,
@@ -176,7 +176,7 @@ public class SqlCancellationTests
         var messages = new List<string>();
 
         await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() =>
-            Service().ExecuteRestoreWithProgressAsync(
+            Service().ExecuteWithProgressAsync(
                 TestServer(),
                 "RESTORE DATABASE [NineLives_NoSuchDb] FROM DISK = 'Z:\\nope.bak'",
                 messages.Add,
@@ -192,7 +192,7 @@ public class SqlCancellationTests
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            Service().ExecuteRestoreWithProgressAsync(
+            Service().ExecuteWithProgressAsync(
                 TestServer(), "SELECT 1", null, cts.Token));
     }
 
@@ -203,7 +203,7 @@ public class SqlCancellationTests
         using var cts = new CancellationTokenSource();
         var messages = new List<string>();
 
-        await Service().ExecuteRestoreWithProgressAsync(
+        await Service().ExecuteWithProgressAsync(
             TestServer(), "SELECT 1", messages.Add, cts.Token);
 
         Assert.NotEmpty(messages);

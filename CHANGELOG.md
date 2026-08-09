@@ -8,7 +8,177 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.4.0] - 2026-08-09
+
+Nine Lives stops being a blob restore tool. It backs up and restores, to and from Azure Blob
+Storage or a path both servers can see - and it can do both in one action.
+
+It also stops showing all of that to everybody. The app grew a great deal in a short time, and
+growth without a way to opt out of it is how a tool becomes intimidating to the people it was
+built for.
+
+### Added
+
+- **Three modes - Basic, Standard and Pro - chosen once on first run** and changeable in Settings.
+  Basic is the app as it originally was: pick a container, pick a restore point, restore. Standard
+  adds the second medium, taking backups, point-in-time and file relocation. Pro adds everything
+  else. Narrowing the mode never deletes anything (#176)
+- **Hand a restore over as a SQL Server Agent job**, one step per batch, created disabled and
+  unscheduled - for a maintenance window, or a change process that takes submitted scripts rather
+  than somebody at a keyboard (#32)
+
+- **Back up a database**, to a blob container or to a path the SQL Server service account can
+  write to. `COPY_ONLY` by default, so a production differential schedule is left alone, with what
+  turning that off costs stated on the screen, in the generated script, and in the console as it
+  runs (#165)
+- **Restore from a path both servers can see**, through the same workflow blob restores use - the
+  same timeline, chain, options, point-in-time and execute path. Backups are found through the
+  source instance's own `msdb` rather than by guessing from filenames (#149)
+- **Copy a database to another server in one action** - back up the source, restore onto the
+  target, through either medium. The confirmation names both servers, and a run that backed up but
+  failed to restore says the backup is still good rather than reporting a bare failure (#105)
+- **Audit backups against their own headers.** An explicit action with an estimate in front of it,
+  a progress bar and a Stop, that reads what each backup actually is and reports where it disagrees
+  with what its path claimed. Results are cached against the blob's ETag, so a second run is
+  instant and a restart does not lose them. Audited backups carry a pill on the restore point and
+  the chain, and the scope is the chosen database or the whole container (#130)
+- **Identify backups a filename could not place.** Files landing with no type or no database are
+  invisible to the restore screen entirely; the app now says how many there are and can settle them
+  from their headers (#130)
+- **Managed-identity credentials**, so an estate that forbids long-lived SAS tokens can restore as
+  well as browse without one. Gated on SQL Server 2022 or Azure SQL MI, with a refusal that names
+  the version it found (#147)
+- **A disk-space check before a restore.** The file sizes were already coming back with the logical
+  names and being discarded; summed per volume against what the target says it has free, they
+  answer whether the restore can physically fit (#32)
+- **A win-arm64 build** alongside x64 (#39)
+- **Integration tests against a real blob API**, using Azurite, covering the listing and the
+  path-pattern inference that decides what every backup is (#37)
+
+### Changed
+
+- **The operation log is readable inside the app that wrote it** - today's file with a filter,
+  copy and refresh, from Settings. The support conversation is "what does the log say about X?",
+  not "navigate to this folder" (#214)
+- **The configuration can move to another machine without moving a single secret** - export
+  writes containers, servers and settings to a file that is safe on a share or in a ticket (SAS
+  tokens and SQL passwords stay in Windows Credential Manager; a SAS pasted into a container URL
+  is stripped on the way out), and import adds and updates but never deletes. Each connection
+  asks for its credential again on the new machine (#213)
+- **Several databases can be backed up in one run** - tick them (or "All user databases"), one
+  BACKUP per database sharing the same options, run database-at-a-time so a failure on the sixth
+  names the sixth and the rest still run. The verify offer afterwards covers exactly what
+  succeeded. "A copy-only of everything before we patch" is now one screen, once (#208)
+- **The download is 55% smaller** - 71 MB instead of 157 MB - by compressing the single-file
+  bundle. Measured before enabling: time-to-first-window is unchanged, hidden entirely inside the
+  splash dwell (#212)
+- **The app comes back where it was left**: window size, position and maximised state, and the
+  screen that was in use - carrying on from the launch cards lands there rather than starting
+  again. Geometry is applied only when it still puts a grabbable title bar on a screen, so a
+  monitor unplugged since cannot swallow the window (#211)
+- **The end of a backup stops being a dead end**: a successful run offers "Verify what was
+  written" - RESTORE VERIFYONLY over the exact devices the statement wrote - and the backup
+  screen gains the same "Copy as Agent job" handover the restore screen has, because backups are
+  the thing people actually schedule (#207)
+- **Backups can be taken WITH ENCRYPTION** - AES-256 against a server certificate picked from
+  the source's own list (only certificates whose private key the backup can actually use are
+  offered). The caution is stated where the choice is made: every future restore target needs
+  that certificate first, so export it and keep it with the DR kit (#222)
+- **TDE and encrypted backups are checked before the restore, not discovered by error 33111.**
+  The preflight reads both certificate thumbprints from the header it already fetches; a missing
+  certificate refuses by thumbprint - and by certificate NAME when the source instance can be
+  asked - with the BACKUP CERTIFICATE / CREATE CERTIFICATE route spelled out and passwords left
+  to whoever owns them. Copy Database warns before the backup half if the source database is TDE
+  and the target lacks its certificate (#222)
+- **Browse Backups hands over to Restore in one move** - a button once a database is chosen, and
+  "Restore this database" on every row. The restore screen arrives with the same source selected,
+  the backups loaded and the database landed, so the only thing left is choosing the restore
+  point. Works from either browsing source, container or server history (#202)
+- **A newer version's backup aimed at an older server refuses before anything runs**, naming both
+  versions and the way out - SQL Server can never restore in that direction (error 3169), and
+  without the check it failed mid-restore, after WITH REPLACE had dropped the target. The legal
+  upgrade direction proceeds with a note about the one-way door. One HEADERONLY on the target,
+  device-aware, so blob, shared-path and ad-hoc chains all get the same check (#210)
+- **A running restore shows its progress as a bar**, built from the server's own STATS lines -
+  per statement across the chain, mirrored to the Windows taskbar so the app conveys progress
+  while minimised. Failure turns the taskbar red and stays red until the next run; finishing
+  behind another window flashes the taskbar button, the polite signal that stops the moment the
+  app is clicked (#204)
+- **A successful restore now ends with the job's remainder on screen**, in the same read-then-run
+  shape as the recovery panel: DBCC CHECKDB offered on every success - the restore is the cheapest
+  moment to find corruption, and it proves the backup rather than just the copy - plus an automatic
+  scan for orphaned SQL-auth users, the single most common post-restore fault. Fixable orphans get
+  the ALTER USER ... WITH LOGIN statement; one with no matching login gets guidance that copies but
+  never runs, because inventing a statement means inventing a password. The database's compat
+  level, recovery model and owner are stated, not altered (#205)
+- **A backup file nobody's msdb knows can now be restored** - the vendor .bak, the file that
+  outlived its server. A third source on the restore screen takes pasted paths, asks a server to
+  read each file's own headers, and hands the result to the same chain, options and script
+  machinery as every other source. A file holding several appended backups yields one restore
+  point per position and the script says WITH FILE = n; a single stripe of a striped set is
+  refused by name, because its header happily describes media it cannot deliver (#203)
+- HEADERONLY, FILELISTONLY and VERIFYONLY statements now name DISK or URL by what each file
+  actually is, instead of assuming blob - which also makes the header audit meaningful for
+  backups discovered through msdb (#203)
+- **The app opens on the mode cards** rather than the container list. The first thing on screen
+  says what shape the app is in and offers to change it, instead of the app simply being that shape
+  with nothing saying why. Only a question the first time - after that the current mode is marked
+  and "Keep what I have" carries straight on (#200)
+- **A restore chain can span containers** - a full archived to cool storage with the logs that
+  carry it forward still in the hot one. Additional containers are ticked alongside the selected
+  one, which stays the primary: it is what the credential panel points at and the script header
+  names. Every container the chain actually uses is checked for a credential on the target before
+  the restore starts, because RESTORE FROM URL matches a credential by container URL and the
+  failure would otherwise land after WITH REPLACE had dropped the target (#32)
+- **Browse Backups can read a server's backup history**, not only a blob container. Backing up and
+  restoring have taken either medium since #165 and this screen did not come along, so the one
+  screen whose whole purpose is looking could not look at half of what the app writes. A share is
+  not walked as a directory - a folder of .bak files says nothing about which database each belongs
+  to - so the instance that took them is asked what it recorded (#197)
+- **The modes are named for the work, not for a rank.** "Restore only", "Back up and restore" and
+  "Everything", rather than Basic/Standard/Pro with a column of ticks against a column of features,
+  an "everything in Basic" ladder and a "Use Pro" button. They are three views of one application
+  and none of them costs anything; the screen should not suggest otherwise (#191)
+- **The mode cards can be reopened** from Settings, with the mode in force marked and a way to leave
+  without changing anything. They said what each mode turns on and were then shown once, replaced by
+  a drop-down of three names - which is the part of them worth the least (#191)
+- **The sidebar carries the logo** rather than the name typed out in bold, so the mark appears on the
+  screen people look at all day and not only on the splash. The strapline is now
+  RESTORE | RECOVER | RESUME: the old one named one medium and one direction (#191)
+- Chains are built from **LSNs** wherever the source knows them - which means anything read from an
+  instance's `msdb`. A differential is paired with the full it was genuinely taken against rather
+  than the nearest one by time, and a log joins a chain when it carries it forward rather than when
+  its timestamp happens to fall in range. Backups discovered by listing a container carry no LSNs
+  and behave exactly as before (#130)
+- The restore summary stays on screen while the rest of the page scrolls
+- The README describes what the app is rather than what it was
+
+### Fixed
+
+- Copy Database never ran the disk-space check the restore screen has had since #182, so the
+  screen where a copy fails after the target is already dropped was the one that never warned. It
+  now checks the source's live file sizes against the target's volumes when the scripts are
+  generated - including a drive the target does not have at all, which without MOVE clauses is
+  exactly where the restore would aim (#206)
+- "Keep what I have" on the launch cards landed on the container list - the exact landing the
+  cards exist to avoid. It now lands on Restore, the same place choosing a mode lands (#209)
+- The widest mode drew an empty bordered box under the source picker. The audit card's border was
+  gated on the mode while its contents waited on the backups, so between "this mode can audit" and
+  "there is something to audit" the chrome outlived its own contents (#195)
+- The mode cards sat at the top of the window and off to the right of it. Hiding the sidebar left
+  its 220px column behind, because a ColumnDefinition keeps its width whatever happens to the
+  element inside it (#191)
+- The mode picker in Settings showed a raw object - `ModeOption { Mode = Pro, Name` - instead of the
+  mode's name. The picker is gone in favour of the cards, and the buttons on those cards now line up
+  with each other rather than landing wherever the text above them ended (#191)
+- A differential whose base full is missing is no longer offered at all. It used to be paired with
+  the nearest full by time, which SQL Server rejects - after `WITH REPLACE` has already dropped the
+  target (#130)
+- An `msdb` row whose backup files have since been pruned is no longer offered as a restore point
+  with nothing to read from (#149)
+- The Audit button stayed disabled after choosing a database, next to an estimate that had
+  correctly updated - the button was never told to re-ask (#130)
+- Test runs wrote to the real log file and audit cache in the profile of whoever ran them (#130)
 
 ## [1.3.0] - 2026-08-06
 

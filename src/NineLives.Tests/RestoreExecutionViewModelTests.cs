@@ -62,13 +62,16 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
 
         await vm.LoadBackupsCommand.ExecuteAsync(null);
 
+        // The app no longer chooses a database or a restore point for anybody.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
+
         vm.TargetDatabaseName = "MyDb_Restored";
         vm.IsConnectedToServer = true;
         vm.ConnectedServer = connected;
 
         // The button arms on the first press and fires on the second.
         await vm.ExecuteScriptCommand.ExecuteAsync(null);
-        Assert.True(vm.IsExecuteArmed);
+        Assert.True(vm.Execution.IsArmed);
 
         return (vm, sql);
     }
@@ -145,7 +148,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
             store.SaveSasToken(vm.SelectedContainer!, "sv=2024-01-01&sig=x");
 
             await vm.ExecuteScriptCommand.ExecuteAsync(null);
-            log = vm.Console.Text;
+            log = vm.Execution.Console.Text;
         });
 
         Assert.Contains("Server state not modified", log);
@@ -187,7 +190,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
 
             await vm.ExecuteScriptCommand.ExecuteAsync(null);
 
-            log = vm.Console.Text;
+            log = vm.Execution.Console.Text;
             writes = sql.CredentialWrites;
             executed = sql.ExecutedScripts;
         });
@@ -231,7 +234,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
 
             await vm.ExecuteScriptCommand.ExecuteAsync(null);
 
-            log = vm.Console.Text;
+            log = vm.Execution.Console.Text;
             error = vm.ErrorMessage;
             writes = sql.CredentialWrites;
             executed = sql.ExecutedScripts;

@@ -2,6 +2,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
@@ -135,7 +136,12 @@ public class XamlLoadTests(WpfFixture wpf)
     [Fact]
     public void BlobBrowserViewLoads()
         => Check("BlobBrowserView", () =>
-            new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(Store()), Store()) });
+            new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(Store()), new FakeSqlServerService(), Store()) });
+
+    [Fact]
+    public void SettingsViewLoads()
+        => Check("SettingsView", () =>
+            new SettingsView { DataContext = new SettingsViewModel(Store()) });
 
     [Fact]
     public void RestoreViewLoads()
@@ -182,6 +188,13 @@ public class XamlLoadTests(WpfFixture wpf)
         });
     }
 
+    // The sidebar highlight is likewise not asserted here (#117 item 5). It is bound to
+    // CurrentViewName so that Ctrl+1..6 moves it, and the obvious test - navigate by command, then
+    // check which RadioButton is checked - finds no RadioButtons at all: an unshown Window has no
+    // visual tree, the same limitation as the banner above. What CAN break is covered elsewhere:
+    // MainWindowLoads traces a wrong binding path, and KeyboardShortcutTests pins the converter in
+    // both directions, including that ConvertBack refuses so a click cannot desync the selection.
+
     // The update banner is not asserted on beyond MainWindowLoads above, which does cover what
     // can break silently: it parses the banner's markup, its storyboard and its drop shadow, and
     // resolves every {StaticResource} it uses - a missing key would throw there.
@@ -206,15 +219,19 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.RecoveryStateMessage = "[MyDb] is in RESTORING state.";
-            vm.RecoveryActions =
+            vm.Execution.RecoveryStateMessage = "[MyDb] is in RESTORING state.";
+            vm.Execution.RecoveryActions =
             [
                 new RecoveryAction("Bring the database online", "RESTORE DATABASE [MyDb] WITH RECOVERY", "Ends the sequence."),
                 new RecoveryAction("Allow other connections again", "ALTER DATABASE [MyDb] SET MULTI_USER", "Safe at any point.")
             ];
-            vm.HasRecoveryActions = true;
-            vm.ExecutionComplete = true;
+            vm.Execution.HasRecoveryActions = true;
+            vm.Execution.ExecutionComplete = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -260,6 +277,10 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsConnectedToServer = true;
             vm.Credential.SectionVisible = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             vm.Credential.ExistsOnServer = false;
@@ -295,6 +316,10 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.IsConnectedToServer = true;
             vm.Credential.SectionVisible = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             vm.Credential.ExistsOnServer = true;
@@ -322,17 +347,21 @@ public class XamlLoadTests(WpfFixture wpf)
             var vm = NewRestoreViewModel();
             // The execute card only exists once backups are loaded, which is correct - there is
             // no script to run before then.
-            vm.BackupsLoaded = true;
+            vm.Inventory.BackupsLoaded = true;
             vm.HasScript = true;
             vm.IsConnectedToServer = true;
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             // Not running: nothing to stop, so the button must not be offered.
-            vm.CanCancelExecute = false;
+            vm.Execution.CanCancel = false;
             Realise(view);
             Assert.DoesNotContain(VisibleButtons(view), b => (b.Content as string) == "Stop restore");
 
-            vm.CanCancelExecute = true;
+            vm.Execution.CanCancel = true;
             Realise(view);
 
             var stop = Assert.Single(VisibleButtons(view), b => (b.Content as string) == "Stop restore");
@@ -348,8 +377,12 @@ public class XamlLoadTests(WpfFixture wpf)
         {
             var vm = NewRestoreViewModel();
             vm.IsBusy = true;
-            vm.CanCancelLoad = true;
+            vm.Inventory.CanCancelLoad = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             Realise(view);
 
@@ -363,7 +396,7 @@ public class XamlLoadTests(WpfFixture wpf)
     {
         wpf.Invoke(() =>
         {
-            var vm = new BlobBrowserViewModel(new BlobStorageService(Store()), Store())
+            var vm = new BlobBrowserViewModel(new BlobStorageService(Store()), new FakeSqlServerService(), Store())
             {
                 IsBusy = true,
                 CanCancelLoad = true
@@ -391,19 +424,23 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.BackupsLoaded = true;
+            vm.Inventory.BackupsLoaded = true;
             vm.HasScript = true;
             vm.GeneratedScript = "RESTORE DATABASE [MyDb] FROM URL = N'https://acct/backups/x.bak'";
-            vm.Console.Lines =
+            vm.Execution.Console.Lines =
             [
                 new ConsoleLine("Beginning restore execution...", ConsoleLineKind.Step),
                 new ConsoleLine("50 percent processed."),
                 new ConsoleLine("ERROR: something went wrong", ConsoleLineKind.Error)
             ];
-            vm.Console.HasOutput = true;
-            vm.IsExecuting = false;
-            vm.ExecutionComplete = true;
+            vm.Execution.Console.HasOutput = true;
+            vm.Execution.IsExecuting = false;
+            vm.Execution.ExecutionComplete = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -443,10 +480,14 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.BackupsLoaded = true;
-            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
-            vm.Console.HasOutput = true;
+            vm.Inventory.BackupsLoaded = true;
+            vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Execution.Console.HasOutput = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
 
             vm.IsConsoleDetached = false;
@@ -471,12 +512,16 @@ public class XamlLoadTests(WpfFixture wpf)
         wpf.Invoke(() =>
         {
             var vm = NewRestoreViewModel();
-            vm.BackupsLoaded = true;
-            vm.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
-            vm.Console.HasOutput = true;
+            vm.Inventory.BackupsLoaded = true;
+            vm.Execution.Console.Lines = [new ConsoleLine("Beginning restore execution...")];
+            vm.Execution.Console.HasOutput = true;
             vm.IsConsoleDetached = false;   // as if the wiring failed
-            vm.IsExecuting = true;
+            vm.Execution.IsExecuting = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             Realise(view);
 
@@ -500,6 +545,10 @@ public class XamlLoadTests(WpfFixture wpf)
             var vm = NewRestoreViewModel();
             vm.PointInTime.SetWindow((new DateTime(2026, 1, 10, 22, 0, 0), new DateTime(2026, 1, 10, 22, 15, 0)));
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -541,6 +590,10 @@ public class XamlLoadTests(WpfFixture wpf)
             ];
             vm.HasInventoryIssues = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -589,6 +642,10 @@ public class XamlLoadTests(WpfFixture wpf)
             vm.HasVerifyResults = true;
             vm.HasVerifyFailures = true;
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -691,6 +748,10 @@ public class XamlLoadTests(WpfFixture wpf)
                 }
             ];
 
+            // Step 4 holds all of this and is collapsed by default (#117 item 3): a collapsed
+            // parent never measures, so its item containers are never generated to be found.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
             var view = new RestoreView { DataContext = vm };
             var listener = BindingErrorListener.Attach();
             try
@@ -772,18 +833,662 @@ public class XamlLoadTests(WpfFixture wpf)
         => Check("HistoryView (empty)", () =>
             new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) });
 
-    // ── helpers ─────────────────────────────────────────────────────────────────
+    // ── auditing against headers (#130) ─────────────────────────────────────────
 
-    private RestoreViewModel NewRestoreViewModel()
+    /// <summary>
+    /// A finding says what it found, on screen.
+    ///
+    /// Found by rendering it: the text was bound to a METHOD, and a binding cannot call one. WPF
+    /// rendered an empty amber box, threw nothing, and traced nothing - a finding that reported
+    /// nothing at all, on the panel whose entire job is reporting.
+    /// </summary>
+    [Fact]
+    public void AnAuditFindingSaysWhatItFound()
+    {
+        wpf.Invoke(() =>
+        {
+            // The audit panel only exists once something has been loaded to audit.
+            var vm = LoadedRestoreViewModel();
+            vm.Inventory.AuditSummary = "1 of 3 backup set(s) do not match their headers.";
+            vm.Inventory.AuditFindings =
+            [
+                new BackupAuditFinding("s1", "MyDb_LOG_20260802.trn",
+                    BackupAuditVerdict.WrongType, "Log", "Differential")
+            ];
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("MyDb_LOG_20260802.trn", StringComparison.Ordinal)
+                                     && t.Contains("Differential", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// A backup checked against its own header is marked as such, and one that disagreed is marked
+    /// differently.
+    ///
+    /// The point of the pill: a chain built from inference and one confirmed by the backups
+    /// themselves look identical otherwise, and that difference is what somebody wants to know
+    /// before restoring from it.
+    /// </summary>
+    [Fact]
+    public void AnAuditedFileCarriesAPillAndAMismatchedOneCarriesADifferentPill()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+
+            // The chain list lives inside step 2, which is collapsed by default - and a collapsed
+            // pane is not on screen, so nothing inside it would be found.
+            vm.Steps.Point.IsVisible = true;
+            vm.Steps.Point.IsExpanded = true;
+            vm.ShowChainDetails = true;
+            vm.ChainFiles =
+            [
+                new BackupFileInfo { BlobName = "passed.bak", Type = BackupType.Full, AuditState = BackupAuditState.Passed },
+                new BackupFileInfo { BlobName = "failed.trn", Type = BackupType.TransactionLog, AuditState = BackupAuditState.Failed },
+                new BackupFileInfo { BlobName = "unchecked.trn", Type = BackupType.TransactionLog }
+            ];
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("✓ audited", shown);
+            Assert.Contains("✗ mismatch", shown);
+
+            // Exactly one of each: an unaudited file carries neither, because "not checked" is not
+            // a claim about the backup.
+            Assert.Single(shown, t => t == "✓ audited");
+            Assert.Single(shown, t => t == "✗ mismatch");
+        });
+    }
+
+    /// <summary>A Restore screen with one backup loaded, so the panels that need one are on screen.</summary>
+    private RestoreViewModel LoadedRestoreViewModel()
+    {
+        var store = new FakeCredentialStore();
+        store.Config.BlobContainers.Add(new BlobContainerConfig
+        { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
+
+        var blob = new FakeBlobStorageService
+        {
+            Files =
+            [
+                new BackupFileInfo
+                {
+                    BlobName = "FULL/SRV01/MyDb/MyDb_FULL_20260801_220000.bak",
+                    BlobUrl = "https://acct.blob.core.windows.net/backups/FULL/SRV01/MyDb/MyDb_FULL_20260801_220000.bak",
+                    Type = BackupType.Full,
+                    InferredDatabaseName = "MyDb",
+                    InferredServerName = "SRV01"
+                }
+            ]
+        };
+
+        var vm = new RestoreViewModel(
+            blob, new FakeSqlServerService(), new BackupChainBuilder(),
+            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
+
+        vm.RefreshContainers();
+        vm.LoadBackupsCommand.Execute(null);
+        return vm;
+    }
+
+    // ── files the filename could not place (#130) ───────────────────────────────
+
+    /// <summary>
+    /// The offer, and why it cannot be taken up yet, both on screen.
+    ///
+    /// A disabled button with no stated reason is one somebody works around, and the reason here is
+    /// not obvious: the header is read by the SERVER, so browsing a container is not enough.
+    /// </summary>
+    [Fact]
+    public void UnplaceableFilesAreExplainedAndTheReasonTheOfferIsDeadIsGiven()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            store.Config.BlobContainers.Add(new BlobContainerConfig
+            { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
+
+            var blob = new FakeBlobStorageService
+            {
+                Files =
+                [
+                    new BackupFileInfo
+                    {
+                        BlobName = "mystery.bak",
+                        BlobUrl = "https://acct.blob.core.windows.net/backups/mystery.bak",
+                        Type = BackupType.Unknown
+                    }
+                ]
+            };
+
+            var vm = new RestoreViewModel(
+                blob, new FakeSqlServerService(), new BackupChainBuilder(),
+                new RestoreScriptGenerator(), store,
+                TestLogs.Temp(),
+                new FakeRestoreHistoryStore());
+
+            vm.RefreshContainers();
+            vm.LoadBackupsCommand.Execute(null);
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("not on the timeline", StringComparison.Ordinal));
+            Assert.Contains(shown, t => t.Contains("it is the server that reads them", StringComparison.Ordinal));
+
+            var identify = VisibleButtons(view)
+                .Single(b => b.Content as string == "Identify them from their headers");
+
+            Assert.False(identify.IsEnabled);
+        });
+    }
+
+    /// <summary>Nothing unplaceable, nothing said - the panel is not a permanent fixture.</summary>
+    [Fact]
+    public void WithNothingUnplaceableTheOfferIsNotOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new RestoreView { DataContext = NewRestoreViewModel() };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain(shown, t => t.Contains("not on the timeline", StringComparison.Ordinal));
+        });
+    }
+
+    // ── the mode cards (#176) ───────────────────────────────────────────────────
+
+    [Fact]
+    public void ModeSelectionViewLoads()
+        => Check("ModeSelectionView", () =>
+            new ModeSelectionView { DataContext = new ModeSelectionViewModel(Store()) });
+
+    /// <summary>
+    /// Each card takes its own shade.
+    ///
+    /// Found by rendering it: the default was a LOCAL Background, and a style setter cannot override
+    /// a local value - so all three bars were the same blue and the triggers silently did nothing.
+    /// The identical trap to the audit tick (#130), repeated a few hours later, which is why it is
+    /// pinned here rather than left to a comment.
+    /// </summary>
+    [Fact]
+    public void EachModeCardTakesItsOwnShade()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new ModeSelectionView { DataContext = new ModeSelectionViewModel(Store()) };
+            Realise(view);
+
+            // The 6px bars: every Border that is exactly that tall and actually painted.
+            var shades = FindAll<Border>(view)
+                .Where(IsShown)
+                .Where(b => Math.Abs(b.ActualHeight - 6) < 0.5)
+                .Select(b => (b.Background as SolidColorBrush)?.Color)
+                .Where(c => c != null)
+                .ToList();
+
+            Assert.Equal(3, shades.Count);
+            Assert.Equal(3, shades.Distinct().Count());
+        });
+    }
+
+    /// <summary>
+    /// No mode shows a card with nothing in it.
+    ///
+    /// Found by rendering the restore screen in all three modes: the audit card's BORDER was shown
+    /// on the mode alone while its contents waited for backups to be loaded, so the widest mode met
+    /// an empty bordered box under the source picker before it had anything to audit (#195).
+    ///
+    /// Written against every card rather than that one, because the shape of the mistake - chrome
+    /// gated on one condition and contents on another - is the kind that arrives again the next
+    /// time a panel learns a second reason to be hidden.
+    /// </summary>
+    [Theory]
+    [InlineData(AppMode.Basic)]
+    [InlineData(AppMode.Standard)]
+    [InlineData(AppMode.Pro)]
+    public void NoModeDrawsACardAroundNothing(AppMode mode)
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.Mode = mode;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // Cards only. Every control template in the app is full of Borders, and a hidden child
+            // inside one of those is ordinary - it is the CARD chrome that must not outlive its
+            // own contents.
+            var cardStyle = view.TryFindResource("CardBorder") as Style;
+            Assert.NotNull(cardStyle);
+
+            foreach (var card in FindAll<Border>(view).Where(b => b.Style == cardStyle).Where(IsShown))
+            {
+                if (card.Child is not FrameworkElement child) continue;
+
+                Assert.True(
+                    IsShown(child),
+                    $"A card is visible in {mode} with its contents hidden - a border drawn around "
+                    + $"nothing. First label inside: {FirstLabel(card) ?? "(none)"}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// The button says what pressing it does, and does NOT repeat the card's own title.
+    ///
+    /// Found by rendering: Button.Content is an object, so a StringFormat on the binding is quietly
+    /// ignored, and the button read "Basic" - a label describing the card rather than the action.
+    ///
+    /// The same words on all three since #191. "Use Pro" under a Basic/Standard/Pro heading was
+    /// most of what made this screen feel like a checkout, and the titles now name the work.
+    /// </summary>
+    [Fact]
+    public void EachCardsButtonSaysWhatPressingItDoes()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = new ModeSelectionViewModel(Store());
+            var view = new ModeSelectionView { DataContext = vm };
+            Realise(view);
+
+            var labels = VisibleButtons(view).Select(b => b.Content as string).ToList();
+
+            foreach (var card in vm.Cards)
+            {
+                Assert.Contains(card.ChooseLabel, labels);
+                Assert.NotEqual(card.Title, card.ChooseLabel);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Nothing on this screen ranks the modes.
+    ///
+    /// It read as a price list: Basic/Standard/Pro, a column of green ticks against a column of
+    /// features, "Everything in Basic" laddering upwards, and a "Use Pro" button. They are three
+    /// views of one application, and none of them costs anything (#191).
+    /// </summary>
+    [Fact]
+    public void NothingOnTheCardsReadsLikeAPriceList()
+    {
+        var words = new[] { "Basic", "Standard", "Pro", "Everything in", "upgrade", "plan", "tier" };
+
+        foreach (var mode in new[] { AppMode.Basic, AppMode.Standard, AppMode.Pro })
+        {
+            var copy = string.Join(" ",
+                [AppModeCapabilities.Title(mode),
+                 AppModeCapabilities.Tagline(mode),
+                 AppModeCapabilities.WhoFor(mode),
+                 .. AppModeCapabilities.Highlights(mode)]);
+
+            foreach (var word in words)
+                Assert.DoesNotContain(word, copy, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Basic does not offer what it cannot do. A medium selector with one option, or an audit panel
+    /// for a check the mode has turned off, would be the clutter this whole idea exists to remove.
+    /// </summary>
+    [Fact]
+    public void TheRestoreScreenInBasicDoesNotOfferWhatBasicCannotDo()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.Mode = AppMode.Basic;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain("WHERE THE BACKUPS LIVE", shown);
+            Assert.DoesNotContain("AUDIT THESE BACKUPS", shown);
+        });
+    }
+
+    [Fact]
+    public void TheRestoreScreenInProOffersThemAgain()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.Mode = AppMode.Pro;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("WHERE THE BACKUPS LIVE", shown);
+        });
+    }
+
+    // ── the Copy Database screen (#105) ─────────────────────────────────────────
+
+    [Fact]
+    public void CopyDatabaseViewLoads()
+        => Check("CopyDatabaseView", () => new CopyDatabaseView { DataContext = NewCopyViewModel() });
+
+    [Fact]
+    public void TheCopyViewLoadsWithASharedPathChosen()
+        => Check("CopyDatabaseView (shared path)", () =>
+        {
+            var vm = NewCopyViewModel();
+            vm.Medium = BackupMedium.SharedPath;
+            return new CopyDatabaseView { DataContext = vm };
+        });
+
+    /// <summary>
+    /// The armed confirmation names BOTH servers, on screen.
+    ///
+    /// The whole point of this screen is that two are involved, so a prompt naming one is a prompt
+    /// somebody can read as being about the other. A collapsed panel is not a confirmation, so this
+    /// asserts on what is drawn.
+    /// </summary>
+    [Fact]
+    public void TheArmedConfirmationNamesBothServersOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            var source = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
+            var target = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV02", ServerName = "SRV02" };
+            store.Config.Servers.Add(source);
+            store.Config.Servers.Add(target);
+            store.Config.BlobContainers.Add(new BlobContainerConfig
+            { Id = "c1", Name = "backups", ContainerUrl = "https://acct.blob.core.windows.net/backups" });
+
+            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestLogs.Temp());
+            vm.SourceServer = vm.Servers.First();
+            vm.TargetServer = vm.Servers.Last();
+            vm.Container = vm.Containers.Single();
+            vm.SourceDatabase = "MyDb";
+            vm.TargetDatabaseName = "MyDb_Test";
+            vm.GenerateCommand.Execute(null);
+            vm.RunCommand.Execute(null);
+
+            var view = new CopyDatabaseView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.True(vm.IsArmed);
+            Assert.Contains(shown, t => t.Contains("SRV01", StringComparison.Ordinal)
+                                     && t.Contains("SRV02", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// A refusal is shown rather than silently disabling the button - a button dead for no stated
+    /// reason is one somebody works around.
+    /// </summary>
+    [Fact]
+    public void ARefusedCopySaysWhyOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            var server = new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
+            store.Config.Servers.Add(server);
+
+            var vm = new CopyDatabaseViewModel(store, new FakeSqlServerService(), TestLogs.Temp());
+            vm.SourceServer = vm.Servers.Single();
+            vm.TargetServer = vm.Servers.Single();
+            vm.SourceDatabase = "MyDb";
+            vm.TargetDatabaseName = "MyDb";
+
+            var view = new CopyDatabaseView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("over itself", StringComparison.Ordinal));
+        });
+    }
+
+    private static CopyDatabaseViewModel NewCopyViewModel()
+        => new(Store(), new SqlServerService(Store()), TestLogs.Temp());
+
+    // ── the Backup screen (#165) ────────────────────────────────────────────────
+
+    [Fact]
+    public void BackupViewLoads()
+        => Check("BackupView", () => new BackupView { DataContext = NewBackupViewModel() });
+
+    [Fact]
+    public void TheBackupViewLoadsWithASharedPathChosen()
+        => Check("BackupView (shared path)", () =>
+        {
+            var vm = NewBackupViewModel();
+            vm.Medium = BackupMedium.SharedPath;
+            return new BackupView { DataContext = vm };
+        });
+
+    /// <summary>
+    /// Turning COPY_ONLY off puts what it costs on screen, in the terms it costs it in.
+    ///
+    /// This is the one thing on the screen that changes the SOURCE, and it is the one thing nothing
+    /// about pressing the button would otherwise say. A collapsed banner is not a warning, so this
+    /// asserts on what is drawn.
+    /// </summary>
+    [Fact]
+    public void TurningCopyOnlyOffWarnsAboutTheSourceOnScreen()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewBackupViewModel();
+            vm.CopyOnly = false;
+
+            var view = new BackupView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("THIS WILL CHANGE THE SOURCE DATABASE", shown);
+            Assert.Contains(shown, t => t.Contains("differential base", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void ACopyOnlyBackupSaysNothingAboutChangingTheSource()
+    {
+        wpf.Invoke(() =>
+        {
+            var view = new BackupView { DataContext = NewBackupViewModel() };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain("THIS WILL CHANGE THE SOURCE DATABASE", shown);
+        });
+    }
+
+    private static BackupViewModel NewBackupViewModel()
     {
         var store = Store();
+        return new BackupViewModel(
+            store,
+            new SqlServerService(store),
+            TestLogs.Temp());
+    }
+
+    // ── the Restore screen under a shared path (#149, #165) ─────────────────
+
+    /// <summary>
+    /// The whole screen loads and binds under the second medium.
+    ///
+    /// The inputs a shared path needs are collapsed in the default state the plain load test
+    /// exercises, so none of their bindings are ever evaluated there - and a broken one would be
+    /// silent, because WPF traces a binding failure and carries on with an empty value.
+    /// </summary>
+    [Fact]
+    public void TheRestoreViewLoadsWithBackupsOnASharedPath()
+        => Check("RestoreView (shared path)", () =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+            return new RestoreView { DataContext = vm };
+        });
+
+    /// <summary>
+    /// The source dropdown shows the servers' names.
+    ///
+    /// Found by rendering the screen it replaced: under this app's ComboBox template a
+    /// DisplayMemberPath left the selection box showing
+    /// "Blackcat.NineLives.Models.ServerConnection". Nothing throws and no binding error is traced -
+    /// it is only wrong to look at, which is why it needs an assertion on what is drawn.
+    /// </summary>
+    [Fact]
+    public void TheBackupSourceDropdownShowsServerNames()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            store.Config.Servers.Add(new ServerConnection
+            { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" });
+
+            var vm = NewRestoreViewModel(store);
+            vm.RefreshContainers();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+            vm.SourceServer = vm.SourceServers.Single();
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("SRV01", shown);
+            Assert.DoesNotContain(shown, t => t.Contains("ServerConnection", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// Under a shared path the credential panel is gone, and what replaces it names the account the
+    /// permission actually belongs to.
+    ///
+    /// Not tidiness: FROM DISK uses no credential, so leaving that panel up presents something
+    /// unsatisfied that can never be satisfied, and sends people to fix the wrong thing. The
+    /// account it names is the one they will otherwise get wrong.
+    /// </summary>
+    [Fact]
+    public void UnderASharedPathTheCredentialPanelIsReplacedByWhatActuallyMatters()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+
+            // The options step is collapsed by default, and a collapsed pane is not on screen - so
+            // nothing inside it would be found, including the thing asserted absent below.
+            ShowOptionsStep(vm);
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain("SQL CREDENTIAL NAME", shown);
+            Assert.Contains("NO CREDENTIAL NEEDED", shown);
+            Assert.Contains(shown, t => t.Contains("service account", StringComparison.Ordinal));
+        });
+    }
+
+    /// <summary>
+    /// And it comes back under blob, because that is where it means something.
+    /// </summary>
+    [Fact]
+    public void UnderBlobTheCredentialNameIsStillThere()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            ShowOptionsStep(vm);
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("SQL CREDENTIAL NAME", shown);
+            Assert.DoesNotContain("NO CREDENTIAL NEEDED", shown);
+        });
+    }
+
+    /// <summary>Opens step 3, where the credential panel lives.</summary>
+    private static void ShowOptionsStep(RestoreViewModel vm)
+    {
+        vm.Steps.Options.IsVisible = true;
+        vm.Steps.Options.IsExpanded = true;
+    }
+
+    /// <summary>
+    /// The "no containers configured" panel does not fire at somebody restoring from a share.
+    ///
+    /// It would send them to the Blob Storage screen to fix a problem they do not have - a shared
+    /// path needs no container at all.
+    /// </summary>
+    [Fact]
+    public void WithNoContainersASharedPathRestoreIsNotToldToGoAndConfigureOne()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            vm.SelectedMedium = BackupMedium.SharedPath;
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Empty(vm.Containers);
+            Assert.DoesNotContain("No blob containers configured", shown);
+        });
+    }
+
+    [Fact]
+    public void WithNoContainersABlobRestoreStillIs()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains("No blob containers configured", shown);
+        });
+    }
+
+    // ── helpers ─────────────────────────────────────────────────────────────────
+
+    private RestoreViewModel NewRestoreViewModel(ICredentialStore? credentialStore = null)
+    {
+        var store = credentialStore ?? Store();
         return new RestoreViewModel(
             new BlobStorageService(store),
             new SqlServerService(store),
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
             store,
-            new OperationLog(Path.Combine(Path.GetTempPath(), "ninelives-xaml-tests", Guid.NewGuid().ToString("n"))),
+            TestLogs.Temp(),
             new FakeRestoreHistoryStore());
     }
 
@@ -796,6 +1501,9 @@ public class XamlLoadTests(WpfFixture wpf)
     /// </summary>
     private static List<Button> VisibleButtons(DependencyObject root)
         => FindAll<Button>(root).Where(IsShown).ToList();
+
+    private static string? FirstLabel(DependencyObject card)
+        => FindAll<TextBlock>(card).Select(t => t.Text).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
 
     private static bool IsShown(FrameworkElement element)
     {

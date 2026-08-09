@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -50,6 +50,9 @@ public class ExecuteBlockedReasonTests
             ContainerUrl = "https://mystorageaccount.blob.core.windows.net/backups"
         };
         await vm.LoadBackupsCommand.ExecuteAsync(null);
+
+        // The app no longer chooses a database or a restore point for anybody.
+        RestoreSetup.ChooseADatabaseAndAPoint(vm);
         return vm;
     }
 
@@ -120,7 +123,7 @@ public class ExecuteBlockedReasonTests
         var vm = await Loaded();
         vm.IsConnectedToServer = true;
         vm.TargetDatabaseName = "MyDb_Restored";
-        vm.IsExecuting = true;
+        vm.Execution.IsExecuting = true;
 
         // The button is doing its other job here; a "why not" line would be noise.
         Assert.Empty(vm.ExecuteBlockedReason);

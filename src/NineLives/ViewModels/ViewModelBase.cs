@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace Blackcat.NineLives.ViewModels;
 
@@ -33,13 +36,24 @@ public abstract partial class ViewModelBase : ObservableObject
     [ObservableProperty]
     private string _errorMessage = string.Empty;
 
-    protected void SetStatus(string message)
-    {
-        StatusMessage = message;
-        HasError = false;
-        ErrorMessage = string.Empty;
-    }
+    /// <summary>
+    /// Transient: what the app is doing, or has just done.
+    ///
+    /// Deliberately does NOT clear the error any more (#117 item 6). The two shared one line, so
+    /// the next thing that happened painted over the last thing that went wrong - "no valid
+    /// restore points" vanishing under "Loaded 1 files" was this, and it was fixed narrowly at
+    /// that one call site rather than here. An error now outlives the status messages that follow
+    /// it.
+    /// </summary>
+    protected void SetStatus(string message) => StatusMessage = message;
 
+    /// <summary>
+    /// Sticky: survives until another error supersedes it, the user dismisses it, or the next
+    /// operation starts and calls <see cref="ClearStatus"/>.
+    ///
+    /// Still writes the status line as well, because not every screen surfaces both - the History
+    /// screen binds only the status line, and an error there would otherwise be silent.
+    /// </summary>
     protected void SetError(string message)
     {
         HasError = true;
@@ -47,9 +61,21 @@ public abstract partial class ViewModelBase : ObservableObject
         StatusMessage = message;
     }
 
+    /// <summary>
+    /// Both surfaces, for the start of an operation. Called by every long-running command before
+    /// it does anything, which is what stops a fixed-and-retried failure leaving its error behind.
+    /// </summary>
     protected void ClearStatus()
     {
         StatusMessage = string.Empty;
+        HasError = false;
+        ErrorMessage = string.Empty;
+    }
+
+    /// <summary>Dismisses the error without touching the status line.</summary>
+    [RelayCommand]
+    private void DismissError()
+    {
         HasError = false;
         ErrorMessage = string.Empty;
     }
@@ -63,6 +89,32 @@ public abstract partial class ViewModelBase : ObservableObject
     /// clipboard managers, and it was reproduced while the issue was being written. A failed copy
     /// deserves a line in the status bar, not a crash.
     /// </summary>
+    /// <summary>
+    /// Copies a backup's full HTTPS path, without a SAS token.
+    ///
+    /// Shared because it was written twice, identically apart from a null check, on the two screens
+    /// that list blobs (#42). Both feed a context menu on a file row, and a path that differs
+    /// between them - one with a token, one without - would be a genuinely dangerous divergence:
+    /// these get pasted into tickets.
+    /// </summary>
+    protected void CopyBlobHttpsPath(BackupFileInfo? file, BlobContainerConfig? container)
+    {
+        if (file == null || container == null) return;
+
+        TryCopyToClipboard(
+            BlobStorageService.BuildBlobUrl(container, file.BlobName),
+            "HTTPS path copied to clipboard (no SAS token).");
+    }
+
+    /// <summary>The container-relative path, for pasting into SSMS or a script.</summary>
+    protected void CopyBlobContainerPath(BackupFileInfo? file, BlobContainerConfig? container)
+    {
+        if (file == null || container == null) return;
+
+        var containerName = container.ContainerName ?? "container";
+        TryCopyToClipboard($"{containerName}/{file.BlobName}", "Container path copied to clipboard.");
+    }
+
     protected bool TryCopyToClipboard(string? text, string successMessage)
     {
         if (string.IsNullOrEmpty(text)) return false;

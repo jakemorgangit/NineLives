@@ -13,7 +13,36 @@
         <converters:TickPositionConverter x:Key="TickPos" />
     </UserControl.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <DockPanel>
+        <!-- The live summary of what a restore would do, PINNED (#117 item 3, and then some).
+
+             It is not a step - it is the answer the steps are building towards, and it changes with
+             every option above it. It was moved out of the accordion because it was invisible
+             whenever another pane was open; it is docked here because it was then invisible whenever
+             anybody scrolled, which on this screen is constantly. The steps run well past a screen
+             height, so the sentence describing what is about to happen to a database was off-screen
+             at exactly the moment somebody was setting up the thing it describes.
+
+             Docked rather than overlaid, so it never covers the controls underneath it - the same
+             way the connection status sits above the content rather than floating on top of it. -->
+        <Border DockPanel.Dock="Top"
+                CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                Background="{DynamicResource WarningPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource WarningBrush}"
+                BorderThickness="1"
+                Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
+            <StackPanel>
+                <TextBlock Text="THIS RESTORE WILL"
+                           Style="{StaticResource LabelText}"
+                           Margin="0,0,0,6" />
+                <TextBlock Text="{Binding RestoreSummaryText}"
+                           Style="{StaticResource BodyText}"
+                           TextWrapping="Wrap"
+                           LineHeight="22" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
             <!-- Header -->
             <StackPanel Margin="0,0,0,20">
@@ -24,14 +53,80 @@
                            Margin="0,4,0,0" />
             </StackPanel>
 
+            <!-- Nothing to restore from yet. An empty dropdown on the first screen somebody
+                 opens says nothing about which screen fixes it (#117 item 7). -->
+            <Border Background="{DynamicResource InputBackgroundBrush}"
+                    CornerRadius="6" Padding="16,14" Margin="0,0,0,16">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <!-- Both conditions: a shared-path restore needs no container at all,
+                                 so telling somebody to go and configure one would send them to
+                                 the wrong screen for a problem they do not have. -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding Containers.Count}" Value="0" />
+                                    <Condition Binding="{Binding MediumIsBlob}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <TextBlock Text="No blob containers configured"
+                               Style="{StaticResource SubHeaderText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
+                        <Run Text="Add one on the Blob Storage screen and it will appear here. A restore also needs a SQL Server connection, on the SQL Servers screen, to run against." />
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
             <!-- Step 1: Container + Database -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
-                    <TextBlock Text="1. SELECT SOURCE"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,12" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Source. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Source}" />
+                    <StackPanel Visibility="{Binding Steps.Source.IsExpanded, Converter={StaticResource BoolToVis}}">
 
-                    <Grid>
+                    <!-- Which medium the backups live on (#149, #165).
+                         Backup media is a choice per operation, not a property of the app. Only
+                         two things below ever cared where a backup lives: where the list comes
+                         from, and how a RESTORE addresses a file. Everything else on this screen -
+                         the timeline, the chain, the options, the script, the execute path - works
+                         the same either way, which is why this is a selector here rather than a
+                         second screen. -->
+                    <StackPanel Margin="0,0,0,14"
+                                Visibility="{Binding ShowMediumChoice, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="WHERE THE BACKUPS LIVE" Style="{StaticResource LabelText}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <RadioButton Content="Azure Blob Storage"
+                                         GroupName="BackupMedium"
+                                         Style="{StaticResource DarkRadioButton}"
+                                         IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
+                                         Margin="0,0,20,0"
+                                         ToolTip="RESTORE FROM URL. Needs a server-side credential, and needs no network path between the two hosts." />
+                            <RadioButton Content="A path both servers can see"
+                                         GroupName="BackupMedium"
+                                         Style="{StaticResource DarkRadioButton}"
+                                         IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=SharedPath}"
+                                         ToolTip="RESTORE FROM DISK against a file share. No credential, no egress, and no waiting on an upload - but both instances have to reach it." />
+
+                            <!-- The backup nobody's msdb knows: a vendor's .bak, a file that
+                                 outlived its server (#203). -->
+                            <RadioButton Content="A backup file I have"
+                                         GroupName="BackupMedium"
+                                         Style="{StaticResource DarkRadioButton}"
+                                         Margin="20,0,0,0"
+                                         IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AdHocFile}"
+                                         ToolTip="RESTORE FROM DISK, identified by its own headers. For a file no configured server took - a vendor's backup, or one that outlived its server." />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Blob: which container -->
+                    <Grid Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -39,10 +134,26 @@
 
                         <StackPanel Grid.Column="0" Margin="0,0,12,0">
                             <TextBlock Text="BLOB CONTAINER" Style="{StaticResource LabelText}" />
+                            <!-- Tag pills here too, not only on the containers screen. This is the
+                                 dropdown where "which of these is production" actually gets
+                                 decided, and it was the one place the tags did not follow (#117
+                                 item 8). DisplayMemberPath cannot coexist with an item template,
+                                 so the name is spelled out. -->
                             <ComboBox ItemsSource="{Binding Containers}"
                                       SelectedItem="{Binding SelectedContainer}"
-                                      DisplayMemberPath="Name"
-                                      Style="{StaticResource DarkComboBox}" />
+                                      Style="{StaticResource DarkComboBox}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <ItemsControl ItemsSource="{Binding TagChips}"
+                                                          Style="{StaticResource TagChipList}"
+                                                          Margin="8,0,0,0"
+                                                          VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                         </StackPanel>
 
                         <Button Grid.Column="1"
@@ -52,9 +163,177 @@
                                 VerticalAlignment="Bottom" />
                     </Grid>
 
+                    <!-- Other containers to read as well (#32).
+                         The layout this exists for is asymmetric - fulls archived to cool storage
+                         while the logs that carry them forward stay hot - so these are additions to
+                         the container above rather than peers of it. Collapsed by default, because
+                         one container is what almost everybody has. -->
+                    <Expander Header="Also read other containers"
+                              Margin="0,12,0,0"
+                              Foreground="{DynamicResource SecondaryTextBrush}"
+                              Visibility="{Binding ShowMultipleContainers, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Margin="0,10,0,0">
+                            <TextBlock Style="{StaticResource SecondaryText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8"
+                                       Text="For a chain split across containers - a full archived to cool storage with its logs still in the hot one. Each container in the chain needs its own credential on the target, which is checked before a restore runs." />
+
+                            <ItemsControl ItemsSource="{Binding AdditionalContainers}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                            <CheckBox IsChecked="{Binding IsSelected}"
+                                                      Content="{Binding Name}"
+                                                      Style="{StaticResource DarkCheckBox}"
+                                                      VerticalAlignment="Center" />
+                                            <ItemsControl ItemsSource="{Binding TagChips}"
+                                                          Style="{StaticResource TagChipList}"
+                                                          Margin="8,0,0,0"
+                                                          VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="{Binding ContainersToReadSummary}"
+                                       Style="{StaticResource BodyText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0"
+                                       Visibility="{Binding ReadsSeveralContainers, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+                    </Expander>
+
+                    <!-- Shared path: whose history, and how the target reaches the files.
+
+                         A share cannot be listed the way a container can - a directory of .bak
+                         files says nothing about which database each belongs to, or which full a
+                         differential was taken against - so the instance that TOOK them is asked
+                         what it recorded. -->
+                    <StackPanel Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="READ THE BACKUP HISTORY OF" Style="{StaticResource LabelText}" />
+                                <ComboBox ItemsSource="{Binding SourceServers}"
+                                          SelectedItem="{Binding SourceServer}"
+                                          Style="{StaticResource DarkComboBox}"
+                                          ToolTip="The instance that TOOK the backups. Not necessarily the one the restore runs on - that difference is the whole point of this mode.">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="Load Backups"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding LoadBackupsCommand}"
+                                    VerticalAlignment="Bottom" />
+                        </Grid>
+
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,10,0,0"
+                                   Text="msdb records the path the source wrote. Leave the two boxes below empty when both hosts reach the backups by the same path - the usual arrangement with a central backup share." />
+
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="AS THE SOURCE WROTE IT" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding SourcePathPrefix, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,4,0,0"
+                                         ToolTip="For example E:\SQLBackups" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="AS THE TARGET REACHES IT" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding TargetPathPrefix, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,4,0,0"
+                                         ToolTip="For example \\SRV01\SQLBackups" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- The one failure here that can end in a SUCCESSFUL restore of the wrong
+                             backup, so it is said as soon as the history is read rather than when
+                             the restore fails. -->
+                        <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="10,8"
+                                Margin="0,12,0,0"
+                                Visibility="{Binding HasPathAdvice, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding PathAdvice}"
+                                       Foreground="{DynamicResource WarningBrush}"
+                                       TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Ad-hoc file: paths and a reader (#203).
+
+                         The file's own headers are the only account of what it holds, so an
+                         instance that can see the path is asked to read them. Usually that is the
+                         target itself - which also has to read the file to restore it. -->
+                    <StackPanel Visibility="{Binding MediumIsAdHocFile, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="BACKUP FILE(S), AS THE SERVER SEES THEM" Style="{StaticResource LabelText}" />
+                        <TextBox Text="{Binding AdHocPathsText, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DarkTextBox}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 MinHeight="52"
+                                 MaxHeight="110"
+                                 FontFamily="Consolas"
+                                 ToolTip="One complete backup file per line - a .bak, .trn or .dif. The path is opened by the SQL Server service account on the server, not by this app, so it must be a path that account can reach." />
+
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   FontSize="11"
+                                   Margin="0,4,0,0"
+                                   Text="One complete backup file per line. A full plus the logs that follow it can be listed together - the chain is assembled from the files' own LSNs. Striped sets are not supported here; restore those from the server's own backup history." />
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Text="ASK THIS SERVER TO READ THEM" Style="{StaticResource LabelText}" />
+                                <ComboBox ItemsSource="{Binding SourceServers}"
+                                          SelectedItem="{Binding SourceServer}"
+                                          Style="{StaticResource DarkComboBox}"
+                                          ToolTip="RESTORE HEADERONLY runs here, so this instance must be able to open the path. Usually the server the restore will run on.">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="Read the files"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding LoadBackupsCommand}"
+                                    VerticalAlignment="Bottom" />
+                        </Grid>
+                    </StackPanel>
+
                     <!-- Server + Database selectors -->
                     <Grid Margin="0,12,0,0"
-                          Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                          Visibility="{Binding Inventory.BackupsLoaded, Converter={StaticResource BoolToVis}}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
@@ -62,22 +341,22 @@
 
                         <StackPanel Grid.Column="0" Margin="0,0,12,0">
                             <TextBlock Text="SERVER / INSTANCE" Style="{StaticResource LabelText}" />
-                            <ComboBox ItemsSource="{Binding DiscoveredServers}"
-                                      SelectedItem="{Binding SelectedServerName}"
+                            <ComboBox ItemsSource="{Binding Inventory.DiscoveredServers}"
+                                      SelectedItem="{Binding Inventory.SelectedServerName}"
                                       Style="{StaticResource DarkComboBox}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Margin="0,0,12,0">
                             <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
-                            <ComboBox ItemsSource="{Binding DiscoveredDatabases}"
-                                      SelectedItem="{Binding SelectedDatabaseName}"
+                            <ComboBox ItemsSource="{Binding Inventory.DiscoveredDatabases}"
+                                      SelectedItem="{Binding Inventory.SelectedDatabaseName}"
                                       Style="{StaticResource DarkComboBox}" />
                         </StackPanel>
                     </Grid>
 
                     <!-- Backup set summary (set counts, accounting for striping) -->
                     <Grid Margin="0,16,0,0"
-                          Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                          Visibility="{Binding Inventory.BackupsLoaded, Converter={StaticResource BoolToVis}}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
@@ -87,31 +366,173 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal">
                             <Border Background="{DynamicResource AccentBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
-                                <TextBlock Text="{Binding FullCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="{Binding Inventory.FullCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Full Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
                             <Border Background="{DynamicResource WarningBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
-                                <TextBlock Text="{Binding DiffCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="{Binding Inventory.DiffCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Diff Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Horizontal">
                             <Border Background="{DynamicResource SuccessBrush}" CornerRadius="3" Padding="8,3" Margin="0,0,8,0">
-                                <TextBlock Text="{Binding LogCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="{Binding Inventory.LogCount}" Foreground="{StaticResource BadgeTextBrush}" FontWeight="Bold" FontSize="12" />
                             </Border>
                             <TextBlock Text="Log Sets" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
                         </StackPanel>
                         <TextBlock Grid.Column="3" Style="{StaticResource SecondaryText}"
                                    VerticalAlignment="Center" Margin="8,0">
-                            <Run Text="{Binding SetCount, Mode=OneWay}" FontWeight="SemiBold" />
+                            <Run Text="{Binding Inventory.SetCount, Mode=OneWay}" FontWeight="SemiBold" />
                             <Run Text=" total sets" />
                         </TextBlock>
                         <TextBlock Grid.Column="4" Text="{Binding Timeline.WindowText}"
                                    Style="{StaticResource SecondaryText}"
                                    VerticalAlignment="Center" HorizontalAlignment="Right" />
                     </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Files the filename could not place (#130).
+
+                 Not tidiness: a file with an unknown type never enters the fulls, diffs or logs
+                 collections and one with no database is filtered out of every working set - so
+                 these are invisible to this screen rather than merely unlabelled. Somebody who can
+                 see the backup in the container and not on the timeline deserves to be told why. -->
+            <Border CornerRadius="4" Padding="12" Margin="0,0,0,16"
+                    Background="{DynamicResource WarningPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding Inventory.HasUnclassified, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap">
+                        <Run Text="{Binding Inventory.UnclassifiedCount, Mode=OneWay}" FontWeight="SemiBold" />
+                        <Run Text="file(s) could not be identified from their path or filename, so they are not on the timeline. SQL Server can read what they actually are from the backup header itself." />
+                    </TextBlock>
+
+                    <TextBlock Text="{Binding IdentifyBlockedReason}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,0"
+                               Visibility="{Binding IdentifyBlockedReason, Converter={StaticResource NullToVis}}" />
+
+                    <WrapPanel Margin="0,10,0,0">
+                        <Button Content="Identify them from their headers"
+                                Command="{Binding IdentifyUnclassifiedCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding Inventory.IdentifyProgressText}"
+                                   Style="{StaticResource SecondaryText}"
+                                   VerticalAlignment="Center" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Audit this database against its own headers (#130).
+
+                 Belt and braces rather than a fix. Path-and-filename inference is right most of the
+                 time and wrong in ways that stay invisible until a restore is needed, so this is
+                 the button for when a set looks fragmented or a container is new and nobody has
+                 confirmed the pattern yet.
+
+                 The estimate goes in FRONT of it because a three-minute operation nobody expected
+                 reads as a hang. -->
+            <!-- One condition on the CARD, not the mode on the border and the backups on what is
+                 inside it - that combination drew the chrome around nothing (#195). -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding ShowAuditPanel, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="AUDIT THESE BACKUPS" Style="{StaticResource LabelText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,6,0,0"
+                               Text="Reads each backup's own header and checks it against what the path and filename claimed. The header is what a RESTORE reads, so it settles the question - a log filed as a full, or a backup filed under the wrong database, both look perfectly normal until the restore fails." />
+
+                    <!-- Opt-in, and next to the estimate rather than anywhere else: at ~2.1s per
+                         set a database is a coffee and a container can be most of an hour, so the
+                         number and the switch have to be read together (#130). -->
+                    <CheckBox Content="Every database in this container, not just the selected one"
+                              IsChecked="{Binding Inventory.AuditWholeContainer}"
+                              Style="{StaticResource DarkCheckBox}"
+                              Margin="0,10,0,0" />
+
+                    <TextBlock Text="{Binding Inventory.AuditEstimate}"
+                               Style="{StaticResource BodyText}"
+                               TextWrapping="Wrap"
+                               Margin="0,10,0,0"
+                               Visibility="{Binding Inventory.AuditEstimate, Converter={StaticResource NullToVis}}" />
+
+                    <TextBlock Text="{Binding AuditBlockedReason}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,0"
+                               Visibility="{Binding AuditBlockedReason, Converter={StaticResource NullToVis}}" />
+
+                    <WrapPanel Margin="0,10,0,0">
+                        <Button Content="Audit this database"
+                                Command="{Binding AuditDatabaseCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0" />
+                        <Button Content="Stop"
+                                Command="{Binding CancelLoadCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0"
+                                Visibility="{Binding Inventory.IsAuditing, Converter={StaticResource BoolToVis}}" />
+                    </WrapPanel>
+
+                    <StackPanel Margin="0,10,0,0"
+                                Visibility="{Binding Inventory.IsAuditing, Converter={StaticResource BoolToVis}}">
+                        <ProgressBar Value="{Binding Inventory.AuditProgress}"
+                                     Maximum="100"
+                                     Height="6"
+                                     Style="{StaticResource DarkProgressBar}" />
+                        <TextBlock Text="{Binding Inventory.AuditProgressText}"
+                                   Style="{StaticResource SecondaryText}"
+                                   Margin="0,6,0,0" />
+                    </StackPanel>
+
+                    <!-- Everything agreed: worth saying, because the whole value of the audit is
+                         being able to trust a chain that was assembled by inference. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,10,0,0"
+                            BorderThickness="1"
+                            Visibility="{Binding Inventory.HasAuditSummary, Converter={StaticResource BoolToVis}}">
+                        <!-- Green only when everything agreed. A summary that says one set does NOT
+                             match, in a success-coloured box, is one people read as a pass. -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource SuccessPanelBackgroundBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource SuccessPanelBorderBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Inventory.HasAuditFindings}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding Inventory.AuditSummary}"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource BodyText}" />
+                    </Border>
+
+                    <!-- Reported, not corrected. A database full of these almost always means the
+                         PATH PATTERN is wrong, and fixing each symptom quietly would hide it. -->
+                    <ItemsControl ItemsSource="{Binding Inventory.AuditFindings}" Margin="0,10,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,6"
+                                        Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                        BorderThickness="1">
+                                    <TextBlock Text="{Binding Description}"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource BodyText}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </Border>
 
@@ -153,11 +574,11 @@
 
             <!-- Step 2: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding Timeline.HasPoints, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Point.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="2. SELECT RESTORE POINT"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,4" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Point. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Point}" />
+                    <StackPanel Visibility="{Binding Steps.Point.IsExpanded, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="Click a point on the timeline, or pick one from the list below."
                                Style="{StaticResource SecondaryText}"
                                Margin="0,0,0,12" />
@@ -174,7 +595,11 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Wraps rather than running on. The type toggles plus two 150px date
+                                 boxes have a minimum width that a narrow window cannot give them,
+                                 and a Grid does not clip its children - so the row used to spill
+                                 over the count beside it. -->
+                            <WrapPanel Grid.Column="0" VerticalAlignment="Center">
                                 <CheckBox Content="Full" IsChecked="{Binding Timeline.ShowFull}"
                                           Style="{StaticResource DarkCheckBox}" Margin="0,0,12,0" />
                                 <CheckBox Content="Diff" IsChecked="{Binding Timeline.ShowDiff}"
@@ -195,12 +620,13 @@
                                          Style="{StaticResource DarkTextBox}"
                                          Width="150"
                                          ToolTip="yyyy-MM-dd or yyyy-MM-dd HH:mm:ss. Leave empty for no upper bound." />
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Grid.Column="1" Text="{Binding Timeline.CountText}"
                                        Style="{StaticResource SecondaryText}"
                                        VerticalAlignment="Center"
                                        HorizontalAlignment="Right"
+                                       TextTrimming="CharacterEllipsis"
                                        Margin="12,0,12,0" />
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -427,6 +853,33 @@
 
                             <DataGridTextColumn Header="Restores" Width="*"
                                                 Binding="{Binding TypeDisplay}" />
+                            <!-- Whether this has been checked against its own header (#130).
+
+                                 Blank until something has been, because not having asked is not a
+                                 finding about the backup - a column of crosses would say the
+                                 opposite. Green and red only once there is an answer. -->
+                            <DataGridTextColumn Header="Audit" Width="90"
+                                                SortMemberPath="AuditDisplay"
+                                                Binding="{Binding AuditDisplay}">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontSize" Value="11" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AuditPassed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                <Setter Property="ToolTip" Value="SQL Server read the header of every backup needed here, and they match what the paths say." />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AuditFailed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                <Setter Property="ToolTip" Value="At least one backup needed here does not match its header - see the audit findings above." />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
                             <DataGridTextColumn Header="Files" Width="60"
                                                 SortMemberPath="TotalFiles"
                                                 Binding="{Binding TotalFiles}" />
@@ -472,6 +925,33 @@
                                     </Style>
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
+                            <!-- Whether this has been checked against its own header (#130).
+
+                                 Blank until something has been, because not having asked is not a
+                                 finding about the backup - a column of crosses would say the
+                                 opposite. Green and red only once there is an answer. -->
+                            <DataGridTextColumn Header="Audit" Width="90"
+                                                SortMemberPath="AuditDisplay"
+                                                Binding="{Binding AuditDisplay}">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontSize" Value="11" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AuditPassed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                <Setter Property="ToolTip" Value="SQL Server read the header of every backup needed here, and they match what the paths say." />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AuditFailed}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                <Setter Property="ToolTip" Value="At least one backup needed here does not match its header - see the audit findings above." />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
                             <DataGridTextColumn Header="Files" Width="55"
                                                 Binding="{Binding FileCount}" />
                             <DataGridTextColumn Header="Striped" Width="60"
@@ -487,12 +967,12 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                        <!-- Wraps inside its own column. With no wrapping it simply ran on
+                             underneath the buttons - a Grid does not clip its children. -->
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" Margin="0,0,12,0">
                             <Run Text="Selected: " Foreground="{DynamicResource SecondaryTextBrush}" />
                             <Run Text="{Binding Timeline.SelectedPoint.TimestampDisplay, Mode=OneWay}"
                                  FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
@@ -500,13 +980,17 @@
                             <Run Text="{Binding ChainSummary, Mode=OneWay}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         </TextBlock>
 
+                        <!-- One wrapping panel, so on a narrow window the buttons fold onto
+                             another line instead of over the text beside them. -->
+                        <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+
                         <!-- On-demand: one RESTORE HEADERONLY per chain member, so it is a
                              deliberate action rather than automatic on selection.
 
                              Named for the question it answers rather than for the word "validate".
                              Two of the buttons on this screen used to say "verify" and mean
                              different things, and a third said it while verifying nothing. -->
-                        <Button Grid.Column="1"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ValidateChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
@@ -542,7 +1026,7 @@
                              checks the LSNs line up, this one reads each backup end to end and
                              checks it is intact. A truncated blob passes the first and fails this.
                              It is also the only one here that costs real time. -->
-                        <Button Grid.Column="2"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding VerifyChainCommand}"
                                 Padding="12,6" Margin="0,0,8,0"
@@ -577,7 +1061,7 @@
                         <!-- Only while something is running. RESTORE VERIFYONLY reads every byte
                              of every backup in the chain at CommandTimeout = 0, so on a large
                              chain this is the difference between waiting and killing the app. -->
-                        <Button Grid.Column="3"
+                        <Button
                                 Content="Stop"
                                 Command="{Binding CancelQueryCommand}"
                                 Style="{StaticResource SecondaryButton}"
@@ -586,7 +1070,7 @@
                                 Visibility="{Binding CanCancelQuery, Converter={StaticResource BoolToVis}}"
                                 ToolTip="Stop the server query that is running." />
 
-                        <Button Grid.Column="4"
+                        <Button
                                 Style="{StaticResource SecondaryButton}"
                                 Command="{Binding ToggleChainDetailsCommand}"
                                 Padding="12,6">
@@ -605,6 +1089,7 @@
                                 </TextBlock>
                             </Button.Content>
                         </Button>
+                        </WrapPanel>
                     </Grid>
 
                     <!-- The pair above are the genuinely subtle one: both act on the whole chain
@@ -779,10 +1264,37 @@
                                                 <TextBlock Text="{Binding TypeDisplay}" Foreground="{StaticResource BadgeTextBrush}"
                                                            FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
                                             </Border>
-                                            <TextBlock Grid.Column="1" Text="{Binding BlobName}"
-                                                       Style="{StaticResource BodyText}" VerticalAlignment="Center"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       ToolTip="{Binding BlobUrl}" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <TextBlock Text="{Binding BlobName}"
+                                                           Style="{StaticResource BodyText}" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding BlobUrl}" />
+
+                                                <!-- Checked against its own header (#130). A chain
+                                                     built from inference and one confirmed by the
+                                                     backups themselves look identical otherwise,
+                                                     and that difference is exactly what somebody
+                                                     wants to know before restoring from it. -->
+                                                <Border CornerRadius="8" Padding="7,1" Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource SuccessBrush}"
+                                                        Visibility="{Binding AuditPassed, Converter={StaticResource BoolToVis}}"
+                                                        ToolTip="SQL Server read this backup's header and it matches what the path says it is.">
+                                                    <TextBlock Text="&#x2713; audited"
+                                                               Foreground="{StaticResource BadgeTextBrush}"
+                                                               FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+
+                                                <Border CornerRadius="8" Padding="7,1" Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource ErrorBrush}"
+                                                        Visibility="{Binding AuditFailed, Converter={StaticResource BoolToVis}}"
+                                                        ToolTip="This backup's header does not match what the path says it is - see the audit findings above.">
+                                                    <TextBlock Text="&#x2717; mismatch"
+                                                               Foreground="{StaticResource BadgeTextBrush}"
+                                                               FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
                                             <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}"
                                                        Style="{StaticResource SecondaryText}" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="3"
@@ -795,16 +1307,32 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+                    </StackPanel>
+                        <!-- Finishing this step is something the user says (#117 item 3). This is the moment the database will be restored to. Confirm to continue. -->
+                        <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
+                                Padding="12,10" Margin="0,16,0,0"
+                                Visibility="{Binding Steps.Point.IsAwaitingConfirmation, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,12,0" TextWrapping="Wrap"
+                                           Text="This is the moment the database will be restored to. Confirm to continue." />
+                                <Button Content="Confirm restore point"
+                                        Command="{Binding Steps.Point.ConfirmCommand}"
+                                        IsEnabled="{Binding Steps.Point.CanConfirm}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
                 </StackPanel>
             </Border>
 
             <!-- Step 3: Restore Options -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Options.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="3. RESTORE OPTIONS"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,16" />
+                    <!-- Collapsible (#117 item 3). Title and summary come from Steps.Options. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Options}" />
+                    <StackPanel Visibility="{Binding Steps.Options.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -833,6 +1361,7 @@
                                       ToolTip="SET SINGLE_USER WITH ROLLBACK IMMEDIATE before restore." />
 
                             <CheckBox Content="KEEP_REPLICATION"
+                                      Visibility="{Binding ShowAdvancedOptions, Converter={StaticResource BoolToVis}}"
                                       IsChecked="{Binding Options.KeepReplication}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
@@ -870,6 +1399,7 @@
                                        Text="A restore that finishes despite errors can leave a corrupt database. Run DBCC CHECKDB on the result before trusting it." />
 
                             <CheckBox Content="WITH MOVE (relocate files)"
+                                      Visibility="{Binding ShowFileRelocation, Converter={StaticResource BoolToVis}}"
                                       IsChecked="{Binding UseWithMove}"
                                       Style="{StaticResource DarkCheckBox}"
                                       Margin="0,0,0,12"
@@ -972,6 +1502,48 @@
                                             />
                                 </WrapPanel>
 
+                                <!-- Whether it can physically fit (#32).
+
+                                     A restore that runs out of disk fails part-way, and by then
+                                     WITH REPLACE has already dropped the database it was replacing
+                                     - so the target is gone and the replacement is incomplete.
+                                     Entirely predictable: the file sizes came back with the logical
+                                     names, and the instance knows what it has free.
+
+                                     A warning rather than a block. SQL Server can grow onto space
+                                     that frees up and a volume can be extended mid-restore; this
+                                     app is not the authority on somebody else's storage. -->
+                                <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,10"
+                                        Background="{DynamicResource DangerPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource ErrorBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding HasSpaceWarning, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding SpaceWarning}"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource BodyText}" />
+                                </Border>
+
+                                <ItemsControl ItemsSource="{Binding VolumeSpace}" Margin="0,0,0,10">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Describe}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="11"
+                                                       Margin="0,0,0,2">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Fits}" Value="False">
+                                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
                                 <Border Visibility="{Binding HasFetchedFileMoves, Converter={StaticResource BoolToVis}}"
                                         Background="{DynamicResource InputBackgroundBrush}"
                                         CornerRadius="4" Padding="8" Margin="0,0,0,8">
@@ -1038,7 +1610,8 @@
                             <!-- Point-in-time (STOPAT): only shown for a log restore point, where
                                  stopping partway through the log is meaningful. -->
                             <StackPanel Visibility="{Binding PointInTime.CanUse, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="POINT IN TIME" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="POINT IN TIME" Style="{StaticResource LabelText}"
+                                           Visibility="{Binding ShowPointInTime, Converter={StaticResource BoolToVis}}" />
                                 <CheckBox Content="Stop at a specific time (STOPAT)"
                                           IsChecked="{Binding PointInTime.Use}"
                                           Style="{StaticResource DarkCheckBox}"
@@ -1074,16 +1647,103 @@
                                      Width="80" HorizontalAlignment="Left"
                                      Margin="0,0,0,16" />
 
-                            <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}" />
+                            <!-- Not applicable rather than merely unsatisfied (#149).
+
+                                 RESTORE FROM DISK needs no credential at all - SQL Server reaches
+                                 the path as its own service account - so under a shared path the
+                                 whole panel below would sit there looking like something still to
+                                 do. Saying which account the permission actually belongs to is
+                                 also the single most useful thing to say here, because that is the
+                                 thing people get wrong. -->
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
+                                    Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="NO CREDENTIAL NEEDED" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap"
+                                               Text="RESTORE FROM DISK does not use a credential. The instance reaches the path as its own SQL Server service account, so that account is what needs read access to the share - not you, and not this app. It is checked on the target before the restore runs." />
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="SQL CREDENTIAL NAME" Style="{StaticResource LabelText}"
+                                       Visibility="{Binding ShowCredentialPanel, Converter={StaticResource BoolToVis}}" />
                             <TextBox Text="{Binding Credential.Name, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,8"
+                                     Visibility="{Binding ShowCredentialPanel, Converter={StaticResource BoolToVis}}"
                                      ToolTip="Defaults to the container URL. The credential on the server must match this name (container URL) for RESTORE FROM URL." />
+
+                            <!-- Which identity the credential holds (#147).
+
+                                 #29 added Entra ID for browsing because many organisations forbid
+                                 long-lived SAS tokens - and those organisations could then browse
+                                 a container without one and still not restore without one, because
+                                 the credential this app wrote was always a SAS. On an Entra
+                                 container the button failed outright with "no SAS token stored",
+                                 which is true, by design, and useless. -->
+                            <StackPanel Visibility="{Binding ShowCredentialPanel, Converter={StaticResource BoolToVis}}"
+                                        Margin="0,0,0,10">
+                                <TextBlock Text="AUTHENTICATE AS" Style="{StaticResource LabelText}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <RadioButton Content="SAS token"
+                                                 GroupName="CredentialIdentity"
+                                                 Style="{StaticResource DarkRadioButton}"
+                                                 IsChecked="{Binding Credential.IdentityToCreate, Converter={StaticResource EnumToBool}, ConverterParameter=SharedAccessSignature}"
+                                                 Margin="0,0,20,0"
+                                                 ToolTip="The stored token is pushed to the server. Needs a token to have been saved for this container." />
+                                    <RadioButton Content="The instance's managed identity"
+                                                 GroupName="CredentialIdentity"
+                                                 Style="{StaticResource DarkRadioButton}"
+                                                 IsEnabled="{Binding Credential.ManagedIdentitySupported}"
+                                                 IsChecked="{Binding Credential.IdentityToCreate, Converter={StaticResource EnumToBool}, ConverterParameter=ManagedIdentity}"
+                                                 ToolTip="No secret is stored anywhere. Needs SQL Server 2022 or later, or Azure SQL Managed Instance." />
+                                </StackPanel>
+
+                                <!-- Named rather than a bare disabled radio button. Somebody who has
+                                     just been told their organisation forbids SAS tokens, and is now
+                                     told the alternative is unavailable, deserves to know which of
+                                     the two things to go and change. -->
+                                <TextBlock Text="{Binding Credential.ManagedIdentityBlockedReason}"
+                                           Style="{StaticResource SecondaryText}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Margin="0,8,0,0"
+                                           Visibility="{Binding Credential.ManagedIdentityBlockedReason, Converter={StaticResource NullToVis}}" />
+
+                                <!-- What the credential alone does NOT buy. The statement succeeds
+                                     whether or not the instance has an identity at all, and both
+                                     failures then surface as a 403 at restore time that says
+                                     nothing about which identity was refused - the trap #144
+                                     addressed on the browsing side. -->
+                                <Border CornerRadius="4" Padding="10,8" Margin="0,8,0,0"
+                                        Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding Credential.CreatingManagedIdentity, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding Credential.ManagedIdentityCaveat}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap"
+                                               FontSize="11" />
+                                </Border>
+                            </StackPanel>
 
                             <!-- Blob credential: when not connected, prompt to connect to verify; when connected, show status and optional Create -->
                             <Border Background="{DynamicResource InputBackgroundBrush}"
-                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16"
-                                    Visibility="{Binding Credential.SectionVisible, Converter={StaticResource BoolToVis}}">
+                                    CornerRadius="4" Padding="12,10" Margin="0,0,0,16">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Credential.SectionVisible}" Value="True" />
+                                                    <Condition Binding="{Binding ShowCredentialPanel}" Value="True" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <StackPanel>
                                     <TextBlock Text="BLOB CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
                                     <!-- Not connected: verify credential by connecting -->
@@ -1152,59 +1812,54 @@
                                                    Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8">
                                             <Run Text="Execute will leave this credential alone and no SAS token is sent to the server. The instance authenticates to the container as itself, so the restore depends on its identity holding a role on the storage account rather than on anything stored here. The button below would replace that with a SAS credential - which would also change how anything else on this instance reaches the same container." />
                                         </TextBlock>
+                                        <!-- The label says what the press would actually DO, which
+                                             needs both what is on the server and what is about to be
+                                             written - the interesting presses are the ones that turn
+                                             one into the other. A label describing only the current
+                                             state is precisely the bug #145 was, and now that the
+                                             identity is a choice the reverse conversion needs the
+                                             same treatment (#147). Computed rather than triggered,
+                                             because four combinations of two states is a truth table
+                                             and belongs somewhere it can be tested. -->
                                         <Button Command="{Binding Credential.CreateOnServerCommand}"
+                                                Content="{Binding Credential.CreateButtonText}"
                                                 Margin="0,0,0,0" Padding="10,6"
-                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one with the SAS token currently stored for the container, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. The SAS token is not included in the generated script."
-                                                HorizontalAlignment="Left">
-                                            <Button.Style>
-                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
-                                                    <Setter Property="Content" Value="Create credential on server" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Credential.IsSharedAccessSignature}" Value="True">
-                                                            <Setter Property="Content" Value="Refresh credential with stored SAS token" />
-                                                        </DataTrigger>
-                                                        <!-- Says what the press would actually do. The same button under the
-                                                             old label read as a harmless refresh while it converted the
-                                                             instance's managed identity to a SAS token (#145). -->
-                                                        <DataTrigger Binding="{Binding Credential.IsManagedIdentity}" Value="True">
-                                                            <Setter Property="Content" Value="Replace Managed Identity with stored SAS token" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Button.Style>
-                                        </Button>
+                                                Style="{StaticResource SecondaryButton}"
+                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. No secret is ever included in the generated script."
+                                                HorizontalAlignment="Left" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
                     </Grid>
-                </StackPanel>
-            </Border>
-
-            <!-- Restore Summary -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding RestoreSummaryText, Converter={StaticResource NullToVis}}">
-                <StackPanel>
-                    <TextBlock Text="RESTORE SUMMARY"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,8" />
-                    <Border Background="{DynamicResource InputBackgroundBrush}"
-                            CornerRadius="4" Padding="12,10">
-                        <TextBlock Text="{Binding RestoreSummaryText}"
-                                   Style="{StaticResource BodyText}"
-                                   TextWrapping="Wrap"
-                                   LineHeight="22" />
-                    </Border>
+                        <!-- Finishing this step is something the user says (#117 item 3). Happy with these? Confirm to move on to generating the script. -->
+                        <Border Background="{DynamicResource InputBackgroundBrush}" CornerRadius="4"
+                                Padding="12,10" Margin="0,16,0,0"
+                                Visibility="{Binding Steps.Options.IsAwaitingConfirmation, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <TextBlock Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                           Margin="0,0,12,0" TextWrapping="Wrap"
+                                           Text="Happy with these? Confirm to move on to generating the script." />
+                                <Button Content="Confirm options"
+                                        Command="{Binding Steps.Options.ConfirmCommand}"
+                                        IsEnabled="{Binding Steps.Options.CanConfirm}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
             <!-- Step 4: Generate + Execute -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
-                    Visibility="{Binding BackupsLoaded, Converter={StaticResource BoolToVis}}">
+                    Visibility="{Binding Steps.Execute.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
-                    <TextBlock Text="4. GENERATE &amp; EXECUTE"
-                               Style="{StaticResource SubHeaderText}"
-                               Margin="0,0,0,16" />
+                    <!-- Collapsible like the rest (#117 item 3). It is the tallest pane on the screen -
+                         script, console, recovery actions - so leaving it permanently open undid most of
+                         what collapsing the others bought. -->
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Execute}" />
+                    <StackPanel Visibility="{Binding Steps.Execute.IsExpanded, Converter={StaticResource BoolToVis}}">
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Button Content="Generate Script"
@@ -1221,7 +1876,18 @@
                                 Command="{Binding SaveScriptCommand}"
                                 IsEnabled="{Binding HasScript}"
                                 Margin="0,0,8,0" />
-                        <Button Content="{Binding ExecuteButtonText}"
+
+                        <!-- For a restore that cannot happen interactively: a maintenance window,
+                             a change process that takes submitted scripts, an operator running what
+                             a DBA handed them. The job is created disabled and unscheduled (#32). -->
+                        <Button Content="Copy as Agent job"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CopyAsAgentJobCommand}"
+                                IsEnabled="{Binding HasScript}"
+                                Visibility="{Binding ShowAgentJob, Converter={StaticResource BoolToVis}}"
+                                Margin="0,0,8,0"
+                                ToolTip="Wraps this restore as a SQL Server Agent job, one step per batch. The job is created DISABLED and with no schedule - enable or start it when the restore should actually happen." />
+                        <Button Content="{Binding Execution.ButtonText}"
                                 Style="{StaticResource DangerButton}"
                                 Command="{Binding ExecuteScriptCommand}"
                                 IsEnabled="{Binding CanPressExecute}"
@@ -1232,8 +1898,8 @@
                              leaves the database mid-restore with nothing written down (#25). -->
                         <Button Content="Stop restore"
                                 Style="{StaticResource SecondaryButton}"
-                                Command="{Binding CancelExecuteCommand}"
-                                Visibility="{Binding CanCancelExecute, Converter={StaticResource BoolToVis}}"
+                                Command="{Binding Execution.CancelCommand}"
+                                Visibility="{Binding Execution.CanCancel, Converter={StaticResource BoolToVis}}"
                                 Margin="8,0,0,0"
                                 MinWidth="110"
                                 ToolTip="Asks SQL Server to abort the statement in flight. It rolls that statement back, but the target database is left mid-restore and will need recovering - the app will tell you how." />
@@ -1253,7 +1919,7 @@
                          hostname alone is a weak signal - blackcatsvr01 and blackcatsvr02 differ
                          by one character. A red PROD pill is read before the sentence is. -->
                     <Border Background="{DynamicResource DangerPanelBackgroundBrush}" CornerRadius="4" Padding="12,8" Margin="0,0,0,12"
-                            Visibility="{Binding IsExecuteArmed, Converter={StaticResource BoolToVis}}">
+                            Visibility="{Binding Execution.IsArmed, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <ItemsControl ItemsSource="{Binding ConnectedServerTags}"
                                           Style="{StaticResource TagChipList}"
@@ -1267,7 +1933,16 @@
                                 <Run Text="{Binding TargetDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
                                 <Run Text="(" />
                                 <Run Text="{Binding ChainSummary, Mode=OneWay}" />
-                                <Run Text="). This operation cannot be undone." Foreground="{DynamicResource ErrorBrush}" />
+                                <Run Text=")." />
+                                <!-- The SOURCE, named on the last screen before an irreversible
+                                     write. Restoring the right chain from the wrong container is
+                                     as bad as restoring to the wrong server, and only one of the
+                                     two was on this banner (#117 item 8). -->
+                                <Run Text=" From:" />
+                                <Run Text="{Binding SelectedContainer.Name, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="/" />
+                                <Run Text="{Binding Inventory.SelectedDatabaseName, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text=". This operation cannot be undone." Foreground="{DynamicResource ErrorBrush}" />
                             </TextBlock>
                         </StackPanel>
                     </Border>
@@ -1282,10 +1957,7 @@
                         </TextBlock>
                     </Border>
 
-                    <TextBlock Text="{Binding ErrorMessage}"
-                               Foreground="{DynamicResource ErrorBrush}"
-                               Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
-                               Margin="0,0,0,12" TextWrapping="Wrap" />
+                    <ContentControl Style="{StaticResource ErrorBanner}" />
 
                     <!-- The generated script. Stays visible during and after execution: it used to
                          be hidden the moment Execute was pressed, so the script and the console
@@ -1331,14 +2003,14 @@
                                 <Style.Triggers>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding Console.HasOutput}" Value="True" />
+                                            <Condition Binding="{Binding Execution.Console.HasOutput}" Value="True" />
                                             <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
                                             <!-- Belt and braces. While a restore runs the console
                                                  is always in its own window, so the inline one
                                                  must be gone even if the detach flag never got
                                                  set - a wiring failure should not put two
                                                  consoles on screen. -->
-                                            <Condition Binding="{Binding IsExecuting}" Value="False" />
+                                            <Condition Binding="{Binding Execution.IsExecuting}" Value="False" />
                                         </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible" />
                                     </MultiDataTrigger>
@@ -1365,7 +2037,7 @@
                                                 <Style TargetType="Ellipse">
                                                     <Setter Property="Fill" Value="{DynamicResource ConsoleMutedBrush}" />
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsExecuting}" Value="True">
+                                                        <DataTrigger Binding="{Binding Execution.IsExecuting}" Value="True">
                                                             <Setter Property="Fill" Value="{DynamicResource ConsoleSuccessBrush}" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
@@ -1380,20 +2052,20 @@
                                     </StackPanel>
 
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBlock Text="{Binding Console.Lines.Count, StringFormat='{}{0} lines'}"
+                                        <TextBlock Text="{Binding Execution.Console.Lines.Count, StringFormat='{}{0} lines'}"
                                                    Foreground="{DynamicResource ConsoleMutedBrush}"
                                                    FontFamily="{StaticResource ConsoleFont}"
                                                    FontSize="11"
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,12,0" />
                                         <Button Content="Copy output"
-                                                Command="{Binding CopyConsoleCommand}"
+                                                Command="{Binding Execution.CopyConsoleCommand}"
                                                 Style="{StaticResource SecondaryButton}"
                                                 Padding="8,2" FontSize="11"
                                                 Margin="0,0,8,0"
                                                 ToolTip="Copies the whole console, which is what to attach to a bug report." />
                                         <Button Content="Save output"
-                                                Command="{Binding SaveConsoleCommand}"
+                                                Command="{Binding Execution.SaveConsoleCommand}"
                                                 Style="{StaticResource SecondaryButton}"
                                                 Padding="8,2" FontSize="11"
                                                 ToolTip="Writes the console to a file, with a header naming the server, the target database and the outcome - for a change ticket or an incident write-up." />
@@ -1404,11 +2076,23 @@
                             <!-- Virtualised so a long restore stays responsive. Auto-follows the
                                  last line unless the user has scrolled up to read something. -->
                             <ListBox Grid.Row="1" x:Name="ConsoleList"
-                                     ItemsSource="{Binding Console.Lines}"
+                                     ItemsSource="{Binding Execution.Console.Lines}"
                                      Style="{StaticResource ConsoleListBox}"
                                      MaxHeight="360" />
                         </Grid>
                     </Border>
+
+                    <!-- The chain's own progress, from the server's STATS lines (#204). -->
+                    <StackPanel Margin="0,8,0,0"
+                                Visibility="{Binding Execution.IsExecuting, Converter={StaticResource BoolToVis}}">
+                        <ProgressBar Value="{Binding Execution.ProgressValue, Mode=OneWay}"
+                                     Maximum="100" Height="8"
+                                     Style="{StaticResource DarkProgressBar}" />
+                        <TextBlock Text="{Binding Execution.ProgressText}"
+                                   Style="{StaticResource SecondaryText}"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+
 
                     <!-- What a failed restore left behind, and how to undo it (#14). A chain that
                          stops part-way leaves the target in RESTORING, and in SINGLE_USER too if
@@ -1425,7 +2109,7 @@
                                 <Style.Triggers>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding HasRecoveryActions}" Value="True" />
+                                            <Condition Binding="{Binding Execution.HasRecoveryActions}" Value="True" />
                                             <Condition Binding="{Binding IsConsoleDetached}" Value="False" />
                                         </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible" />
@@ -1436,10 +2120,10 @@
                         <StackPanel>
                             <TextBlock Text="THE TARGET DATABASE NEEDS ATTENTION"
                                        Style="{StaticResource LabelText}" Margin="0,0,0,8" />
-                            <TextBlock Text="{Binding RecoveryStateMessage}"
+                            <TextBlock Text="{Binding Execution.RecoveryStateMessage}"
                                        Style="{StaticResource BodyText}"
                                        TextWrapping="Wrap" Margin="0,0,0,12" />
-                            <ItemsControl ItemsSource="{Binding RecoveryActions}">
+                            <ItemsControl ItemsSource="{Binding Execution.RecoveryActions}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Border Background="{DynamicResource InputBackgroundBrush}"
@@ -1459,13 +2143,13 @@
                                                            TextWrapping="Wrap" Margin="0,0,0,8" />
                                                 <StackPanel Orientation="Horizontal">
                                                     <Button Content="Run this"
-                                                            Command="{Binding DataContext.RunRecoveryActionCommand,
+                                                            Command="{Binding DataContext.Execution.RunRecoveryActionCommand,
                                                                       RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                             CommandParameter="{Binding}"
                                                             Style="{StaticResource SecondaryButton}"
                                                             Padding="10,6" Margin="0,0,8,0" />
                                                     <Button Content="Copy"
-                                                            Command="{Binding DataContext.CopyRecoveryActionCommand,
+                                                            Command="{Binding DataContext.Execution.CopyRecoveryActionCommand,
                                                                       RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                             CommandParameter="{Binding}"
                                                             Style="{StaticResource SecondaryButton}"
@@ -1478,6 +2162,61 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+        <!-- What finishes the restore that WORKED (#205): the recovery panel's counterpart.
+             CHECKDB proves the backup rather than just the copy, and the orphan scan names the
+             single most common post-restore fault before anybody hits it. -->
+        <Border CornerRadius="4" Padding="12" Margin="0,12,0,0"
+                Background="{DynamicResource SuccessPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource SuccessBrush}"
+                BorderThickness="1"
+                Visibility="{Binding Execution.HasPostRestoreActions, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <TextBlock Text="FINISHING THE JOB"
+                           Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                <TextBlock Text="{Binding Execution.PostRestoreMessage}"
+                           Style="{StaticResource BodyText}"
+                           TextWrapping="Wrap" Margin="0,0,0,10" />
+                <ItemsControl ItemsSource="{Binding Execution.PostRestoreActions}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource InputBackgroundBrush}"
+                                    CornerRadius="4" Padding="10" Margin="0,0,0,8">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBox Text="{Binding Sql, Mode=OneWay}"
+                                             Style="{StaticResource DarkTextBox}"
+                                             IsReadOnly="True" TextWrapping="Wrap"
+                                             FontFamily="{StaticResource ConsoleFont}"
+                                             FontSize="12" Margin="0,6,0,6" />
+                                    <TextBlock Text="{Binding Caution}"
+                                               Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Run this"
+                                                Visibility="{Binding Runnable, Converter={StaticResource BoolToVis}}"
+                                                Command="{Binding DataContext.Execution.RunRecoveryActionCommand,
+                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="10,6" Margin="0,0,8,0" />
+                                        <Button Content="Copy"
+                                                Command="{Binding DataContext.Execution.CopyRecoveryActionCommand,
+                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="10,6" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -1486,14 +2225,14 @@
                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" Padding="20">
                 <StackPanel HorizontalAlignment="Center">
                     <TextBlock Text="Loading..." Style="{StaticResource BodyText}" HorizontalAlignment="Center" />
-                    <TextBlock Text="{Binding LoadProgressText}"
+                    <TextBlock Text="{Binding Inventory.LoadProgressText}"
                                Style="{StaticResource SecondaryText}"
                                HorizontalAlignment="Center"
                                Margin="0,4,0,0" />
                     <Button Content="Cancel"
                             Style="{StaticResource SecondaryButton}"
                             Command="{Binding CancelLoadCommand}"
-                            Visibility="{Binding CanCancelLoad, Converter={StaticResource BoolToVis}}"
+                            Visibility="{Binding Inventory.CanCancelLoad, Converter={StaticResource BoolToVis}}"
                             Padding="10,6" Margin="0,10,0,0"
                             HorizontalAlignment="Center" />
                 </StackPanel>
@@ -1505,5 +2244,6 @@
                        Margin="0,4,0,16"
                        Visibility="{Binding StatusMessage, Converter={StaticResource NullToVis}}" />
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

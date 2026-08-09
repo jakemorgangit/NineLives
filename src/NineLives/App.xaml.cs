@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.Views;
 
@@ -27,7 +27,9 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
-        Log.Prune();
+        // Prune moved to MainViewModel, after the config is read: retention is configurable now,
+        // and pruning here with the default would delete files the user had asked to keep before
+        // anything had read the setting (#117 item 2).
         Log.Info($"Nine Lives {AppVersion.Display} starting on {Environment.OSVersion}");
 
         // Explicit for the whole startup sequence: while the splash is briefly the only window,

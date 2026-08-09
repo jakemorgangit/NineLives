@@ -10,17 +10,51 @@
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}">
 
+    <!-- The taskbar carries the restore's progress, so the app conveys it while minimised (#204).
+         Red on failure and it stays red until the next run - the signal somebody who alt-tabbed
+         away most needs. -->
+    <Window.TaskbarItemInfo>
+        <TaskbarItemInfo ProgressState="{Binding Restore.Execution.TaskbarState}"
+                         ProgressValue="{Binding Restore.Execution.TaskbarValue}" />
+    </Window.TaskbarItemInfo>
+
+
     <!-- DataContext is set in the constructor, not here. Declaring it in XAML meant every
          construction of this window - including a test that only wanted to check the markup -
          built a MainViewModel against the real %LOCALAPPDATA% config and ran the secret-key
          migration over it. -->
 
+    <!-- Keyboard shortcuts (#117 item 5). Every action needed the mouse: no menu bar, no
+         accelerators, nothing. Ctrl+1..6 follow the sidebar's own order, so the numbering is
+         readable off the screen rather than something to memorise.
+
+         What each one does is decided on MainViewModel, not bound straight to a screen's command -
+         see the comment there. -->
+    <Window.InputBindings>
+        <KeyBinding Modifiers="Ctrl" Key="D1" Command="{Binding NavigateToCommand}" CommandParameter="Blob Storage" />
+        <KeyBinding Modifiers="Ctrl" Key="D2" Command="{Binding NavigateToCommand}" CommandParameter="SQL Servers" />
+        <KeyBinding Modifiers="Ctrl" Key="D3" Command="{Binding NavigateToCommand}" CommandParameter="Browse Backups" />
+        <KeyBinding Modifiers="Ctrl" Key="D4" Command="{Binding NavigateToCommand}" CommandParameter="Back Up" />
+        <KeyBinding Modifiers="Ctrl" Key="D5" Command="{Binding NavigateToCommand}" CommandParameter="Restore" />
+        <KeyBinding Modifiers="Ctrl" Key="D6" Command="{Binding NavigateToCommand}" CommandParameter="Copy Database" />
+        <KeyBinding Modifiers="Ctrl" Key="D7" Command="{Binding NavigateToCommand}" CommandParameter="History" />
+        <KeyBinding Modifiers="Ctrl" Key="D8" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
+        <KeyBinding Modifiers="Ctrl" Key="D9" Command="{Binding NavigateToCommand}" CommandParameter="About" />
+        <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
+        <KeyBinding Modifiers="Ctrl" Key="G" Command="{Binding GenerateScriptCommand}" />
+        <KeyBinding Key="Escape" Command="{Binding CancelCurrentCommand}" />
+    </Window.InputBindings>
+
     <Window.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:EnumToBoolConverter x:Key="EnumToBool" />
 
         <DataTemplate DataType="{x:Type vm:BlobConfigViewModel}">
             <views:BlobConfigView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+            <views:SettingsView />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ServerManagerViewModel}">
             <views:ServerManagerView />
@@ -28,8 +62,17 @@
         <DataTemplate DataType="{x:Type vm:BlobBrowserViewModel}">
             <views:BlobBrowserView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ModeSelectionViewModel}">
+            <views:ModeSelectionView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:BackupViewModel}">
+            <views:BackupView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:RestoreViewModel}">
             <views:RestoreView />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:CopyDatabaseViewModel}">
+            <views:CopyDatabaseView />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
             <views:HistoryView />
@@ -114,22 +157,48 @@
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="220" />
+                <!-- Bound, because collapsing the sidebar does not collapse the space it sits in
+                     and the cards centre in what is left (#191). -->
+                <ColumnDefinition Width="{Binding SidebarWidth}" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Sidebar -->
-            <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}">
+            <!-- Sidebar.
+                 Hidden while the mode cards are up (#176): a sidebar sitting behind a choice about
+                 what the sidebar should contain would be answering the question twice, and the
+                 entries it shows would be the ones about to change. -->
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}"
+                    Visibility="{Binding IsChoosingMode, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                 <DockPanel>
-                    <!-- App Title -->
-                    <StackPanel DockPanel.Dock="Top" Margin="20,20,20,8">
-                        <TextBlock FontSize="18" FontWeight="Bold"
-                                   FontFamily="Segoe UI">
-                            <Run Text="Nine" Foreground="{DynamicResource PrimaryTextBrush}" /><Run Text=" Lives" Foreground="{DynamicResource AccentBrush}" />
+                    <!-- The mark itself, not a re-typed name (#191).
+                         The paw and the tracked wordmark are the brand; the sidebar used to spell
+                         "Nine Lives" in bold Segoe, so the one screen people look at all day was
+                         the one place the logo never appeared.
+
+                         Both come from Themes/Logo.xaml, shared with the splash - a second copy
+                         would be a second thing to keep in step, and the two sit side by side in
+                         the first few seconds of every launch. -->
+                    <StackPanel DockPanel.Dock="Top" Margin="20,18,20,8">
+                        <ContentControl Template="{StaticResource NineLivesLogo}"
+                                        Height="58"
+                                        HorizontalAlignment="Center" />
+
+                        <TextBlock Style="{StaticResource LogoWordmark}"
+                                   FontSize="16"
+                                   Margin="0,10,0,0">
+                            <!-- Tracking is per-Run: WPF has no letter-spacing, and the wide
+                                 tracking is what makes the wordmark the wordmark. -->
+                            <Run Text="N I N E" Foreground="{DynamicResource PrimaryTextBrush}" /><Run Text="  " /><Run Text="L I V E S" Foreground="{DynamicResource AccentBrush}" />
                         </TextBlock>
-                        <TextBlock Text="SQL Restore from Azure Blob"
+
+                        <!-- Not "SQL Restore from Azure Blob" any more: it names one medium and one
+                             direction, and the app now backs up as well as restores, to a file
+                             share as well as to blob. -->
+                        <TextBlock Text="RESTORE | RECOVER | RESUME"
                                    Style="{StaticResource SecondaryText}"
-                                   Margin="0,4,0,0" />
+                                   FontSize="9.5"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,8,0,0" />
                     </StackPanel>
 
                     <Border DockPanel.Dock="Top"
@@ -137,9 +206,25 @@
                             Background="{DynamicResource CardBorderBrush}"
                             Margin="16,8,16,8" />
 
+                    <!-- Settings and About, pinned to the bottom. Settings is declared first so
+                         it docks BELOW About - DockPanel stacks bottom-docked children in
+                         declaration order, from the edge inwards. -->
+                    <RadioButton DockPanel.Dock="Bottom"
+                                 Style="{StaticResource SidebarButton}"
+                                 IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Settings'}"
+                                 Command="{Binding NavigateToCommand}"
+                                 CommandParameter="Settings"
+                                 Margin="0,0,0,4">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#x2699;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                            <TextBlock Text="Settings" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </RadioButton>
+
                     <!-- About Button -->
                     <RadioButton DockPanel.Dock="Bottom"
                                  Style="{StaticResource SidebarButton}"
+                                 IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='About'}"
                                  Command="{Binding NavigateToCommand}"
                                  CommandParameter="About"
                                  Margin="0,0,0,4">
@@ -184,7 +269,7 @@
                                    FontFamily="Segoe UI" />
 
                         <RadioButton Style="{StaticResource SidebarButton}"
-                                     IsChecked="True"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Blob Storage'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="Blob Storage">
                             <StackPanel Orientation="Horizontal">
@@ -194,6 +279,7 @@
                         </RadioButton>
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='SQL Servers'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="SQL Servers">
                             <StackPanel Orientation="Horizontal">
@@ -213,7 +299,9 @@
                                    FontFamily="Segoe UI" />
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Browse Backups'}"
                                      Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowBrowseBackups, Converter={StaticResource BoolToVis}}"
                                      CommandParameter="Browse Backups">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x1F4C2;" FontSize="15" VerticalAlignment="Center" Width="24" />
@@ -222,6 +310,18 @@
                         </RadioButton>
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Back Up'}"
+                                     Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowBackup, Converter={StaticResource BoolToVis}}"
+                                     CommandParameter="Back Up">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x1F4BE;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                                <TextBlock Text="Back Up" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Restore'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="Restore">
                             <StackPanel Orientation="Horizontal">
@@ -231,6 +331,18 @@
                         </RadioButton>
 
                         <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Copy Database'}"
+                                     Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowCopyDatabase, Converter={StaticResource BoolToVis}}"
+                                     CommandParameter="Copy Database">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x21C4;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                                <TextBlock Text="Copy Database" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='History'}"
                                      Command="{Binding NavigateToCommand}"
                                      CommandParameter="History">
                             <StackPanel Orientation="Horizontal">

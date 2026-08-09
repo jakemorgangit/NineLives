@@ -4,7 +4,7 @@
 
 **Every database deserves nine lives.**
 
-Nine Lives is a modern desktop application for restoring SQL Server databases from Azure Blob Storage backups — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 10, featuring a dark-mode UI.
+Nine Lives is a modern desktop application for **backing up and restoring SQL Server databases**, to and from either Azure Blob Storage or a file share both servers can see — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 10, featuring a dark-mode UI.
 
 *A free tool from [Blackcat Data Solutions](https://blackcat.wales).*
 
@@ -16,16 +16,61 @@ Download the latest release from the [Releases page](https://github.com/jakemorg
 
 The application is distributed as a single self-contained executable (`NineLives.exe`) — no installation required. Simply download and run.
 
+On a Windows-on-ARM machine, take `NineLives-arm64.exe` instead. The plain `NineLives.exe` is x64 and will run there under emulation, just more slowly.
+
 ## Why Nine Lives?
 
-Restoring a native SQL Server backup from a blob container is painful with existing tooling when the destination server has no msdb backup history (the normal case for DR, environment refreshes, and migrations):
+Restoring a native SQL Server backup is painful with existing tooling when the destination server has no msdb backup history — the normal case for DR, environment refreshes, and migrations:
 
 - **SSMS** makes you pick blobs from a container one file at a time, with no chain calculation and no timeline.
 - **dbatools** (`Restore-DbaDatabase`) is excellent if you live in PowerShell — Nine Lives is the GUI complement, not a replacement. If your team prefers clicking a restore point on a timeline over composing cmdlet parameters mid-incident, this is for you.
 
-Nine Lives points at a container, discovers every backup, groups striped sets, computes the full restore chain (full → differential → log tail), and gives you a clickable point-in-time timeline. Generate the T-SQL, or execute it directly with live progress.
+Nine Lives discovers every backup, groups striped sets, computes the full restore chain (full → differential → log tail), and gives you a clickable point-in-time timeline. Generate the T-SQL, or execute it directly with live progress.
+
+### Two media, both directions
+
+Where a backup lives is a choice per operation, not a property of the tool:
+
+|             | Azure Blob Storage      | A path both servers can see |
+|-------------|-------------------------|-----------------------------|
+| **Back up** | `BACKUP ... TO URL`     | `BACKUP ... TO DISK`        |
+| **Restore** | `RESTORE ... FROM URL`  | `RESTORE ... FROM DISK`     |
+
+Neither is right in every estate. **Blob** needs no network path between the two hosts, which is often the real blocker when source and target sit in different environments. **A shared path** is faster, costs no egress, needs no SAS with write, and does not make the restore wait on an upload — where both instances can reach it.
+
+The whole workflow is the same either way: the same timeline, the same chain, the same options, the same script, the same execute path. Only two things ever differ — where the list of backups comes from, and how a `RESTORE` addresses a file.
+
+### Restoring from a shared path
+
+A file share cannot be listed the way a container can: a directory of `.bak` files says nothing about which database each belongs to, what type it is, or which full a differential was taken against. So Nine Lives reads the **source instance's own `msdb`** instead, which recorded all of it — including the LSNs, so a differential is paired with the full it was genuinely taken against rather than the nearest one by time.
+
+Two things it checks that are easy to get wrong by hand:
+
+- **`msdb` records the path the source wrote.** A job that backed up to `E:\SQLBackups\MyDb.bak` recorded a path that means something entirely different on the target — and if it resolves there at all, it resolves to the target's *own* `E:` drive, which is worse than failing. Nine Lives warns about that before it checks anything, and lets you say how the target reaches the same place.
+- **Before the restore runs, it asks the target whether it can actually read every file** — with `RESTORE HEADERONLY`, on that instance, as the account that will do the work. This app's process can see a share the SQL Server service account cannot, and the usual cause of failure is an instance running as a local account or `NT SERVICE\MSSQLSERVER`, which has no identity on the network and so cannot read *any* share. Finding that out afterwards means finding it out after `WITH REPLACE` has already dropped the database being restored over.
+
+### Taking a backup
+
+`COPY_ONLY` is on by default, and turning it off is loud. A plain full backup resets the differential base on the source, so every differential that database's schedule takes afterwards depends on the file Nine Lives just wrote — which the person running the restore has never heard of. That warning appears on the screen, in the generated script, and in the console as the backup starts.
+
+Backups are written to the layout the container is configured with, so what Nine Lives writes is what Nine Lives can then find.
 
 ## Features
+
+### Copying and Auditing
+- Copy a database from one server onto another in one action, through blob or a shared path
+- Audit a database's backups against their own headers, with the result cached so a second run is
+  instant — and a pill on every restore point that has been confirmed
+- Hand a restore over as a SQL Server Agent job, created disabled and unscheduled, for a
+  maintenance window or a change process
+
+### Backing Up
+- Back up a database to Azure Blob Storage or to a path the SQL Server service account can write to
+- `COPY_ONLY` by default, so a production differential schedule is left alone — and a clear warning when it is turned off
+- `COMPRESSION` and `CHECKSUM` on by default
+- Striped backups, which for blob are the only way past the 195 GB per-blob limit
+- Written to the container's own configured layout, so the backup is discoverable by the restore screen
+- The script is shown before anything runs, and the button arms on the first press
 
 ### Azure Blob Storage Integration
 - Connect to Azure Blob Storage containers using SAS tokens, or Entra ID for organisations that prohibit long-lived SAS ([see the caveat](#entra-id-for-blob-storage))
@@ -259,10 +304,20 @@ credential on the *instance* for the blob container, which is separate and confi
 4. Use filters to narrow down by server, database, or backup type
 5. Review the summary showing backup set counts
 
-### 4. Restore a Database
+### 4. Back Up a Database
+
+1. Navigate to **Back Up** in the sidebar
+2. Choose the server and click **List databases**, then pick the database
+3. Choose where it goes — a blob container, or a folder the SQL Server service account can write to
+4. Leave **COPY_ONLY** ticked unless you specifically mean to move the differential base
+5. Click **Generate script**, read what it says, then press **Run backup** twice — it arms on the first press
+
+### 5. Restore a Database
 
 1. Navigate to **Restore** in the sidebar
-2. Select your container and click **Load Backups**
+2. Choose where the backups live:
+   - **Azure Blob Storage** — select your container and click **Load Backups**
+   - **A path both servers can see** — select the instance that TOOK the backups and click **Load Backups**. Its `msdb` is read rather than a folder being listed. If the target reaches the files by a different path, give both forms in the two boxes below.
 3. Filter by server/database if needed
 4. Click a restore point on the timeline (or in the list)
 5. Review the restore chain in the details panel
@@ -280,7 +335,39 @@ credential on the *instance* for the blob container, which is separate and confi
    - **Copy to Clipboard** or **Save to File** to run manually in SSMS
    - **Execute on Server** to run directly (requires connected SQL Server)
 
-### 5. Execute Restore
+### 6. Copy a Database to Another Server
+
+Back up the source and restore it onto the target in one action.
+
+1. Navigate to **Copy Database** in the sidebar
+2. Choose the source server and database, then click **List databases**
+3. Choose how it travels — a blob container, or a folder both servers can reach
+4. Choose the target server and what to call the copy
+5. Click **Generate scripts** — both statements are shown together, because what happens to each
+   server is one decision
+6. Press **Copy database** twice; the confirmation names both servers
+
+If the backup succeeds and the restore fails, the app says so explicitly: the backup is real and
+usable, and restoring from it is the right next step rather than running the whole thing again.
+
+### 7. Audit Backups Against Their Headers
+
+Optional, and worth doing on a container nobody has confirmed the path pattern for.
+
+Path-and-filename inference is right most of the time and wrong in ways that stay invisible until a
+restore is needed — a log filed as a full, a backup filed under the wrong database. The header is
+what a `RESTORE` reads, so it settles the question.
+
+1. Load a container and choose a database on the **Restore** screen
+2. The **Audit these backups** panel estimates how long it will take, from a measured cost per
+   backup set
+3. Click **Audit this database**; it can be stopped at any point and what it checked is kept
+4. Restore points and chain members that match their headers carry a **✓ audited** pill
+
+Results are cached against each blob's ETag, so a second audit is instant and closing the app does
+not lose them. A backup replaced under the same name is read again.
+
+### 8. Execute Restore
 
 When clicking **Execute on Server**:
 1. The button changes to "Confirm Execute (5)" with a countdown
@@ -410,11 +497,15 @@ NineLives/
 ## Known Limitations
 
 - Windows only (WPF application)
-- x64 architecture only
-- Single container per restore operation
-- Browsing a container works with a SAS token or Entra ID. The **server-side** credential that
-  `RESTORE FROM URL` needs can only be created from here as a SAS credential — a Managed Identity
-  credential is recognised and left alone, but has to be created on the instance itself
+- Single container per restore operation — a chain whose full and log backups live in different
+  containers is not yet supported
+- A managed-identity credential can be created from here, but only on **SQL Server 2022 or later,
+  or Azure SQL Managed Instance**. Earlier versions accept the statement and then fail at restore
+  time, so the app does not offer it there
+- Creating that credential does not grant anything. The instance needs a managed identity, and that
+  identity needs **Storage Blob Data Reader** on the container
+- Restoring to a UNC path is supported, but the disk-space check does not cover it — a share has no
+  drive letter for SQL Server to report free space on
 
 ## Troubleshooting
 

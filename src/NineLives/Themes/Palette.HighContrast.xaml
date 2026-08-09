@@ -86,6 +86,17 @@
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="{StaticResource InputBackgroundColor}" />
     <SolidColorBrush x:Key="InputBorderBrush" Color="{StaticResource InputBorderColor}" />
     <SolidColorBrush x:Key="InputFocusBorderBrush" Color="{StaticResource InputFocusBorderColor}" />
+    <!-- The three mode cards (#176).
+
+         One accent getting stronger rather than a traffic light: the modes are more and less, not
+         better and worse, and green-amber-red would read as "the safe one and the dangerous ones".
+
+         High contrast takes the three pure hues it already uses elsewhere, because a 6px bar
+         distinguished only by saturation is exactly what that theme exists to avoid. -->
+    <SolidColorBrush x:Key="ModeBasicBrush" Color="#00FFFF" />
+    <SolidColorBrush x:Key="ModeStandardBrush" Color="#FFFF00" />
+    <SolidColorBrush x:Key="ModeProBrush" Color="#FF00FF" />
+
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}" />

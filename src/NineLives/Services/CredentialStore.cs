@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -298,6 +298,29 @@ public class AppConfig
     public string? LastSelectedContainer { get; set; }
     public string? LastSelectedServer { get; set; }
 
+    /// <summary>
+    /// How much of the app to show (#176).
+    ///
+    /// Null until somebody has chosen, which is what makes the mode cards a FIRST-RUN screen rather
+    /// than a gate on every launch. Being asked every time would be worse than the clutter it is
+    /// meant to fix.
+    ///
+    /// An unknown value degrades to Pro rather than Basic: hiding features from somebody whose
+    /// config got mangled is a worse failure than showing them too many, because the second is
+    /// merely untidy and the first looks like the app has lost a capability.
+    /// </summary>
+    public AppMode? Mode { get; set; }
+
+    /// <summary>Where the window was when the app closed, or null before the first close (#211).</summary>
+    public WindowGeometry? Window { get; set; }
+
+    /// <summary>
+    /// The screen in use when the app closed (#211). Carrying on from the launch cards lands here
+    /// - carrying on means carrying ON, not starting again - falling back to Restore when the
+    /// screen is unknown or the current mode no longer offers it.
+    /// </summary>
+    public string? LastScreen { get; set; }
+
     /// <summary>Check GitHub for a newer release at startup. Turn off for offline installs.</summary>
     public bool CheckForUpdates { get; set; } = true;
 
@@ -310,6 +333,16 @@ public class AppConfig
     /// starting.
     /// </summary>
     public AppTheme Theme { get; set; } = AppTheme.Dark;
+
+    /// <summary>
+    /// How many days of operation logs to keep. It was a hardcoded 30 with no way to change it,
+    /// which is the wrong answer in both directions: a change ticket may need the record kept for
+    /// longer, and a shared machine may want it kept for less (#117 item 2).
+    ///
+    /// Clamped where it is used rather than trusted from here - a hand-edited 0 would otherwise
+    /// delete today's log, which is the one recording the restore currently running.
+    /// </summary>
+    public int LogRetentionDays { get; set; } = OperationLog.DefaultRetentionDays;
 
     /// <summary>
     /// Set when config.json existed but could not be read or parsed. Not persisted - it describes

@@ -33,7 +33,7 @@ public partial class RestoreView : UserControl
         if (e.NewValue is RestoreViewModel vm)
         {
             _viewModel = vm;
-            _observedLines = vm.Console.Lines;
+            _observedLines = vm.Execution.Console.Lines;
             _observedLines.CollectionChanged += OnConsoleLinesChanged;
             vm.PropertyChanged += OnViewModelPropertyChanged;
         }

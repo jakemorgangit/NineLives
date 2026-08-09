@@ -247,18 +247,53 @@ public class BlobStorageService : IBlobStorageService
         return prefixes is { Count: > 0 } ? [.. prefixes] : [null];
     }
 
+    /// <summary>Runs the real listing inference over blobs a test names, without Azure.</summary>
+    internal List<BackupFileInfo> ParseListedBlobsForTests(
+        BlobContainerConfig config, IEnumerable<(string Name, long Size, DateTimeOffset Modified)> blobs)
+    {
+        var files = new List<BackupFileInfo>();
+        foreach (var (name, size, modified) in blobs) ReadBlob(config, name, size, modified, files);
+        return files;
+    }
+
     private void ReadBlob(BlobContainerConfig config, BlobItem blob, List<BackupFileInfo> files)
+        => ReadBlob(
+            config,
+            blob.Name,
+            blob.Properties.ContentLength ?? 0,
+            blob.Properties.LastModified ?? DateTimeOffset.MinValue,
+            files,
+            // Azure's identity for the blob's content. Carried through so an audit result can be
+            // cached against it and only re-read when the blob itself changes (#130).
+            blob.Properties.ETag?.ToString());
+
+    /// <summary>
+    /// Everything this app infers about a backup from where it sits in the container and what it is
+    /// called - separated from the Azure types so it can be exercised without them.
+    ///
+    /// Worth the seam: this is the inference #44, #45 and #130 are all about, and it is also the
+    /// other half of a round trip now that the app WRITES backups too (#165). A backup written to a
+    /// layout this cannot read back is a backup that exists and cannot be found.
+    /// </summary>
+    internal void ReadBlob(
+        BlobContainerConfig config,
+        string blobName,
+        long sizeBytes,
+        DateTimeOffset lastModified,
+        List<BackupFileInfo> files,
+        string? etag = null)
     {
         {
-            var blobUrl = $"{config.ContainerUrl.TrimEnd('/')}/{blob.Name}";
+            var blobUrl = $"{config.ContainerUrl.TrimEnd('/')}/{blobName}";
 
             var file = new BackupFileInfo
             {
-                BlobName = blob.Name,
+                BlobName = blobName,
                 BlobUrl = blobUrl,
                 Type = BackupType.Unknown,
-                SizeBytes = blob.Properties.ContentLength ?? 0,
-                LastModified = blob.Properties.LastModified ?? DateTimeOffset.MinValue
+                SizeBytes = sizeBytes,
+                LastModified = lastModified,
+                ETag = etag
             };
 
             var pathParts = file.BlobName.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -268,7 +303,7 @@ public class BlobStorageService : IBlobStorageService
 
             if (tryAgParsing)
             {
-                var agParsed = OlaAgFileNameParser.TryParse(blob.Name);
+                var agParsed = OlaAgFileNameParser.TryParse(blobName);
                 if (agParsed != null)
                 {
                     file.InferredServerName = agParsed.ServerDisplay;
@@ -282,7 +317,7 @@ public class BlobStorageService : IBlobStorageService
 
             if (!file.IsAgDefaultNaming)
             {
-                var agPattern = config.AgPathPattern ?? "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+                var agPattern = config.AgPathPattern ?? BlobContainerConfig.DefaultPathPattern;
                 if (pathParts.Length > 1 && config.BackupSourceType == BackupSourceType.AvailabilityGroup)
                 {
                     // AG container with path: e.g. BackupType/ClusterName$AGName/DatabaseName/FileName
@@ -305,7 +340,7 @@ public class BlobStorageService : IBlobStorageService
             }
 
             if (file.Type == BackupType.Unknown)
-                file.Type = InferBackupTypeFromExtension(blob.Name);
+                file.Type = InferBackupTypeFromExtension(blobName);
 
             if (!file.IsCopyOnly)
                 file.IsCopyOnly = IsCopyOnlyFileName(file.FileName);
@@ -435,20 +470,37 @@ public class BlobStorageService : IBlobStorageService
                 ? BackupTime.ToBackupServerTime(first.LastModified, backupServerTimeZoneId)
                 : null;
 
+            // A header read beats all of the above, where one has happened (#130).
+            //
+            // It is the instance's own record of when the backup ran, on its own clock - not parsed
+            // out of a name, and not the moment an upload finished. The files that reach here with
+            // a header are the ones the filename could not place, which are exactly the ones whose
+            // fallback reading was the weakest available.
+            var fromHeader = first.BackupStartDate;
+
             sets.Add(new BackupSet
             {
                 SetId = setId,
                 Type = first.Type,
                 Files = groupFiles.OrderBy(f => f.FileName).ToList(),
-                Timestamp = parsed ?? converted ?? BackupTime.WallClock(first.LastModified),
+                Timestamp = fromHeader ?? parsed ?? converted ?? BackupTime.WallClock(first.LastModified),
                 TimestampSource =
-                    parsed != null ? BackupTimestampSource.FileName
+                    fromHeader != null ? BackupTimestampSource.BackupHeader
+                    : parsed != null ? BackupTimestampSource.FileName
                     : converted != null ? BackupTimestampSource.BlobLastModifiedConverted
                     : BackupTimestampSource.BlobLastModified,
                 DatabaseName = first.InferredDatabaseName,
                 ServerName = first.InferredServerName,
                 InstanceName = first.InferredInstanceName,
-                IsCopyOnly = first.IsCopyOnly
+                IsCopyOnly = first.IsCopyOnly,
+
+                // Carried up from the file so the chain builder can pair definitively rather than by
+                // proximity in time. Null for everything a listing alone produced, which is the
+                // state it has always been in.
+                CheckpointLsn = first.CheckpointLsn,
+                DatabaseBackupLsn = first.DatabaseBackupLsn,
+                FirstLsn = first.FirstLsn,
+                LastLsn = first.LastLsn
             });
         }
 

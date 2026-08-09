@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Blackcat.NineLives.Models;
@@ -19,7 +20,138 @@ public partial class MainViewModel : ViewModelBase
     private ViewModelBase? _currentView;
 
     [ObservableProperty]
-    private string _currentViewName = "Blob Storage";
+    // The sidebar's selection is bound to this, so it also decides which button is highlighted at
+    // startup - it used to be a hardcoded IsChecked="True" on the first one (#117 item 5).
+    private string _currentViewName = Nav.BlobStorage;
+
+    /// <summary>How much of the app is on screen (#176).</summary>
+    [ObservableProperty]
+    private AppMode _mode = AppMode.Pro;
+
+    /// <summary>True while the mode cards are up, which is once, on first run.</summary>
+    [ObservableProperty]
+    private bool _isChoosingMode;
+
+    /// <summary>
+    /// How much room the sidebar's COLUMN takes.
+    ///
+    /// Collapsing the sidebar itself is not enough: a ColumnDefinition keeps its width whatever
+    /// happens to the element inside it, so hiding the sidebar left 220px of nothing on the left
+    /// and pushed the mode cards - which centre inside the remaining column - visibly off to the
+    /// right of the window (#191).
+    /// </summary>
+    public GridLength SidebarWidth => IsChoosingMode ? new GridLength(0) : new GridLength(220);
+
+    partial void OnIsChoosingModeChanged(bool value) => OnPropertyChanged(nameof(SidebarWidth));
+
+    // Each of these is asked by the navigation and by the screens themselves, so they live here
+    // rather than being recomputed from Mode at every binding.
+    public bool ShowBackup => AppModeCapabilities.CanBackUp(Mode);
+    public bool ShowCopyDatabase => AppModeCapabilities.CanCopyBetweenServers(Mode);
+    public bool ShowBrowseBackups => AppModeCapabilities.CanBrowseBackups(Mode);
+
+    partial void OnModeChanged(AppMode value)
+    {
+        OnPropertyChanged(nameof(ShowBackup));
+        OnPropertyChanged(nameof(ShowCopyDatabase));
+        OnPropertyChanged(nameof(ShowBrowseBackups));
+
+        Restore.Mode = value;
+        Backup.Mode = value;
+        Settings.CurrentMode = value;
+
+        // A screen that has just been hidden must not stay on display underneath a sidebar that no
+        // longer offers it - which is what changing mode from Settings would otherwise do.
+        if (!IsViewAvailable(CurrentViewName)) NavigateTo(Nav.Restore);
+    }
+
+    private void OnModeChosen(AppMode mode)
+    {
+        Mode = mode;
+        IsChoosingMode = false;
+
+        // Restore rather than back to Settings, deliberately: the point of changing the mode is the
+        // shape of the app, and landing on the settings page you came from shows none of it.
+        NavigateTo(Nav.Restore);
+    }
+
+    /// <summary>
+    /// Puts the cards back up from Settings (#191).
+    ///
+    /// They used to be shown once and then reduced to a drop-down of three names, which is the part
+    /// of them worth the least - what each mode turns ON is written on the cards.
+    /// </summary>
+    private void ShowModeCards() => ShowModeCards(Nav.Settings);
+
+    private void ShowModeCards(string returnTo)
+    {
+        _modeCardsReturnTo = returnTo;
+        ModeSelection.ShowCurrent(Mode);
+        IsChoosingMode = true;
+        CurrentView = ModeSelection;
+    }
+
+    /// <summary>
+    /// Where "Keep what I have" goes back to.
+    ///
+    /// Depends on why the cards are up: from Settings, back to Settings; from a launch, on into the
+    /// app. Sending somebody who has just started the app to the settings page would be a stranger
+    /// place to land than the one they were heading for.
+    /// </summary>
+    private string _modeCardsReturnTo = Nav.Restore;
+
+    private void OnModeCardsCancelled()
+    {
+        IsChoosingMode = false;
+        NavigateTo(_modeCardsReturnTo);
+    }
+
+    /// <summary>
+    /// Where carrying on from the launch cards lands (#211): the last session's screen when it is
+    /// still a screen this mode offers, Restore otherwise. Restore rather than the recorded
+    /// screen's nearest cousin, because a guess about intent is worse than the app's centre.
+    /// </summary>
+    internal string LandingScreen(string? lastScreen) =>
+        lastScreen != null && Nav.Views.Contains(lastScreen) && IsViewAvailable(lastScreen)
+            ? lastScreen
+            : Nav.Restore;
+
+    /// <summary>
+    /// Files everything the next launch wants back: where the window was, and which screen was in
+    /// use (#211). Called once, at close - geometry changes are not worth a disk write each.
+    ///
+    /// Silent on failure, deliberately: the app is shutting down, and there is nobody left to act
+    /// on an error about remembering window positions. The store itself refuses to save over a
+    /// config that failed to load (#7), and that refusal is respected here too.
+    /// </summary>
+    public void SaveShutdownState(WindowGeometry geometry)
+    {
+        try
+        {
+            var config = _credentialStore.LoadConfig();
+            if (config.LoadError != null) return;
+
+            config.Window = geometry;
+            config.LastScreen = IsChoosingMode ? null : CurrentViewName;
+            _credentialStore.SaveConfig(config);
+        }
+        catch
+        {
+            // Shutdown. Nothing useful can be done with a failure here.
+        }
+    }
+
+    /// <summary>The geometry the last session saved, for the window to apply before first paint.</summary>
+    public WindowGeometry? SavedGeometry { get; private set; }
+
+    /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
+    public bool IsViewAvailable(string viewName) => viewName switch
+    {
+        Nav.Backup => ShowBackup,
+        Nav.CopyDatabase => ShowCopyDatabase,
+        Nav.BrowseBackups => ShowBrowseBackups,
+        _ => true
+    };
 
     [ObservableProperty]
     private string _globalStatus = "Ready";
@@ -48,8 +180,12 @@ public partial class MainViewModel : ViewModelBase
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
+    public ModeSelectionViewModel ModeSelection { get; }
+    public BackupViewModel Backup { get; }
+    public CopyDatabaseViewModel CopyDatabase { get; }
     public RestoreViewModel Restore { get; }
     public HistoryViewModel History { get; }
+    public SettingsViewModel Settings { get; }
     public AboutViewModel About { get; }
 
     /// <summary>
@@ -85,7 +221,7 @@ public partial class MainViewModel : ViewModelBase
 
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
-        BlobBrowser = new BlobBrowserViewModel(_blobService, _credentialStore);
+        BlobBrowser = new BlobBrowserViewModel(_blobService, _sqlService, _credentialStore);
         // One store, shared: the Restore screen writes to it and the History screen reads it back,
         // and two instances pointed at the same file would be a way to lose an entry.
         _historyStore = new RestoreHistoryStore();
@@ -93,17 +229,78 @@ public partial class MainViewModel : ViewModelBase
         Restore = new RestoreViewModel(
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
             log: null, history: _historyStore);
+        ModeSelection = new ModeSelectionViewModel(_credentialStore);
+        ModeSelection.Chosen += OnModeChosen;
+        ModeSelection.Cancelled += OnModeCardsCancelled;
+
+        Backup = new BackupViewModel(_credentialStore, _sqlService);
+        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService);
         History = new HistoryViewModel(_historyStore);
-        About = new AboutViewModel(_credentialStore);
+        Settings = new SettingsViewModel(_credentialStore);
+        About = new AboutViewModel();
+
+        // After the config is loaded, not at startup in App: pruning first and reading the setting
+        // afterwards would delete files the user had asked to keep, using the default of 30 to
+        // decide (#117 item 2).
+        App.Log.RetentionDays = Settings.LogRetentionDays;
+        App.Log.Prune();
 
         ServerManager.ConnectionChanged += OnSqlConnectionChanged;
+
+        // From looking to restoring in one move (#202). Navigation first, so the load's progress
+        // happens on the screen the user is now watching rather than behind the one they left.
+        BlobBrowser.RestoreRequested += handoff =>
+        {
+            NavigateTo(Nav.Restore);
+            _ = Restore.AcceptHandoffAsync(handoff);
+        };
+
+        // Changing the mode from Settings has to move the app immediately - a sidebar that still
+        // offers a screen the new mode hides, or a screen left on display underneath one that no
+        // longer lists it, is worse than not offering the setting (#176).
+        Settings.ShowModeCardsRequested += ShowModeCards;
 
         // One place that answers "is it doing something?". Every screen already tracks its own
         // work; without this the answer depended on which part of a long page was scrolled into
         // view, and the Restore screen's own status line is below the fold most of the time (#128).
-        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Restore);
+        WatchForBusy(BlobConfig, ServerManager, BlobBrowser, Backup, Restore, CopyDatabase);
 
-        CurrentView = BlobConfig;
+        // How much of the app to show (#176).
+        //
+        // An unreadable or unrecognised value lands on Pro rather than Basic: hiding features from
+        // somebody whose config got mangled is a worse failure than showing too many, because the
+        // second is untidy and the first looks like the app has lost a capability.
+        var config = _credentialStore.LoadConfig();
+        var savedMode = config.Mode;
+        Mode = savedMode ?? AppMode.Pro;
+
+        // The window applies this before first paint (#211) - read here so the window never
+        // touches the store itself.
+        SavedGeometry = config.Window;
+
+        if (savedMode == null)
+        {
+            // First run. Nothing else is shown until the question is answered - a sidebar behind a
+            // choice about what the sidebar contains would be answering it twice - and there is no
+            // way past it, because leaving would mean an app that has not been told how much of
+            // itself to show.
+            IsChoosingMode = true;
+            CurrentView = ModeSelection;
+        }
+        else
+        {
+            // The cards are the landing screen, not a first-run gate (#200).
+            //
+            // It reads better than opening on the container list: the first thing on screen says
+            // what shape the app is in and offers to change it, rather than the app simply being
+            // that shape with no indication why. It is only a question the first time - after that
+            // the current mode is marked and "Keep what I have" carries straight on.
+            //
+            // Straight on to where the last session WAS (#211), or to Restore - the same place
+            // choosing a mode lands (#209) - when nothing is recorded or the mode no longer
+            // offers it. Carrying on means carrying on.
+            ShowModeCards(LandingScreen(config.LastScreen));
+        }
 
         // Fire and forget - startup must not wait on the network.
         _ = CheckForUpdatesAsync();
@@ -262,6 +459,58 @@ public partial class MainViewModel : ViewModelBase
         ServerManager.DisconnectCommand.Execute(null);
     }
 
+    // ── keyboard (#117 item 5) ──────────────────────────────────────────────────
+    //
+    // The shortcuts are declared on the window, but what they DO is decided here, because a key
+    // that reaches the whole app has to mean something sensible on every screen. F5 bound straight
+    // to the Restore screen's loader would run a blob listing while somebody was reading About -
+    // no visible effect, real network traffic, and a status line changing on a page that has none.
+    //
+    // Each of these routes to the current screen and does nothing where it has no meaning, rather
+    // than being disabled globally because one screen cannot use it.
+
+    /// <summary>F5: reload whatever the current screen lists.</summary>
+    [RelayCommand]
+    private void Reload()
+    {
+        switch (CurrentViewName)
+        {
+            case Nav.Restore:
+                if (Restore.LoadBackupsCommand.CanExecute(null)) Restore.LoadBackupsCommand.Execute(null);
+                break;
+            case Nav.BrowseBackups:
+                BlobBrowser.RefreshContainers();
+                break;
+            case Nav.History:
+                History.Refresh();
+                break;
+        }
+    }
+
+    /// <summary>Ctrl+G: generate the restore script. Only the Restore screen generates anything.</summary>
+    [RelayCommand]
+    private void GenerateScript()
+    {
+        if (CurrentViewName != Nav.Restore) return;
+        if (Restore.GenerateScriptCommand.CanExecute(null)) Restore.GenerateScriptCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Esc: stop whatever is running.
+    ///
+    /// Not gated on the current screen. A restore or a verify keeps running while somebody
+    /// navigates away, and the whole point of a stop key is that it works when you reach for it.
+    /// Ordered by cost of letting it continue: an execute is writing to a database, a query is
+    /// only reading, a load is only listing.
+    /// </summary>
+    [RelayCommand]
+    private void CancelCurrent()
+    {
+        if (Restore.Execution.CancelCommand.CanExecute(null)) { Restore.Execution.CancelCommand.Execute(null); return; }
+        if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
+        if (Restore.CancelLoadCommand.CanExecute(null)) Restore.CancelLoadCommand.Execute(null);
+    }
+
     /// <summary>
     /// The sidebar's view names. Constants rather than literals scattered across the switch,
     /// because an unrecognised name here silently lands on Blob Storage rather than failing -
@@ -275,12 +524,15 @@ public partial class MainViewModel : ViewModelBase
         public const string BlobStorage = "Blob Storage";
         public const string SqlServers = "SQL Servers";
         public const string BrowseBackups = "Browse Backups";
+        public const string Backup = "Back Up";
         public const string Restore = "Restore";
+        public const string CopyDatabase = "Copy Database";
         public const string History = "History";
+        public const string Settings = "Settings";
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Restore, History, About];
+            [BlobStorage, SqlServers, BrowseBackups, Backup, Restore, CopyDatabase, History, Settings, About];
     }
 
     [RelayCommand]
@@ -292,8 +544,11 @@ public partial class MainViewModel : ViewModelBase
             Nav.BlobStorage => BlobConfig,
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,
+            Nav.Backup => Backup,
             Nav.Restore => Restore,
+            Nav.CopyDatabase => CopyDatabase,
             Nav.History => History,
+            Nav.Settings => Settings,
             Nav.About => About,
             _ => BlobConfig
         };
@@ -301,7 +556,16 @@ public partial class MainViewModel : ViewModelBase
         // Refresh container lists when navigating to views that depend on them
         if (viewName is Nav.BrowseBackups)
             BlobBrowser.RefreshContainers();
+        else if (viewName is Nav.Backup)
+            // Servers AND containers: a backup needs one of each, and either can have been added
+            // on another screen since the last visit.
+            Backup.Refresh();
+        else if (viewName is Nav.CopyDatabase)
+            // Two servers and a container here, for the same reason.
+            CopyDatabase.Refresh();
         else if (viewName is Nav.Restore)
+            // Containers AND servers: either can be the backup source now, and one added on
+            // another screen since the last visit has to be selectable here (#165).
             Restore.RefreshContainers();
         else if (viewName is Nav.History)
             // Re-read on every visit: a restore run since the last look must be here, and the

@@ -1,0 +1,137 @@
+﻿<UserControl x:Class="Blackcat.NineLives.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+        <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+
+            <TextBlock Text="Settings" Style="{StaticResource HeaderText}" Margin="0,0,0,4" />
+            <TextBlock Text="Applies to the whole application. Anything that belongs to one container or one server is edited where that container or server is."
+                       Style="{StaticResource SecondaryText}"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,20" />
+
+            <ContentControl Style="{StaticResource ErrorBanner}" />
+
+            <!-- Appearance -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="HOW MUCH OF THE APP TO SHOW" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+
+                    <!-- The mode is READ here and CHANGED on the cards (#191).
+                         A drop-down of three names could only say what the modes were called; what
+                         each one turns on is written on the cards, and they were being shown once
+                         and then never again. -->
+                    <TextBlock Text="{Binding CurrentModeTitle}"
+                               Style="{StaticResource SubHeaderText}"
+                               FontSize="17" />
+                    <TextBlock Text="{Binding CurrentModeTagline}"
+                               Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+
+                    <Button Content="Compare the modes..."
+                            Command="{Binding ShowModeCardsCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            HorizontalAlignment="Left"
+                            Margin="0,12,0,8" />
+
+                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,20"
+                               Text="Narrowing this hides screens and options; it never deletes anything. Containers, servers and saved credentials set up under a wider mode are all still there, and come back when you widen it again." />
+
+                    <TextBlock Text="APPEARANCE" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                    <ComboBox ItemsSource="{Binding Themes}"
+                              DisplayMemberPath="Name"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding SelectedTheme}"
+                              Style="{StaticResource DarkComboBox}"
+                              Width="240"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,6"
+                              ToolTip="Dark is the default. High contrast is pure black and white with saturated status colours, for anyone who needs it." />
+                    <TextBlock Text="Applies straight away, and is remembered."
+                               Style="{StaticResource SecondaryText}"
+                               FontSize="11" />
+                </StackPanel>
+            </Border>
+
+            <!-- Updates -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="UPDATES" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                    <CheckBox IsChecked="{Binding CheckForUpdates}"
+                              Content="Check GitHub for a newer release at startup"
+                              Style="{StaticResource DarkCheckBox}"
+                              Margin="0,0,0,6" />
+                    <TextBlock Text="Turn this off for an offline install, or where outbound access to github.com is not allowed. Nothing is ever downloaded or installed automatically - the check only shows a banner."
+                               Style="{StaticResource SecondaryText}"
+                               FontSize="11"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!-- Logs -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="LOGS" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+
+                    <TextBlock Text="{Binding LogFolder}"
+                               Style="{StaticResource SecondaryText}"
+                               FontFamily="Cascadia Code, Consolas, Courier New"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8" />
+
+                    <!-- The logs are what someone attaches to a bug report, so there has to be a
+                         way to find them that is not "know where LocalAppData lives" (#40). -->
+                    <Button Content="View the log"
+                            Command="{Binding ViewLogCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="14,7" Margin="0,0,8,0"
+                            ToolTip="Today's operation log, inside the app - filter, copy, refresh." />
+                    <Button Content="Open log folder"
+                            Command="{Binding OpenLogFolderCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="10,6"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,16"
+                            ToolTip="{Binding LogFolder}" />
+
+                    <TextBlock Text="KEEP LOGS FOR (DAYS)" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding LogRetentionDays, UpdateSourceTrigger=LostFocus}"
+                             Style="{StaticResource DarkTextBox}"
+                             Width="100"
+                             HorizontalAlignment="Left"
+                             Margin="0,0,0,6" />
+                    <TextBlock Text="Older log files are deleted on startup, and when this is changed. A restore's own record lives here, so a change ticket that needs the evidence later needs this set high enough to keep it."
+                               Style="{StaticResource SecondaryText}"
+                               FontSize="11"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!-- Moving machines (#213). The boundary is the feature: the file holds shapes,
+                 never secrets. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,16,0,0">
+                <StackPanel>
+                    <TextBlock Text="Moving to another machine" Style="{StaticResource SubHeaderText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,10"
+                               Text="Export writes the containers, servers and settings to a file that holds NO secrets - SAS tokens and SQL passwords stay in this machine's Windows Credential Manager, and each connection asks for its credential again on the new machine. Import adds and updates; it never deletes." />
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Export configuration..."
+                                Command="{Binding ExportConfigCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" Margin="0,0,8,0" />
+                        <Button Content="Import configuration..."
+                                Command="{Binding ImportConfigCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="14,7" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

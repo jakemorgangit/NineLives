@@ -21,15 +21,12 @@ public partial class RestoreViewModel : ViewModelBase
     private readonly BackupChainValidator _chainValidator = new();
     private readonly ICredentialStore _credentialStore;
 
-    private List<BackupFileInfo> _allBackups = [];
-    private List<BackupSet> _allSets = [];
-    private List<BackupSet> _dbSets = [];
+    // The loaded backups, what was found in them and which container they came from all live on
+    // the inventory seam (#115 seam 4).
 
     // Two separate operations, two separate sources: browsing a container and running a restore
     // can both be in flight, and cancelling one must not touch the other (#25).
     private readonly OperationCancellation _loadCancellation = new();
-    private readonly OperationCancellation _executeCancellation = new();
-
     /// <summary>
     /// The server queries a user starts and might want to abandon: verify, validate, the two
     /// metadata reads, creating the credential, and the post-failure recovery actions (#111).
@@ -47,6 +44,20 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public ServerCredentialViewModel Credential { get; }
 
+    /// <summary>
+    /// Running the restore: arming, the countdown, execution, cancellation, the recovery guidance
+    /// afterwards and the history entry (#115 seam 6). The only code on this screen that writes to
+    /// somebody's database.
+    /// </summary>
+    public RestoreExecutionViewModel Execution { get; }
+
+    /// <summary>
+    /// What the selected container holds, and which server and database within it is being looked
+    /// at - carrying the container it was loaded FROM, so nothing downstream has to assume (#115
+    /// seam 4).
+    /// </summary>
+    public BackupInventoryViewModel Inventory { get; }
+
     #region Observable Properties
 
     [ObservableProperty]
@@ -54,21 +65,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private BlobContainerConfig? _selectedContainer;
-
-    [ObservableProperty]
-    private bool _backupsLoaded;
-
-    [ObservableProperty]
-    private ObservableCollection<string> _discoveredServers = [];
-
-    [ObservableProperty]
-    private string? _selectedServerName;
-
-    [ObservableProperty]
-    private ObservableCollection<string> _discoveredDatabases = [];
-
-    [ObservableProperty]
-    private string? _selectedDatabaseName;
 
     [ObservableProperty]
     private string _targetDatabaseName = string.Empty;
@@ -119,6 +115,13 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public PointInTimeViewModel PointInTime { get; } = new();
 
+    /// <summary>
+    /// The numbered steps, and whether each is open (#117 item 3). Every step was expanded at all
+    /// times, including the ones already finished and the ones not yet reachable, on a screen of
+    /// roughly 1,300 lines of markup in one column.
+    /// </summary>
+    public RestoreStepsViewModel Steps { get; } = new();
+
     // ── Chain gap detection ──────────────────────────────────────────────────────
     // Structural validation of the selected chain, run at selection time. The app otherwise
     // assumes every discovered backup is present and intact, so a missing stripe or a hole in
@@ -149,29 +152,10 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasInventoryIssues;
 
-    // ── Aftermath of a failed restore (#14) ─────────────────────────────────────
-    // A chain that stops part-way leaves the target in RESTORING, and in SINGLE_USER too if
-    // Disconnect sessions was on, because the closing SET MULTI_USER never ran. Both block other
-    // connections, at the worst possible moment.
-
-    [ObservableProperty]
-    private string _recoveryStateMessage = string.Empty;
-
-    [ObservableProperty]
-    private ObservableCollection<RecoveryAction> _recoveryActions = [];
-
-    [ObservableProperty]
-    private bool _hasRecoveryActions;
+    // The aftermath of a failed restore (#14) lives on the execution seam with the run that
+    // produced it (#115 seam 6).
 
     // ── Cancellation (#25) ──────────────────────────────────────────────────────
-
-    /// <summary>True while a backup listing is running and has not been asked to stop.</summary>
-    [ObservableProperty]
-    private bool _canCancelLoad;
-
-    /// <summary>True while a restore is running and has not been asked to stop.</summary>
-    [ObservableProperty]
-    private bool _canCancelExecute;
 
     /// <summary>True while a server query is running and has not been asked to stop (#111).</summary>
     [ObservableProperty]
@@ -180,13 +164,6 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>True between asking to stop and the operation actually unwinding.</summary>
     [ObservableProperty]
     private bool _isCancelling;
-
-    /// <summary>
-    /// Running count during a listing. A container of any size takes long enough that "Loading..."
-    /// on its own gives no sense of whether it is progressing or hung (#28).
-    /// </summary>
-    [ObservableProperty]
-    private string _loadProgressText = string.Empty;
 
     // ── Execution console ───────────────────────────────────────────────────────
 
@@ -203,11 +180,11 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
     private void RefreshCancelState()
     {
-        CanCancelLoad = _loadCancellation.CanCancel;
-        CanCancelExecute = _executeCancellation.CanCancel;
+        Inventory.CanCancelLoad = _loadCancellation.CanCancel;
+
         CanCancelQuery = _queryCancellation.CanCancel;
         IsCancelling = _loadCancellation.IsCancelling
-            || _executeCancellation.IsCancelling
+            || Execution.IsCancelling
             || _queryCancellation.IsCancelling;
     }
 
@@ -333,8 +310,96 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _restoreSummaryText = string.Empty;
 
+    /// <summary>
+    /// Other containers to read as well as the selected one (#32).
+    ///
+    /// The layout this exists for is asymmetric, and the model follows it: full backups archived to
+    /// cool storage while the logs that carry them forward stay hot. There is a container somebody
+    /// is working in - the credential panel points at it, the script header names it, a copied path
+    /// is relative to it - and others that happen to hold parts of the chain.
+    ///
+    /// Peers would have been the tidier model and the wrong one: it would have made every one of
+    /// those anchored things ask "which container?" and have no answer.
+    /// </summary>
+    public ObservableCollection<ContainerChoice> AdditionalContainers { get; } = [];
+
+    /// <summary>Every container a load will read, primary first.</summary>
+    public IReadOnlyList<BlobContainerConfig> ContainersToRead
+    {
+        get
+        {
+            if (SelectedContainer == null) return [];
+
+            return
+            [
+                SelectedContainer,
+                .. AdditionalContainers
+                    .Where(c => c.IsSelected && c.Container.Id != SelectedContainer.Id)
+                    .Select(c => c.Container)
+            ];
+        }
+    }
+
+    /// <summary>Whether more than one container is being read, for the screen to say so.</summary>
+    public bool ReadsSeveralContainers => ContainersToRead.Count > 1;
+
+    public string ContainersToReadSummary => ContainersToRead.Count switch
+    {
+        0 or 1 => string.Empty,
+        var n => $"Reading {n} containers. A chain may span them."
+    };
+
+    /// <summary>
+    /// Called by each tick. The list rebuilds rather than the choice being observable itself,
+    /// because what changed is what a LOAD would read - and that is a property of the whole set.
+    /// </summary>
+    private void OnAdditionalContainerToggled()
+    {
+        // What is on screen came from the previous set of containers.
+        ClearLoadedBackups();
+
+        OnPropertyChanged(nameof(ContainersToRead));
+        OnPropertyChanged(nameof(ReadsSeveralContainers));
+        OnPropertyChanged(nameof(ContainersToReadSummary));
+        OnPropertyChanged(nameof(CurrentLocation));
+        RefreshSteps();
+    }
+
+    /// <summary>
+    /// Rebuilds the additional list to be everything EXCEPT the primary.
+    ///
+    /// Offering the primary again would be a tick that either does nothing or, read literally, asks
+    /// to list the same container twice.
+    /// </summary>
+    private void RefreshAdditionalContainers()
+    {
+        var ticked = AdditionalContainers
+            .Where(c => c.IsSelected)
+            .Select(c => c.Container.Id)
+            .ToHashSet();
+
+        AdditionalContainers.Clear();
+
+        foreach (var container in Containers)
+        {
+            if (SelectedContainer != null && container.Id == SelectedContainer.Id) continue;
+
+            AdditionalContainers.Add(new ContainerChoice(container, OnAdditionalContainerToggled)
+            {
+                IsSelected = ticked.Contains(container.Id)
+            });
+        }
+
+        OnPropertyChanged(nameof(ContainersToRead));
+        OnPropertyChanged(nameof(ReadsSeveralContainers));
+        OnPropertyChanged(nameof(ContainersToReadSummary));
+        OnPropertyChanged(nameof(ShowMultipleContainers));
+    }
+
     partial void OnSelectedContainerChanged(BlobContainerConfig? value)
     {
+        RefreshAdditionalContainers();
+
         // Everything on screen below this point came from the PREVIOUS container. Leaving it there
         // meant the credential panel and Create credential targeted the new container while the
         // script still restored from the old one's URLs - so Execute stayed armed and enabled, and
@@ -344,32 +409,253 @@ public partial class RestoreViewModel : ViewModelBase
         _ = Credential.PointAtAsync(value);
     }
 
+    // ── which medium the backups live on (#149, #165) ───────────────────────────
+    //
+    // Backup media is a choice per operation, not a property of the app. Everything below the
+    // listing already works on BackupSet and never asks where the sets came from, so this is the
+    // whole of what a second medium changes on this screen: which inputs step 1 offers, and whether
+    // the server-side credential is applicable at all.
+
+    /// <summary>
+    /// How much of this screen to show (#176).
+    ///
+    /// Pro by default, so anything that constructs this without a shell - a test, a future CLI -
+    /// gets the whole thing rather than silently losing capability.
+    /// </summary>
+    [ObservableProperty]
+    private AppMode _mode = AppMode.Pro;
+
+    [ObservableProperty]
+    private BackupMedium _selectedMedium = BackupMedium.AzureBlob;
+
+    public bool ShowMediumChoice => AppModeCapabilities.CanUseSharedPath(Mode);
+    public bool ShowPointInTime => AppModeCapabilities.CanRestoreToAPointInTime(Mode);
+    public bool ShowFileRelocation => AppModeCapabilities.CanRelocateFiles(Mode);
+    public bool ShowVerifyAndAudit => AppModeCapabilities.CanVerifyAndAudit(Mode);
+
+    /// <summary>
+    /// Whether the audit card appears at all.
+    ///
+    /// The mode AND something to audit. The card used to be shown on the mode alone while its
+    /// contents waited on the backups, so anybody in the widest mode met an empty bordered box
+    /// sitting under the source picker before they had loaded anything (#195).
+    /// </summary>
+    public bool ShowAuditPanel => ShowVerifyAndAudit && Inventory.BackupsLoaded;
+    public bool ShowCredentialPanel => AppModeCapabilities.CanManageServerCredentials(Mode) && CredentialApplies;
+    public bool ShowAgentJob => AppModeCapabilities.CanScriptAsAgentJob(Mode);
+    public bool ShowAdvancedOptions => AppModeCapabilities.CanUseAdvancedRestoreOptions(Mode);
+
+    /// <summary>
+    /// Whether to offer reading more than one container (#32).
+    ///
+    /// Pro, and only when there is more than one container to offer. It answers a question somebody
+    /// has to know to ask - that a chain CAN be split across containers - and a tick list with
+    /// nothing in it is worse than no tick list.
+    /// </summary>
+    public bool ShowMultipleContainers =>
+        AppModeCapabilities.CanUseAdvancedRestoreOptions(Mode) && AdditionalContainers.Count > 0;
+
+    partial void OnModeChanged(AppMode value)
+    {
+        OnPropertyChanged(nameof(ShowMediumChoice));
+        OnPropertyChanged(nameof(ShowPointInTime));
+        OnPropertyChanged(nameof(ShowFileRelocation));
+        OnPropertyChanged(nameof(ShowVerifyAndAudit));
+        OnPropertyChanged(nameof(ShowAuditPanel));
+        OnPropertyChanged(nameof(ShowCredentialPanel));
+        OnPropertyChanged(nameof(ShowAgentJob));
+        OnPropertyChanged(nameof(ShowAdvancedOptions));
+        OnPropertyChanged(nameof(ShowMultipleContainers));
+
+        // A medium that is no longer offered must not stay selected underneath a hidden control -
+        // the screen would be restoring FROM DISK with nothing on screen saying so.
+        if (!ShowMediumChoice && SelectedMedium != BackupMedium.AzureBlob)
+            SelectedMedium = BackupMedium.AzureBlob;
+    }
+
+    public bool MediumIsBlob => SelectedMedium == BackupMedium.AzureBlob;
+    public bool MediumIsSharedPath => SelectedMedium == BackupMedium.SharedPath;
+    public bool MediumIsAdHocFile => SelectedMedium == BackupMedium.AdHocFile;
+
+    /// <summary>
+    /// The pasted paths, one complete backup file per line (#203).
+    ///
+    /// As the READING server sees them, not this machine - the same trust rule as the shared path,
+    /// and the readability preflight enforces it on the target before anything runs.
+    /// </summary>
+    [ObservableProperty]
+    private string _adHocPathsText = string.Empty;
+
+    partial void OnAdHocPathsTextChanged(string value)
+    {
+        // What is loaded came from the PREVIOUS files.
+        ClearLoadedBackups();
+        OnPropertyChanged(nameof(CurrentLocation));
+    }
+
+    /// <summary>One path per non-empty line, in the order given.</summary>
+    public IReadOnlyList<string> AdHocPaths =>
+        AdHocPathsText
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>
+    /// Whether the server-side credential means anything here.
+    ///
+    /// FROM DISK needs no credential at all - SQL Server reaches the path as its own service
+    /// account - so under a shared path the whole credential panel is not merely unsatisfied, it is
+    /// inapplicable, and it says so rather than sitting there looking like something still to do.
+    /// </summary>
+    public bool CredentialApplies => MediumIsBlob;
+
+    partial void OnSelectedMediumChanged(BackupMedium value)
+    {
+        OnPropertyChanged(nameof(MediumIsBlob));
+        OnPropertyChanged(nameof(MediumIsSharedPath));
+        OnPropertyChanged(nameof(MediumIsAdHocFile));
+        OnPropertyChanged(nameof(CredentialApplies));
+        OnPropertyChanged(nameof(ShowCredentialPanel));
+
+        // Same rule as changing the container, for the same reason: what is on screen came from the
+        // other medium entirely, and an armed Execute that survives the switch is aimed at
+        // something nobody is looking at any more.
+        ClearLoadedBackups();
+    }
+
+    /// <summary>
+    /// Picks up where the browser left off (#202): same source, same server, same database,
+    /// backups loaded - so the only thing left to do here is choose the restore point.
+    /// </summary>
+    public async Task AcceptHandoffAsync(BrowseHandoff handoff)
+    {
+        SelectedMedium = handoff.Medium == BackupMedium.SharedPath
+            ? BackupMedium.SharedPath
+            : BackupMedium.AzureBlob;
+
+        if (handoff.Medium == BackupMedium.SharedPath)
+        {
+            // By id against OUR list, because the browser's instance and this screen's are
+            // separate objects loaded from the same config.
+            SourceServer = SourceServers.FirstOrDefault(s => s.Id == handoff.SourceServer?.Id)
+                           ?? handoff.SourceServer;
+        }
+        else if (handoff.Container != null)
+        {
+            SelectedContainer = Containers.FirstOrDefault(c => c.Id == handoff.Container.Id)
+                                ?? handoff.Container;
+        }
+
+        await LoadBackupsCommand.ExecuteAsync(null);
+
+        // The filters land only when the load found them - a database the load did not see would
+        // put the working set into a state the screen cannot have reached by hand.
+        if (handoff.ServerFilter != null && Inventory.DiscoveredServers.Contains(handoff.ServerFilter))
+            Inventory.SelectedServerName = handoff.ServerFilter;
+
+        if (handoff.Database != null &&
+            Inventory.DiscoveredDatabases.Contains(handoff.Database, StringComparer.OrdinalIgnoreCase))
+            Inventory.SelectedDatabaseName =
+                Inventory.DiscoveredDatabases.First(d =>
+                    string.Equals(d, handoff.Database, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The saved connections, for choosing whose backup history to read.</summary>
+    [ObservableProperty]
+    private ObservableCollection<ServerConnection> _sourceServers = [];
+
+    /// <summary>
+    /// The instance whose msdb is read under a shared path - the one that TOOK the backups.
+    ///
+    /// Not necessarily the instance the restore runs on. That distinction is the whole reason the
+    /// shared-path medium exists, and it is the thing people get wrong.
+    /// </summary>
+    [ObservableProperty]
+    private ServerConnection? _sourceServer;
+
+    partial void OnSourceServerChanged(ServerConnection? value) => ClearLoadedBackups();
+
+    /// <summary>The path as the source wrote it, when the target reaches it by another name.</summary>
+    [ObservableProperty]
+    private string _sourcePathPrefix = string.Empty;
+
+    /// <summary>How the target reaches the same place.</summary>
+    [ObservableProperty]
+    private string _targetPathPrefix = string.Empty;
+
+    partial void OnSourcePathPrefixChanged(string value) => ClearLoadedBackups();
+    partial void OnTargetPathPrefixChanged(string value) => ClearLoadedBackups();
+
+    /// <summary>
+    /// Where the backups are being read from, as one value.
+    ///
+    /// Null when the inputs for the chosen medium are not answered yet, which is what stops a load
+    /// running against half a selection.
+    /// </summary>
+    public BackupLocation? CurrentLocation => SelectedMedium switch
+    {
+        BackupMedium.AzureBlob =>
+            SelectedContainer == null ? null : BackupLocation.Blob(ContainersToRead),
+
+        BackupMedium.SharedPath =>
+            SourceServer == null
+                ? null
+                : BackupLocation.Shared(SourceServer, new BackupPathMapping(SourcePathPrefix, TargetPathPrefix)),
+
+        // The same server picker as the shared path, deliberately: both media mean "an instance I
+        // ask about backups", and for a file the natural reader is the target itself.
+        BackupMedium.AdHocFile =>
+            SourceServer == null || AdHocPaths.Count == 0
+                ? null
+                : BackupLocation.AdHoc(SourceServer, AdHocPaths),
+
+        _ => null
+    };
+
+    /// <summary>
+    /// Said before anything is read, because it is the one failure here that can end in a
+    /// SUCCESSFUL restore of the wrong backup: a local path on the source may resolve on the target
+    /// to the target's OWN drive of that letter.
+    /// </summary>
+    public string PathAdvice
+    {
+        get
+        {
+            if (!MediumIsSharedPath || !Inventory.LoadedFromSharedPath) return string.Empty;
+
+            var mapping = new BackupPathMapping(SourcePathPrefix, TargetPathPrefix);
+            if (mapping.IsInUse) return string.Empty;
+
+            var local = Inventory.WorkingSet
+                .SelectMany(s => s.Files)
+                .Select(f => f.RestoreDevice)
+                .Where(BackupPathMapping.LooksLocalToTheSource)
+                .ToList();
+
+            if (local.Count == 0) return string.Empty;
+
+            return $"{local.Count} of these backups were written to a local path on the source " +
+                   $"(for example {local[0]}). That path means something different on the target - " +
+                   "at best it will not be found, at worst it resolves to the target's own drive. " +
+                   "Give the path as the target reaches it above.";
+        }
+    }
+
+    public bool HasPathAdvice => PathAdvice.Length > 0;
+
     /// <summary>
     /// Drops everything derived from a container's contents. Called when the container changes and
-    /// when a load is abandoned, so what is on screen always belongs to the container named above
-    /// it.
+    /// when a load is abandoned, so what is on screen always belongs to the container named above it.
     /// </summary>
     private void ClearLoadedBackups()
     {
-        _allBackups = [];
-        _allSets = [];
-        _dbSets = [];
+        Inventory.Clear();
 
-        BackupsLoaded = false;
-        DiscoveredServers = [];
-        DiscoveredDatabases = [];
-        SelectedServerName = null;
-        SelectedDatabaseName = null;
-
-        // Clearing the timeline drops its selection, which runs the selection handler below and
-        // clears the chain, the script, the verification results and the inventory findings.
         Timeline.Clear();
 
         // Disarm. An armed Execute that survives a container change is an armed Execute aimed at
         // something the user is no longer looking at.
-        IsExecuteArmed = false;
-        ExecuteButtonText = "Execute on Server";
-        _armTimeoutCts?.Cancel();
+        Execution.Disarm();
     }
 
     [ObservableProperty]
@@ -421,39 +707,13 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerName = string.Empty;
 
-    [ObservableProperty]
-    private bool _isExecuting;
-
-    [ObservableProperty]
-    private bool _executionComplete;
-
-    [ObservableProperty]
-    private bool _executionSuccess;
-
-    [ObservableProperty]
-    private bool _isExecuteArmed;
-
-    [ObservableProperty]
-    private int _executeCountdown;
-
-    [ObservableProperty]
-    private string _executeButtonText = "Execute on Server";
-
-    private CancellationTokenSource? _armTimeoutCts;
+    /// <summary>
+    /// Whether a restore is running. The state belongs to the execution seam; this reads it, so
+    /// the things on this screen that must not happen mid-restore still have one thing to ask.
+    /// </summary>
+    public bool IsExecuting => Execution.IsExecuting;
 
     // Backup summary
-    [ObservableProperty]
-    private int _fullCount;
-
-    [ObservableProperty]
-    private int _diffCount;
-
-    [ObservableProperty]
-    private int _logCount;
-
-    [ObservableProperty]
-    private int _setCount;
-
     #endregion
 
     public RestoreViewModel(
@@ -463,7 +723,8 @@ public partial class RestoreViewModel : ViewModelBase
         RestoreScriptGenerator scriptGenerator,
         ICredentialStore credentialStore,
         OperationLog? log = null,
-        IRestoreHistoryStore? history = null)
+        IRestoreHistoryStore? history = null,
+        IBackupAuditStore? auditStore = null)
     {
         _history = history ?? new RestoreHistoryStore();
 
@@ -478,9 +739,92 @@ public partial class RestoreViewModel : ViewModelBase
         // actual log file, which is the same class of side effect this whole change is about.
         _log = log ?? App.Log;
 
-        // Every console message is written to the log file as it arrives, so the file cannot drift
-        // from what was on screen.
-        Console = new ConsoleBuffer(message => _log.Info($"[execute] {message.Trim()}"));
+        // The audit cache is passed down for the same reason the log is: left to find its own, it
+        // finds the one in the user's profile - so a TEST run reads and writes the real cache, and
+        // a stale entry from one test then decides the answer in another (#130).
+        Inventory = new BackupInventoryViewModel(blobService, sqlService, _log, auditStore);
+
+        // The chain and the timeline are built from whatever the inventory currently holds, so a
+        // change there is the one signal that rebuilds them.
+        Inventory.WorkingSetChanged += ComputeAndDisplayRestorePoints;
+
+        // And so are the two offers that act on it. Both are gated on the working set having
+        // something in it, and a CanExecute answered once at load time is answered when the working
+        // set is still EMPTY - so the Audit button stayed dead after picking a database, next to an
+        // estimate that had cheerfully updated to 98 headers. The estimate is a property and
+        // re-read itself; the command is not and has to be told.
+        Inventory.WorkingSetChanged += RefreshIdentifyState;
+
+        Inventory.CancelStateChanged += RefreshCancelState;
+        Inventory.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(BackupInventoryViewModel.StatusMessage) when !Inventory.HasError:
+                    SetStatus(Inventory.StatusMessage);
+                    break;
+                case nameof(BackupInventoryViewModel.ErrorMessage) when Inventory.HasError:
+                    SetError(Inventory.ErrorMessage);
+                    break;
+                case nameof(BackupInventoryViewModel.IsBusy):
+                    IsBusy = Inventory.IsBusy;
+
+                    // Both offers are also gated on the inventory being idle, so a load or an audit
+                    // finishing is what makes them live again.
+                    RefreshIdentifyState();
+                    break;
+
+                case nameof(BackupInventoryViewModel.IsAuditing):
+                case nameof(BackupInventoryViewModel.UnclassifiedCount):
+                    RefreshIdentifyState();
+                    break;
+                case nameof(BackupInventoryViewModel.SelectedDatabaseName):
+                    // The target defaults to the source name, and the MOVE paths follow from it.
+                    // Both belong to the screen rather than to the inventory - they describe where
+                    // the restore is GOING, not what the container holds.
+                    if (!string.IsNullOrEmpty(Inventory.SelectedDatabaseName))
+                    {
+                        TargetDatabaseName = Inventory.SelectedDatabaseName!;
+                        AutoPopulateMoveDefaults();
+                    }
+                    RefreshSteps();
+                    RefreshCheckState();
+                    break;
+
+                case nameof(BackupInventoryViewModel.BackupsLoaded):
+                    OnPropertyChanged(nameof(ShowAuditPanel));
+                    RefreshSteps();
+                    RefreshCheckState();
+                    break;
+
+                case nameof(BackupInventoryViewModel.SelectedServerName):
+                    RefreshSteps();
+                    RefreshCheckState();
+                    break;
+            }
+        };
+
+        Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation);
+
+        // The run reports through the same status line as the rest of the screen, and its cancel
+        // state feeds the one Stop button that covers every server call here.
+        Execution.CancelStateChanged += RefreshCancelState;
+        Execution.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(ViewModelBase.StatusMessage):
+                    if (!Execution.HasError) SetStatus(Execution.StatusMessage);
+                    break;
+                case nameof(ViewModelBase.ErrorMessage) when Execution.HasError:
+                    SetError(Execution.ErrorMessage);
+                    break;
+                case nameof(RestoreExecutionViewModel.IsExecuting):
+                    OnExecutionRunningChanged();
+                    OnPropertyChanged(nameof(IsBusyWithAnything));
+                    break;
+            }
+        };
 
         // Shares _queryCancellation so the Stop button stops a credential write too (#111), and
         // reports through the same status line as everything else on this screen (#115 seam 5).
@@ -496,6 +840,11 @@ public partial class RestoreViewModel : ViewModelBase
         {
             if (e.PropertyName is nameof(IsBusy) or nameof(TargetDatabaseName))
                 RefreshCheckState();
+
+            if (e.PropertyName is nameof(Inventory.BackupsLoaded) or nameof(Inventory.SelectedDatabaseName)
+                or nameof(Inventory.SelectedServerName) or nameof(SelectedContainer)
+                or nameof(TargetDatabaseName))
+                RefreshSteps();
         };
 
         // The selection now lives on the timeline (#115 seam 2), which is a different object, so
@@ -511,13 +860,19 @@ public partial class RestoreViewModel : ViewModelBase
         // the caller updates once at the end rather than four times through a half-built state.
         PointInTime.PropertyChanged += (_, _) =>
         {
-            if (!PointInTime.IsUpdating) UpdateRestoreSummary();
+            if (PointInTime.IsUpdating) return;
+            Steps.Options.Invalidate();
+            UpdateRestoreSummary();
         };
 
         // One subscription in place of a one-line change handler per option (#115 seam 7). An
         // option added later is kept in step with the script by existing, rather than by whoever
         // adds it remembering to write a handler - which is what #110 was.
-        Options.PropertyChanged += (_, _) => UpdateRestoreSummary();
+        Options.PropertyChanged += (_, _) =>
+        {
+            Steps.Options.Invalidate();
+            UpdateRestoreSummary();
+        };
 
         RefreshContainers();
     }
@@ -529,6 +884,14 @@ public partial class RestoreViewModel : ViewModelBase
     {
         var previous = SelectedContainer?.Name;
         var config = _credentialStore.LoadConfig();
+
+        // A server added on the SQL Servers screen since the last visit has to be selectable as a
+        // backup source here, so the two lists are refreshed together.
+        var previousSource = SourceServer?.Id;
+        SourceServers = new ObservableCollection<ServerConnection>(config.Servers);
+        if (previousSource != null)
+            SourceServer = SourceServers.FirstOrDefault(x => x.Id == previousSource);
+
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
         {
@@ -539,69 +902,12 @@ public partial class RestoreViewModel : ViewModelBase
             SelectedContainer = Containers.FirstOrDefault(c => c.Name == previous);
         if (SelectedContainer == null && Containers.Count > 0)
             SelectedContainer = Containers[0];
+
+        // After the primary is settled, so the list it excludes is the right one.
+        RefreshAdditionalContainers();
     }
 
-    partial void OnSelectedServerNameChanged(string? value)
-    {
-        if (_allSets.Count == 0) return;
 
-        // Compare the FULL server identity. Matching on the host alone made selecting
-        // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that
-        // only exist on the other instance.
-        var filtered = _allSets.Where(s => s.MatchesServer(value));
-
-        var dbs = filtered
-            .Where(s => !string.IsNullOrEmpty(s.DatabaseName))
-            .Select(s => s.DatabaseName!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        DiscoveredDatabases = new ObservableCollection<string>(dbs);
-        if (DiscoveredDatabases.Count > 0)
-            SelectedDatabaseName = DiscoveredDatabases[0];
-    }
-
-    partial void OnSelectedDatabaseNameChanged(string? value) => RefreshSelectedDatabase(value);
-
-    /// <summary>
-    /// Rebuilds the working set and the restore points for the chosen database.
-    ///
-    /// Called on selection change AND at the end of every load. Relying on the change alone meant
-    /// a reload with the same server and database still selected - the natural thing to do after
-    /// taking a fresh backup - raised no property change at all, so the sets and the timeline kept
-    /// the PREVIOUS scan's contents and the new backup never appeared.
-    /// </summary>
-    private void RefreshSelectedDatabase(string? value)
-    {
-        if (value == null || _allSets.Count == 0) return;
-
-        _dbSets = _allSets
-            .Where(s => string.Equals(s.DatabaseName, value, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        // Full server identity again - this is the filter that decides which sets reach
-        // BackupChainBuilder, so a host-only match let one instance's full pair with another
-        // instance's differentials and logs.
-        if (!string.IsNullOrEmpty(SelectedServerName))
-            _dbSets = _dbSets.Where(s => s.MatchesServer(SelectedServerName)).ToList();
-
-        FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
-        DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
-        LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
-        SetCount = _dbSets.Count;
-
-        TargetDatabaseName = value;
-        AutoPopulateMoveDefaults();
-
-        ComputeAndDisplayRestorePoints();
-    }
-
-    [RelayCommand]
-    private void ToggleChainDetails()
-    {
-        ShowChainDetails = !ShowChainDetails;
-    }
 
     /// <summary>
     /// Everything downstream of the timeline: the chain, the script, the point-in-time window and
@@ -615,6 +921,10 @@ public partial class RestoreViewModel : ViewModelBase
     private void OnSelectedRestorePointChanged(RestorePoint? value)
     {
         ShowChainDetails = false;
+
+        // A confirmed point that then moves is no longer confirmed. Leaving it standing would let
+        // the script, the summary and the execute button describe a moment nobody chose.
+        Steps.Point.Invalidate();
 
         // Verification belongs to the chain that was verified. Leaving the results on screen
         // after the selection moves would show a green tick against backups nothing has read.
@@ -664,112 +974,32 @@ public partial class RestoreViewModel : ViewModelBase
         CopyHeaderOnlyCommandCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>Reads the selected location. Everything it finds lives on the inventory seam.</summary>
     [RelayCommand]
     private async Task LoadBackupsAsync()
     {
-        if (SelectedContainer == null)
+        var location = CurrentLocation;
+        if (location == null)
         {
-            SetError("Please select a container first.");
+            SetError(MediumIsAdHocFile
+                ? "Enter at least one backup file path, and choose a server that can read it."
+                : MediumIsSharedPath
+                ? "Choose the server the backups were taken on first."
+                : "Please select a container first.");
             return;
         }
 
-        var ct = _loadCancellation.Begin();
-        IsBusy = true;
-        LoadProgressText = "Scanning container...";
-        RefreshCancelState();
-        ClearStatus();
-        try
-        {
-            // If a database is already chosen - a reload after taking a fresh backup, say - push
-            // that down to Azure as a prefix instead of walking the whole container and discarding
-            // most of it. Measured on a real 4,440-blob container: about 1,075 ms unscoped versus
-            // about 233 ms for one database (#28).
-            //
-            // The FIRST load has no selection yet and stays a full scan, which it has to be: the
-            // server and database lists are built from what it finds.
-            var scope = BuildListingScope();
-            var progress = new Progress<int>(n => LoadProgressText = $"Scanned {n:N0} blobs...");
+        await Inventory.LoadAsync(location);
 
-            _allBackups = await _blobService.ListBackupFilesAsync(SelectedContainer, scope, progress, ct);
-            _allSets = _blobService.GroupIntoBackupSets(
-                _allBackups, SelectedContainer?.BackupServerTimeZoneId);
+        // Only worth saying once there is something to say it about - it is derived from what was
+        // actually loaded, not from the paths typed above.
+        OnPropertyChanged(nameof(PathAdvice));
+        OnPropertyChanged(nameof(HasPathAdvice));
 
-            var servers = _blobService.GetDiscoveredServers(_allBackups);
-            DiscoveredServers = new ObservableCollection<string>(servers);
-
-            var dbs = _blobService.GetDiscoveredDatabases(_allBackups);
-            DiscoveredDatabases = new ObservableCollection<string>(dbs);
-            BackupsLoaded = _allBackups.Count > 0;
-
-            if (DiscoveredServers.Count > 0)
-            {
-                SelectedServerName = DiscoveredServers[0];
-            }
-            else if (DiscoveredDatabases.Count > 0)
-            {
-                SelectedDatabaseName = DiscoveredDatabases[0];
-            }
-            else
-            {
-                _dbSets = _allSets;
-                FullCount = _dbSets.Count(s => s.Type == BackupType.Full);
-                DiffCount = _dbSets.Count(s => s.Type == BackupType.Differential);
-                LogCount = _dbSets.Count(s => s.Type == BackupType.TransactionLog);
-                SetCount = _dbSets.Count;
-                ComputeAndDisplayRestorePoints();
-            }
-
-
-            // Unconditionally, not just when the selection changed - see RefreshSelectedDatabase.
-            RefreshSelectedDatabase(SelectedDatabaseName);
-
-            // Only when nothing above went wrong. Selecting the first server or database runs the
-            // whole filter-and-compute cascade, which can end in "no valid restore points found" -
-            // and painting a success line over that left an empty timeline with the status bar
-            // cheerfully reporting how many files had loaded. Found by the first ViewModel test.
-            if (!HasError)
-                SetStatus($"Loaded {_allBackups.Count} files in {_allSets.Count} backup set(s) across {dbs.Count} database(s).");
-        }
-        catch (OperationCanceledException)
-        {
-            // Asked for, not a failure. Nothing was written anywhere - listing is read-only - so
-            // there is nothing to explain beyond saying it stopped.
-            SetStatus("Loading cancelled.");
-            BackupsLoaded = false;
-        }
-        catch (Exception ex)
-        {
-            SetError($"Failed to load backups: {ex.Message}");
-            BackupsLoaded = false;
-        }
-        finally
-        {
-            _loadCancellation.End();
-            IsBusy = false;
-            LoadProgressText = string.Empty;
-            RefreshCancelState();
-        }
+        // How many files the filenames could not place is only known once they have been read.
+        RefreshIdentifyState();
     }
 
-    /// <summary>
-    /// The scope to push down to Azure, or null to scan everything.
-    ///
-    /// Only offered when a database is chosen. A server on its own narrows far less and the
-    /// database list is built from the previous scan anyway, so scoping to a server alone would
-    /// mostly re-fetch what is already in memory.
-    /// </summary>
-    private BlobListingScope? BuildListingScope()
-    {
-        if (string.IsNullOrWhiteSpace(SelectedDatabaseName)) return null;
-
-        // ServerName here is the identity used in the PATH, which for an instance is the host
-        // part - "SRV01\PROD" lives under "SRV01". ServerIdentity knows how to split it.
-        var pathServer = string.IsNullOrWhiteSpace(SelectedServerName)
-            ? null
-            : SelectedServerName.Split('\\')[0];
-
-        return new BlobListingScope(pathServer, SelectedDatabaseName);
-    }
 
     /// <summary>
     /// Stops whichever server query is running - verify, validate, a metadata read, or a recovery
@@ -787,19 +1017,118 @@ public partial class RestoreViewModel : ViewModelBase
 
     /// <summary>Stops an in-progress backup listing.</summary>
     [RelayCommand]
-    private void CancelLoad()
+    private void CancelLoad() => Inventory.CancelLoadCommand.Execute(null);
+
+    /// <summary>
+    /// Asks the connected instance what the unplaceable files actually are (#130).
+    ///
+    /// Needs a server because the header can only be read by one - which is also why this is an
+    /// action rather than something the load does on its own. Browsing a container works with no
+    /// connection at all today, and working out WHICH server is needed is sometimes the reason for
+    /// browsing in the first place.
+    /// </summary>
+    public bool CanIdentifyUnclassified =>
+        Inventory.HasUnclassified && IsConnectedToServer && !Inventory.IsBusy;
+
+    /// <summary>Why the button cannot be pressed, or empty when it can.</summary>
+    public string IdentifyBlockedReason =>
+        !Inventory.HasUnclassified ? string.Empty
+        : IsConnectedToServer ? string.Empty
+        : "Connect to a SQL Server instance to read the backup headers - it is the server that reads them, not this app.";
+
+    [RelayCommand(CanExecute = nameof(CanIdentifyUnclassified))]
+    private async Task IdentifyUnclassifiedAsync()
     {
-        _loadCancellation.Cancel();
-        RefreshCancelState();
-        SetStatus("Cancelling...");
+        var server = ConnectedServer;
+        if (server == null) return;
+
+        await Inventory.IdentifyUnclassifiedAsync(server);
+
+        // What the headers settled changes the working set, so whatever was on the timeline was
+        // computed from the state before them.
+        RefreshIdentifyState();
     }
+
+    private void RefreshIdentifyState()
+    {
+        OnPropertyChanged(nameof(CanIdentifyUnclassified));
+        OnPropertyChanged(nameof(IdentifyBlockedReason));
+        IdentifyUnclassifiedCommand.NotifyCanExecuteChanged();
+
+        OnPropertyChanged(nameof(CanAuditDatabase));
+        OnPropertyChanged(nameof(AuditBlockedReason));
+        AuditDatabaseCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Checks every backup of the selected database against its own header (#130).
+    ///
+    /// Belt and braces rather than a fix: inference is right most of the time, and the times it is
+    /// not are invisible until a restore is needed. This is the button for when a set looks
+    /// fragmented, or a container is new and nobody has confirmed the path pattern yet.
+    /// </summary>
+    public bool CanAuditDatabase => Inventory.CanAudit && IsConnectedToServer;
+
+    public string AuditBlockedReason =>
+        Inventory.AuditScope.Count == 0 ? string.Empty
+        : IsConnectedToServer ? string.Empty
+        : "Connect to a SQL Server instance to audit these backups - it is the server that reads the headers, not this app.";
+
+    [RelayCommand(CanExecute = nameof(CanAuditDatabase))]
+    private async Task AuditDatabaseAsync()
+    {
+        var server = ConnectedServer;
+        if (server == null) return;
+
+        await Inventory.AuditAsync(server);
+
+        // The audit marks the files it checked, and the chain on screen holds those same objects -
+        // but a list does not re-render because a property nobody is watching changed underneath it.
+        RefreshChainFiles();
+        RefreshIdentifyState();
+    }
+
+    /// <summary>
+    /// Re-publishes the chain's files so their audit pills appear.
+    ///
+    /// BackupFileInfo is a plain model with no change notification - deliberately, it is a
+    /// serialised listing rather than a viewmodel - so the collection is replaced rather than the
+    /// items being expected to announce themselves.
+    /// </summary>
+    private void RefreshChainFiles()
+    {
+        // The restore points grid is what somebody is actually looking at when an audit finishes -
+        // the chain panel below it is collapsed until they ask for it - so that grid is the one
+        // that has to show the result. Reported: an audit passed 98 sets and nothing said so.
+        Timeline.RefreshRows();
+
+        if (RestoreChain == null) return;
+
+        ChainFiles = new ObservableCollection<BackupFileInfo>(RestoreChain.AllFiles);
+        ChainSets = new ObservableCollection<BackupSet>(RestoreChain.AllSets);
+    }
+
+    [RelayCommand]
+    private void ToggleChainDetails()
+    {
+        ShowChainDetails = !ShowChainDetails;
+    }
+
+    /// <summary>
+    /// What one header read cost, in the terms #130 needs to settle its design.
+    ///
+    /// Kept as a property as well as a log line so it can be read off the screen without going to
+    /// the file - the point of measuring is that somebody looks at the number.
+    /// </summary>
+    [ObservableProperty]
+    private string _headerReadTiming = string.Empty;
 
     /// <summary>
     /// Works out which points this database can be restored to, and hands them to the timeline.
     /// </summary>
     private void ComputeAndDisplayRestorePoints()
     {
-        var points = _chainBuilder.ComputeRestorePoints(_dbSets);
+        var points = _chainBuilder.ComputeRestorePoints(Inventory.WorkingSet);
 
         // Inventory-level findings: backups that exist but can never be offered. These belong to
         // the discovered set rather than to any one chain, so they are held separately and survive
@@ -808,8 +1137,8 @@ public partial class RestoreViewModel : ViewModelBase
         // ValidateInventory was written for #62 and then never called, so orphaned differentials,
         // orphaned logs and "no full backup at all" were being computed nowhere and shown nowhere.
         InventoryIssues = new ObservableCollection<ChainIssue>(
-            _chainValidator.ValidateInventory(_dbSets)
-                .Concat(_chainValidator.ValidateReachability(_dbSets, points)));
+            _chainValidator.ValidateInventory(Inventory.WorkingSet)
+                .Concat(_chainValidator.ValidateReachability(Inventory.WorkingSet, points)));
         HasInventoryIssues = InventoryIssues.Count > 0;
 
         Timeline.Load(points);
@@ -892,6 +1221,8 @@ public partial class RestoreViewModel : ViewModelBase
         // the thing people read before running a restore against production.
         RegenerateScript();
 
+        RefreshSteps();
+
         if (RestoreChain == null || string.IsNullOrWhiteSpace(TargetDatabaseName))
         {
             RestoreSummaryText = string.Empty;
@@ -899,7 +1230,7 @@ public partial class RestoreViewModel : ViewModelBase
         }
 
         var parts = new List<string>();
-        parts.Add($"Restore '{SelectedDatabaseName}' as '{TargetDatabaseName}'");
+        parts.Add($"Restore '{Inventory.SelectedDatabaseName}' as '{TargetDatabaseName}'");
         parts.Add($"using {RestoreChain.Summary} ({RestoreChain.FileCount} files total).");
 
         if (PointInTime.Effective is DateTime stopAt)
@@ -936,6 +1267,78 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Tells each step where it stands. Driven from the same places as the restore summary, so a
+    /// step's heading cannot disagree with the screen underneath it.
+    /// </summary>
+    private void RefreshSteps()
+    {
+        // Step 1 finishes by itself, because there is nothing to confirm: a database either has
+        // been chosen or has not. It needs BOTH the container loaded and a database picked - the
+        // step holds the server and database dropdowns, so completing it on the load alone threw
+        // people out of the step before they could use them.
+        Steps.Report(
+            Steps.Source,
+            Inventory.BackupsLoaded && !string.IsNullOrWhiteSpace(Inventory.SelectedDatabaseName),
+            DescribeSource());
+
+        // Described, and confirmed by the user rather than by a click. Choosing a restore point is
+        // the decision this application exists to support: collapsing the step the instant a dot is
+        // clicked takes the timeline away from somebody who is still comparing points.
+        Steps.Point.Describe(
+            Timeline.SelectedPoint is { } point
+                ? $"{point.TimestampDisplay}, {RestoreChain?.Summary ?? "no chain"}"
+                : string.Empty);
+        Steps.Point.CanConfirm = Timeline.SelectedPoint != null && RestoreChain != null;
+
+        // Described, not completed. The options have defaults, so there is no point at which they
+        // are finished - and the target name is derived from the chosen database, so treating a
+        // non-empty one as completion folded this step away the moment a database was picked, and
+        // the hand-over from step 2 then skipped straight over it to step 4.
+        Steps.Options.Describe(DescribeOptions());
+        Steps.Options.CanConfirm = !string.IsNullOrWhiteSpace(TargetDatabaseName);
+    }
+
+    private string DescribeSource()
+    {
+        if (SelectedContainer == null) return string.Empty;
+
+        var parts = new List<string> { SelectedContainer.Name };
+        if (!string.IsNullOrWhiteSpace(Inventory.SelectedDatabaseName))
+        {
+            parts.Add(string.IsNullOrWhiteSpace(Inventory.SelectedServerName)
+                ? Inventory.SelectedDatabaseName!
+                : $"{Inventory.SelectedDatabaseName} on {Inventory.SelectedServerName}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// The short form for a collapsed step: the target and the handful of options that change what
+    /// the restore DOES. Not the full sentence from the restore summary - that is a paragraph, and
+    /// this has to fit on the heading beside the step title.
+    /// </summary>
+    private string DescribeOptions()
+    {
+        if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return string.Empty;
+
+        var parts = new List<string> { $"as {TargetDatabaseName}" };
+
+        parts.Add(Options.RecoveryMode switch
+        {
+            RecoveryMode.NoRecovery => "NORECOVERY",
+            RecoveryMode.Standby => "STANDBY",
+            _ => "RECOVERY"
+        });
+
+        if (Options.WithReplace) parts.Add("REPLACE");
+        if (UseWithMove) parts.Add("MOVE");
+        if (PointInTime.Effective is DateTime stopAt) parts.Add($"STOPAT {stopAt:yyyy-MM-dd HH:mm:ss}");
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
     /// Points the STOPAT box at the selected restore point's window, or turns it off.
     ///
     /// STOPAT only applies to a log restore, and only inside the LAST log's window - which is what
@@ -963,36 +1366,45 @@ public partial class RestoreViewModel : ViewModelBase
         try
         {
             var headers = new List<ChainHeader>();
-            foreach (var set in RestoreChain.AllSets)
-            {
-                ct.ThrowIfCancellationRequested();
 
-                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
-                try
+            // Timed, because #130 turns on a number nobody has: how long ONE header read actually
+            // costs against a real container. Building chains from headers rather than filenames is
+            // only sensible if that number is small, and the whole design in that issue is written
+            // around an assumption that it is not. This is the cheapest place to find out - the
+            // work is already being done, one read per chain member, against real backups.
+            // One connection for the whole chain, not one per member.
+            //
+            // The first measurement on a real container - three statements over nine striped files,
+            // 17.4 seconds - was taken with a fresh connection per read, so part of what it reported
+            // was the connect cost paid three times. Batching removes that, and the timing now says
+            // which part was which (#130).
+            //
+            // A null result is an unreadable member rather than a failure of the whole validation:
+            // the validator reports it and carries on with the rest.
+            var requests = RestoreChain.AllSets
+                .Select(s => (IReadOnlyList<string>)s.Files.Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl)).ToList())
+                .ToList();
+
+            var read = await _sqlService.RestoreHeaderOnlyBatchAsync(
+                ConnectedServer, requests,
+                progress: null,
+                timing: t =>
                 {
-                    var header = await _sqlService.RestoreHeaderOnlyMultiAsync(ConnectedServer, urls, ct);
-                    headers.Add(new ChainHeader(set, header));
-                }
-                catch (OperationCanceledException)
-                {
-                    // Asked for. Must not be swallowed by the per-member catch below, which exists
-                    // so ONE unreadable backup does not abort the rest.
-                    throw;
-                }
-                catch (Exception)
-                {
-                    // One unreadable member must not abort the whole validation - the validator
-                    // reports it and carries on checking everything else.
-                    headers.Add(new ChainHeader(set, null));
-                }
-            }
+                    HeaderReadTiming = t;
+                    _log.Info($"[headeronly] {t}");
+                },
+                ct: ct);
+
+            headers.AddRange(RestoreChain.AllSets.Select((set, i) =>
+                new ChainHeader(set, i < read.Count ? read[i] : null)));
 
             UpdateChainIssues(RestoreChain, headers);
             ChainLsnVerified = true;
 
             SetStatus(HasChainIssues
                 ? $"Chain check found problems - see the panel above."
-                : $"Chain checked: {headers.Count} header(s) read, the LSN chain is unbroken.");
+                : $"Chain checked: {headers.Count} header(s) read, the LSN chain is unbroken. " +
+                  HeaderReadTiming);
         }
         catch (OperationCanceledException)
         {
@@ -1054,7 +1466,7 @@ public partial class RestoreViewModel : ViewModelBase
                 var set = sets[i];
                 SetStatus($"Verifying {i + 1} of {sets.Count}: {set.TypeDisplay} {set.SetId}...");
 
-                var urls = set.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+                var urls = set.Files.Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
                 var result = await _sqlService.RestoreVerifyOnlyAsync(
                     ConnectedServer, urls, Options.WithChecksum, fileMoves, ct);
 
@@ -1181,8 +1593,10 @@ public partial class RestoreViewModel : ViewModelBase
 
     // Verification opens its own connection and reads whole backups. Letting it start while a
     // restore is running would put a second heavy reader on the same server at the worst moment.
-    partial void OnIsExecutingChanged(bool value)
+    // Called from the execution seam's own IsExecuting, which is where that state now lives.
+    private void OnExecutionRunningChanged()
     {
+        OnPropertyChanged(nameof(IsExecuting));
         VerifyChainCommand.NotifyCanExecuteChanged();
         RefreshExecuteBlockedReason();
         RefreshCheckState();
@@ -1227,6 +1641,11 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnIsConnectedToServerChanged(bool value)
     {
         RefreshExecuteBlockedReason();
+
+        // Reading a backup header needs a server, so connecting is what makes that offer live -
+        // and disconnecting is what has to withdraw it (#130).
+        RefreshIdentifyState();
+
         var chips = value && ConnectedServer != null
             ? ConnectedServer.TagChips
             : [];
@@ -1311,7 +1730,7 @@ public partial class RestoreViewModel : ViewModelBase
         {
             // Guessed logical names. Wrong for a renamed database or one with secondary files,
             // which is what Get file names exists to fix.
-            var sourceDbName = SelectedDatabaseName ?? TargetDatabaseName;
+            var sourceDbName = Inventory.SelectedDatabaseName ?? TargetDatabaseName;
             fileMoves.Add(new FileMoveOption
             {
                 LogicalName = sourceDbName,
@@ -1329,6 +1748,61 @@ public partial class RestoreViewModel : ViewModelBase
         }
 
         return fileMoves;
+    }
+
+    // ── will it fit (#32) ───────────────────────────────────────────────────────
+    //
+    // A restore that runs out of disk fails part-way, and by then WITH REPLACE has already dropped
+    // the database it was replacing - so the target is gone and the replacement is incomplete. That
+    // is the worst outcome this screen can produce and it is entirely predictable: FILELISTONLY
+    // already reports how big each file will be, and the instance already knows what it has free.
+
+    /// <summary>Per-volume space, once the file list and the server's volumes are both known.</summary>
+    [ObservableProperty]
+    private ObservableCollection<VolumeSpace> _volumeSpace = [];
+
+    /// <summary>What to say about it, or empty when everything fits.</summary>
+    [ObservableProperty]
+    private string _spaceWarning = string.Empty;
+
+    public bool HasSpaceWarning => SpaceWarning.Length > 0;
+
+    partial void OnSpaceWarningChanged(string value) => OnPropertyChanged(nameof(HasSpaceWarning));
+
+    /// <summary>
+    /// Asks the target what it has free and compares it with what the restore will write.
+    ///
+    /// Failing to answer is not a warning. This is a courtesy check over somebody else's storage,
+    /// and an instance that will not report its volumes - permissions, an edition that does not
+    /// expose the DMV - must not turn that into a scary message about a restore that is probably
+    /// fine.
+    /// </summary>
+    private async Task CheckSpaceAsync(CancellationToken ct)
+    {
+        VolumeSpace = [];
+        SpaceWarning = string.Empty;
+
+        if (ConnectedServer == null || FetchedFileMoves.Count == 0) return;
+
+        try
+        {
+            var free = await _sqlService.GetVolumeFreeSpaceAsync(ConnectedServer, ct);
+            var volumes = RestoreSpaceCheck.Check(FetchedFileMoves, free);
+
+            VolumeSpace = new ObservableCollection<VolumeSpace>(volumes);
+            SpaceWarning = RestoreSpaceCheck.Warn(volumes);
+
+            if (HasSpaceWarning) _log.Warn($"[space] {SpaceWarning}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Logged rather than shown. Not being able to check is not the same as not fitting.
+            _log.Info($"[space] could not check free space: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -1370,27 +1844,43 @@ public partial class RestoreViewModel : ViewModelBase
     private void CopyScript()
         => TryCopyToClipboard(GeneratedScript, "Script copied to clipboard.");
 
+    /// <summary>
+    /// The same restore, wrapped as an Agent job for somebody else to run (#32).
+    ///
+    /// For the case where a restore cannot happen interactively: a maintenance window at 3am, a
+    /// change process that takes submitted scripts rather than a person at a keyboard, an operator
+    /// who runs what a DBA hands them.
+    ///
+    /// The job is created disabled and unscheduled, so what is handed over is reviewable and inert
+    /// until somebody deliberately starts it.
+    /// </summary>
     [RelayCommand]
-    private void CopyPathHttps(BackupFileInfo? file)
+    private void CopyAsAgentJob()
     {
-        if (file == null || SelectedContainer == null) return;
-        TryCopyToClipboard(
-            BlobStorageService.BuildBlobUrl(SelectedContainer, file.BlobName),
-            "HTTPS path copied to clipboard (no SAS token).");
+        if (!HasScript) return;
+
+        var job = SqlAgentJobScript.Wrap(
+            GeneratedScript,
+            SqlAgentJobScript.SuggestName(TargetDatabaseName, DateTime.Now),
+            $"Restore {Inventory.SelectedDatabaseName ?? "a database"} as {TargetDatabaseName}, " +
+            $"generated by Nine Lives on {DateTime.Now:yyyy-MM-dd HH:mm}.");
+
+        TryCopyToClipboard(job,
+            "Agent job script copied to clipboard. The job is created disabled and unscheduled - " +
+            "enable or start it when the restore should actually happen.");
     }
 
     [RelayCommand]
-    private void CopyPathContainer(BackupFileInfo? file)
-    {
-        if (file == null || SelectedContainer == null) return;
-        var containerName = SelectedContainer.ContainerName ?? "container";
-        TryCopyToClipboard($"{containerName}/{file.BlobName}", "Container path copied to clipboard.");
-    }
+    private void CopyPathHttps(BackupFileInfo? file) => CopyBlobHttpsPath(file, SelectedContainer);
+
+    [RelayCommand]
+    private void CopyPathContainer(BackupFileInfo? file) => CopyBlobContainerPath(file, SelectedContainer);
 
     [RelayCommand(CanExecute = nameof(CanFetchLogicalNames))]
     private async Task FetchLogicalNamesAsync()
     {
-        if (RestoreChain == null || ConnectedServer == null || SelectedContainer == null) return;
+        if (RestoreChain == null || ConnectedServer == null) return;
+        if (SelectedContainer == null && !RestoreChain.FullSet.Files.All(f => f.IsOnDisk)) return;
 
         var ct = _queryCancellation.Begin();
         IsBusy = true;
@@ -1401,7 +1891,11 @@ public partial class RestoreViewModel : ViewModelBase
         // catch below would itself throw, replacing the error explaining why FILELISTONLY failed
         // with a bare "Nine Lives hit an unexpected error".
         // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
 
         try
         {
@@ -1424,6 +1918,10 @@ public partial class RestoreViewModel : ViewModelBase
             FetchedFileMoves = new ObservableCollection<FileMoveOption>(list);
             HasFetchedFileMoves = FetchedFileMoves.Count > 0;
             SetStatus($"Read {FetchedFileMoves.Count} logical file name(s) from the backup. Edit the target paths above, and tick WITH MOVE to use them.");
+
+            // The sizes came back in the same result set, so the question of whether this can
+            // physically fit costs one more query rather than another read of the backup (#32).
+            await CheckSpaceAsync(ct);
         }
         catch (Exception ex)
         {
@@ -1442,7 +1940,10 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     private bool CanFetchLogicalNames() =>
-        IsConnectedToServer && RestoreChain != null && SelectedContainer != null && RestoreChain.FullSet.Files.Count > 0;
+        IsConnectedToServer && RestoreChain != null && RestoreChain.FullSet.Files.Count > 0
+        // A container for blob URLs; a chain on disk needs none - FILELISTONLY reads the path
+        // directly, and demanding a container here kept MOVE defaults blob-only (#203).
+        && (SelectedContainer != null || RestoreChain.FullSet.Files.All(f => f.IsOnDisk));
 
     [RelayCommand(CanExecute = nameof(CanInspectMetadata))]
     private async Task InspectBackupMetadataAsync()
@@ -1454,7 +1955,11 @@ public partial class RestoreViewModel : ViewModelBase
         RefreshCancelState();
         // Captured before the await - see the note on FetchLogicalNamesAsync.
         // Use URL without SAS and omit WITH CREDENTIAL. Encode path so spaces/special chars (e.g. in folder names) are valid.
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
 
         try
         {
@@ -1500,7 +2005,11 @@ public partial class RestoreViewModel : ViewModelBase
     private void CopyFileListOnlyCommand()
     {
         if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE FILELISTONLY FROM {urlClauses}";
         TryCopyToClipboard(sql, "RESTORE FILELISTONLY command copied to clipboard. Paste into SSMS to run.");
@@ -1511,7 +2020,11 @@ public partial class RestoreViewModel : ViewModelBase
     private void CopyHeaderOnlyCommand()
     {
         if (RestoreChain == null || RestoreChain.FullSet.Files.Count == 0) return;
-        var urls = RestoreChain.FullSet.Files.Select(f => BlobUrlEncoder.Encode(f.BlobUrl)).ToList();
+        // By the device a RESTORE would name it: an encoded URL for blob, the raw path for
+        // disk - a path is not a URI, and percent-encoding one breaks it (#203).
+        var urls = RestoreChain.FullSet.Files
+            .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+            .ToList();
         var urlClauses = string.Join(", ", urls.Select(u => $"URL = N'{TSql.EscapeLiteral(u)}'"));
         var sql = $"RESTORE HEADERONLY FROM {urlClauses}";
         TryCopyToClipboard(sql, "RESTORE HEADERONLY command copied to clipboard. Paste into SSMS to run.");
@@ -1544,6 +2057,14 @@ public partial class RestoreViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Arms the button, then hands the run to the execution seam (#115 seam 6).
+    ///
+    /// What stays here is what belongs to this screen rather than to the run: whether the script
+    /// on display is the one the options currently produce, and whether the chain can restore at
+    /// all. Both are checked on the CONFIRM press as well as when arming - validation can finish
+    /// during the five-second countdown and find an error that was not known when it was armed.
+    /// </summary>
     [RelayCommand]
     private async Task ExecuteScriptAsync()
     {
@@ -1558,355 +2079,319 @@ public partial class RestoreViewModel : ViewModelBase
         if (string.IsNullOrEmpty(GeneratedScript))
         {
             SetError("The current options do not produce a script. Check the settings above.");
-            IsExecuteArmed = false;
-            ExecuteButtonText = "Execute on Server";
+            Execution.Disarm();
             return;
         }
 
-        // Refuse to run when the chain cannot possibly restore. This is the last safe moment:
-        // once execution starts, WITH REPLACE drops the target database, and a chain that fails
-        // partway leaves nothing usable behind. Failing here costs the user a few seconds;
-        // failing mid-restore costs them the database they were restoring over.
-        //
-        // Checked on the confirm press as well as when arming: validation can finish during the
-        // five-second countdown and find an error that was not known when the button was armed.
+        // Once execution starts, WITH REPLACE drops the target database, and a chain that fails
+        // partway leaves nothing usable behind. Failing here costs a few seconds; failing
+        // mid-restore costs the database being restored over.
         if (HasChainErrors)
         {
             var first = ChainIssues.First(i => i.IsError);
             SetError($"Cannot execute: {first.Title}. {first.Detail}");
-            IsExecuteArmed = false;
-            ExecuteButtonText = "Execute on Server";
+            Execution.Disarm();
             return;
         }
 
-        if (!IsExecuteArmed)
+        if (!Execution.IsArmed)
         {
-            IsExecuteArmed = true;
-            ExecuteButtonText = "Confirm Execute (5)";
-            ExecuteCountdown = 5;
-
-            _armTimeoutCts?.Cancel();
-            _armTimeoutCts = new CancellationTokenSource();
-
-            _ = RunArmCountdownAsync(_armTimeoutCts.Token);
+            Execution.Arm();
             return;
         }
 
-        _armTimeoutCts?.Cancel();
-        IsExecuteArmed = false;
-        ExecuteButtonText = "Execute on Server";
-
-        var startedAt = DateTime.Now;
-        var outcome = RestoreOutcome.Failed;
-        string? failure = null;
-
-        // Set false when the run is abandoned before anything was attempted, so history records
-        // executions rather than button presses.
-        var attempted = true;
-
-        var executeToken = _executeCancellation.Begin();
-        IsExecuting = true;
-        Console.IsRunning = true;
-        // Reset alongside ExecutionComplete. Left over from a previous run it could combine with an
-        // early bail-out to show the success banner - and write "Outcome: Succeeded" into a saved
-        // log - for a restore that never ran.
-        ExecutionSuccess = false;
-        ExecutionComplete = false;
-        Console.Clear();
-        RecoveryActions = [];
-        HasRecoveryActions = false;
-        RefreshCancelState();
-
-        try
+        // Execute against the server we are actually connected to, not one looked up by name. This
+        // used to re-read config.json and take the first entry whose ServerName matched, which is a
+        // different object whenever two entries share a host and differ in auth, port or encryption
+        // - so the restore ran under credentials the user never connected with or tested.
+        var server = ConnectedServer;
+        if (server == null)
         {
-            // Execute against the server we are actually connected to, not one looked up by name.
-            // This used to re-read config.json and take the first entry whose ServerName matched,
-            // which is a different object whenever two entries share a host and differ in auth,
-            // port or encryption - a Windows-auth and a SQL-auth entry for the same box, say. The
-            // restore would then run under credentials the user never connected with or tested.
-            // Every other server call on this screen already uses ConnectedServer.
-            var server = ConnectedServer;
-            if (server == null)
-            {
-                attempted = false;
-                SetError("Not connected to a server.");
-                return;
-            }
+            Execution.Disarm();
+            SetError("Not connected to a server.");
+            return;
+        }
 
-            // Everything about the server-side credential lives on the child (#115 seam 5),
-            // including the decision not to touch one. A refusal has written nothing, so there is
-            // nothing to unwind - and nothing to file in the history either.
-            var preflight = await Credential.PrepareForRestoreAsync(server, AppendLog);
-            if (!preflight.CanProceed)
-            {
-                attempted = false;
-                SetError(preflight.Refusal!);
-                return;
-            }
-
-            _log.ServerChange(server.ServerName,
-                $"restore starting: target [{TargetDatabaseName}], " +
-                $"{RestoreChain?.Summary ?? "no chain"}, WITH REPLACE={Options.WithReplace}, " +
-                $"recovery={Options.RecoveryMode}, stopAt={PointInTime.Effective?.ToString("s") ?? "none"}");
-
-            AppendLog("Beginning restore execution...\n");
-
-            await _sqlService.ExecuteRestoreWithProgressAsync(
+        await Execution.RunAsync(
+            new RestoreRun(
                 server,
                 GeneratedScript,
-                // InvokeAsync, not Invoke. This callback runs on the connection's thread when SQL
-                // Server sends an info message, and a synchronous Invoke BLOCKS that thread until
-                // the UI has finished handling it. With the UI busy re-rendering, progress backed
-                // up and then arrived in bursts - which is precisely what "not live" looked like.
-                // Posting instead lets the restore keep streaming while the UI catches up.
-                msg => Application.Current.Dispatcher.InvokeAsync(() => AppendLog(msg)),
-                executeToken);
-
-            ExecutionSuccess = true;
-            outcome = RestoreOutcome.Succeeded;
-            AppendLog("\nRestore completed successfully!");
-            SetStatus("Restore execution completed successfully.");
-        }
-        catch (OperationCanceledException)
-        {
-            outcome = RestoreOutcome.Cancelled;
-            failure = "Cancelled by the user part-way through the chain.";
-            // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
-            // the client waiting and SQL Server rolls back the statement that was in flight, but
-            // the target stays mid-restore - so this must be as loud as a failure, and it goes
-            // through the same recovery guidance (#14, #25).
-            ExecutionSuccess = false;
-            AppendLog("\nCANCELLED. The statement in flight was rolled back by SQL Server, but the " +
-                      "restore stopped part-way through the chain.");
-
-            _log.ServerChange(ConnectedServer?.ServerName ?? "unknown",
-                $"restore CANCELLED by user, target [{TargetDatabaseName}]");
-
-            SetError("Restore cancelled. The target database has been left mid-restore - see below.");
-
-            if (ConnectedServer != null)
-                await ReportRecoveryStateAsync(ConnectedServer);
-        }
-        catch (Exception ex)
-        {
-            ExecutionSuccess = false;
-            outcome = RestoreOutcome.Failed;
-            failure = ex.Message;
-            AppendLog($"\nERROR: {ex.Message}");
-            SetError($"Restore failed: {ex.Message}");
-
-            // The restore has stopped part-way and the target is almost certainly not usable.
-            // Find out exactly how, and say so, while the connection is still open (#14).
-            if (ConnectedServer != null)
-                await ReportRecoveryStateAsync(ConnectedServer);
-        }
-        finally
-        {
-            _executeCancellation.End();
-            IsExecuting = false;
-            Console.IsRunning = false;
-            ExecutionComplete = true;
-            Console.Flush();   // nothing buffered may outlive the run
-            RefreshCancelState();
-
-            // After the flush, so the recorded log is the whole console rather than whatever had
-            // made it out of the batching buffer. Recorded for every outcome including cancelled -
-            // "I stopped it" is exactly the kind of thing a change ticket needs to say.
-            if (attempted) RecordHistory(startedAt, outcome, failure);
-        }
+                TargetDatabaseName,
+                Inventory.SelectedDatabaseName,
+                SelectedContainer?.Name,
+                RestoreChain?.Summary ?? "no chain",
+                Timeline.SelectedPoint?.Timestamp,
+                $"WITH REPLACE={Options.WithReplace}, recovery={Options.RecoveryMode}, " +
+                $"stopAt={PointInTime.Effective?.ToString("s") ?? "none"}"),
+            appendLog => PreflightAsync(server, appendLog));
     }
 
     /// <summary>
-    /// Files this execution in the history (#31). Never throws: the store swallows its own
-    /// failures, and a restore must not be reported as failed because a record could not be kept.
-    /// </summary>
-    private void RecordHistory(DateTime startedAt, RestoreOutcome outcome, string? failure)
-    {
-        _history.Append(new RestoreHistoryEntry
-        {
-            StartedAt = startedAt,
-            CompletedAt = DateTime.Now,
-            ServerName = ConnectedServer?.ServerName ?? "unknown",
-            TargetDatabase = TargetDatabaseName,
-            ContainerName = SelectedContainer?.Name,
-            SourceDatabase = SelectedDatabaseName,
-            RestorePointTimestamp = Timeline.SelectedPoint?.Timestamp,
-            ChainSummary = RestoreChain?.Summary ?? "no chain",
-            Outcome = outcome,
-            ErrorMessage = failure,
-            Script = GeneratedScript,
-            Log = Console.Text
-        });
-    }
-
-    /// <summary>
-    /// Stops a running restore.
+    /// The last thing checked before a restore runs, and it differs by medium.
     ///
-    /// Deliberately worded as a warning rather than a neutral action: stopping a restore part-way
-    /// leaves the target database in RESTORING, which is not a state anyone wants to discover by
-    /// accident. The recovery panel that appears afterwards explains how to get out of it.
+    /// Blob needs the server-side credential to be usable. A shared path needs no credential at all
+    /// - but it needs something the blob path never has to ask: whether the instance about to run
+    /// the RESTORE can actually READ the files. Those are the same question in different clothes,
+    /// which is why they share one hook rather than the execute path growing a branch.
     /// </summary>
-    [RelayCommand]
-    private void CancelExecute()
+    internal async Task<CredentialPreflight> PreflightAsync(ServerConnection server, Action<string> appendLog)
     {
-        if (!_executeCancellation.CanCancel) return;
+        // Both non-blob media end in FROM DISK on the target, so both need the same answer: can
+        // the instance that will run the RESTORE actually read these files (#203).
+        if (MediumIsSharedPath || MediumIsAdHocFile)
+        {
+            var readable = await CheckTargetCanReadFilesAsync(server, appendLog);
+            if (!readable.CanProceed) return readable;
 
-        _executeCancellation.Cancel();
-        RefreshCancelState();
-        AppendLog("\nCancellation requested - waiting for SQL Server to roll back the current statement...");
+            return await CheckVersionCompatibilityAsync(server, appendLog);
+        }
+
+        var primary = await Credential.PrepareForRestoreAsync(server, appendLog);
+        if (!primary.CanProceed) return primary;
+
+        var containers = await CheckOtherContainersHaveCredentialsAsync(server, appendLog);
+        if (!containers.CanProceed) return containers;
+
+        return await CheckVersionCompatibilityAsync(server, appendLog);
     }
 
     /// <summary>
-    /// After a failed restore, works out what state the target database was left in and offers the
-    /// statements that put it right.
+    /// Refuses a restore whose certificate is missing from the target (#222).
     ///
-    /// This is the moment of maximum stress - a restore has failed mid-incident and the database is
-    /// now in a state that blocks other connections. Leaving someone to work that out from a raw
-    /// SQL error, when the app is still holding the connection that could tell them, is the wrong
-    /// place to stop.
+    /// Two thumbprints can appear in a header, and both mean the same thing: TDEThumbprint says
+    /// the database inside the backup is TDE-encrypted, EncryptorThumbprint says the backup file
+    /// itself was taken WITH ENCRYPTION. Either way the target must hold a certificate with that
+    /// thumbprint in master, or the restore fails with error 33111.
+    ///
+    /// When the source instance is known (the shared path knows it), the refusal also NAMES the
+    /// certificate there - BACKUP CERTIFICATE takes a name, not a thumbprint, and mid-incident is
+    /// the wrong time to go looking for which one. Null return means no objection.
     /// </summary>
-    private async Task ReportRecoveryStateAsync(ServerConnection server)
+    private async Task<CredentialPreflight?> CheckCertificatesAsync(
+        ServerConnection server, BackupFileInfo? header, Action<string> appendLog)
     {
-        RecoveryActions = [];
-        HasRecoveryActions = false;
-        RecoveryStateMessage = string.Empty;
+        if (header == null) return null;
 
-        try
+        foreach (var (thumbprint, isTde) in new[]
+                 {
+                     (header.TdeThumbprint, true),
+                     (header.EncryptorThumbprint, false)
+                 })
         {
-            var state = await _sqlService.GetDatabaseRecoveryStateAsync(server, TargetDatabaseName);
-            if (!state.NeedsAttention)
+            if (thumbprint == null) continue;
+
+            appendLog(EncryptionGuidance.DescribeProtection(
+                isTde ? thumbprint : null, isTde ? null : thumbprint));
+
+            var onTarget = await _sqlService.FindCertificateByThumbprintAsync(server, thumbprint);
+            if (onTarget != null)
             {
-                if (!state.Exists)
-                    AppendLog($"\n[{TargetDatabaseName}] is not on the server - nothing was left behind.");
-                return;
+                appendLog(EncryptionGuidance.ExplainPresent(isTde, onTarget, server.ServerName));
+                continue;
             }
 
-            RecoveryStateMessage = state.Explain(TargetDatabaseName);
-            RecoveryActions = new ObservableCollection<RecoveryAction>(
-                state.SuggestedActions(TargetDatabaseName));
-            HasRecoveryActions = RecoveryActions.Count > 0;
+            // Name the certificate on the source when an instance is there to ask - best effort,
+            // and only meaningful for media that HAVE a source instance.
+            string? sourceCertName = null;
+            var sourceServer = MediumIsBlob ? null : SourceServer;
+            if (sourceServer != null && sourceServer.Id != server.Id)
+            {
+                try
+                {
+                    sourceCertName =
+                        await _sqlService.FindCertificateByThumbprintAsync(sourceServer, thumbprint);
+                }
+                catch
+                {
+                    // The refusal stands on the thumbprint alone.
+                }
+            }
 
-            AppendLog($"\n{RecoveryStateMessage}");
-            foreach (var action in RecoveryActions)
-                AppendLog($"\n  {action.Title}:  {action.Sql}");
+            return CredentialPreflight.Stop(EncryptionGuidance.ExplainMissingCertificate(
+                isTde, thumbprint, server.ServerName, sourceCertName, sourceServer?.ServerName));
         }
-        catch (Exception ex)
-        {
-            // Best effort. The restore failure is the news; failing to describe the aftermath must
-            // not replace the error the user actually needs to read.
-            AppendLog($"\nCould not check the state of [{TargetDatabaseName}]: {ex.Message}");
-        }
-    }
 
-    /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
-    [RelayCommand]
-    private async Task RunRecoveryActionAsync(RecoveryAction? action)
-    {
-        if (action == null || ConnectedServer == null) return;
-
-        // Cancellable, and it needs it more than most: this runs when a restore has already
-        // failed, RESTORE ... WITH RECOVERY can take a long time on a large database, and it goes
-        // out at CommandTimeout = 0. Without a Stop the only way out was killing the process - at
-        // the exact moment the user is trying to get their database back.
-        var ct = _queryCancellation.Begin();
-        RefreshCancelState();
-
-        try
-        {
-            AppendLog($"\nRunning: {action.Sql}");
-            await _sqlService.ExecuteRecoveryActionAsync(ConnectedServer, action.Sql, ct);
-            AppendLog("Completed.");
-            await ReportRecoveryStateAsync(ConnectedServer);
-
-            if (!HasRecoveryActions)
-                SetStatus($"[{TargetDatabaseName}] is back to a usable state.");
-        }
-        catch (OperationCanceledException)
-        {
-            // SQL Server rolls back the statement that was in flight, so the database is where it
-            // was before this step - which is still whatever the failed restore left behind.
-            AppendLog("\nCancelled. The database is in the same state as before this step.");
-            SetStatus("Recovery step cancelled.");
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"\nERROR: {ex.Message}");
-            SetError($"Recovery step failed: {ex.Message}");
-        }
-        finally
-        {
-            _queryCancellation.End();
-            RefreshCancelState();
-        }
-    }
-
-    [RelayCommand]
-    private void CopyRecoveryAction(RecoveryAction? action)
-    {
-        if (action != null)
-            TryCopyToClipboard(action.Sql, "Recovery statement copied to clipboard.");
+        return null;
     }
 
     /// <summary>
-    /// Appends to the on-screen console and to the log file at the same time.
+    /// Refuses a newer version's backup before anything is touched (#210).
     ///
-    /// One call rather than two so the file cannot drift from what the user was shown - and so a
-    /// restore that ends with the window being closed still leaves a record of how far it got.
-    /// Redaction happens inside the log, not here (#40).
+    /// The one-directional law of RESTORE: a backup taken on a newer major version can never be
+    /// restored onto an older one - error 3169, no exceptions, not even between adjacent releases.
+    /// Without this it arrives from the server mid-restore, after WITH REPLACE has already dropped
+    /// the database being restored over. Same failure shape as every other preflight here, and the
+    /// cheapest: the header carries the version, and the target's is one SERVERPROPERTY away.
+    ///
+    /// One HEADERONLY on the full set, on the target, device-aware since #203 - so this one path
+    /// serves blob, shared path and ad-hoc alike. Best effort throughout: no verdict from silence,
+    /// because refusing on a guess would block legal restores.
     /// </summary>
-    /// <summary>
-    /// The execution console. Its batching and line handling live in ConsoleBuffer (#115) - this
-    /// screen only feeds it and shows it.
-    /// </summary>
-    public ConsoleBuffer Console { get; }
-
-    /// <summary>
-    /// Appends to the on-screen console and to the log file at the same time, so the file cannot
-    /// drift from what the user was shown.
-    /// </summary>
-    private void AppendLog(string message) => Console.Append(message);
-
-
-
-    [RelayCommand]
-    private void CopyConsole()
-        => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
-
-    /// <summary>
-    /// Writes the console to a file, with a header saying what it was (#31). The clipboard is fine
-    /// for pasting into a chat window; a change ticket or an incident write-up wants a file, and
-    /// wants it to say which server and which database on its own.
-    /// </summary>
-    [RelayCommand]
-    private void SaveConsole()
+    private async Task<CredentialPreflight> CheckVersionCompatibilityAsync(
+        ServerConnection server, Action<string> appendLog)
     {
-        if (string.IsNullOrEmpty(Console.Text))
-        {
-            SetError("There is no execution log to save yet.");
-            return;
-        }
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = "Text Files (*.txt)|*.txt|Log Files (*.log)|*.log|All Files (*.*)|*.*",
-            DefaultExt = ".txt",
-            FileName = $"ninelives_{TargetDatabaseName}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
-        };
-
-        if (dialog.ShowDialog() != true) return;
+        var files = RestoreChain?.FullSet.Files;
+        if (files == null || files.Count == 0) return CredentialPreflight.Proceed;
 
         try
         {
-            File.WriteAllText(dialog.FileName, BuildSavedLog());
-            SetStatus($"Execution log saved to {dialog.FileName}");
+            appendLog("Comparing the backup's SQL Server version with the target's...");
+
+            var devices = files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+
+            var header = await _sqlService.RestoreHeaderOnlyMultiAsync(server, devices);
+            var targetMajor = await _sqlService.GetProductMajorVersionAsync(server);
+
+            switch (VersionCompatibility.Check(header?.SoftwareVersionMajor, targetMajor))
+            {
+                case VersionVerdict.Refuse:
+                    return CredentialPreflight.Stop(
+                        VersionCompatibility.ExplainRefusal(
+                            header!.SoftwareVersionMajor!.Value, targetMajor!.Value, server.ServerName));
+
+                case VersionVerdict.UpgradeInPassing:
+                    appendLog(VersionCompatibility.ExplainUpgrade(
+                        header!.SoftwareVersionMajor!.Value, targetMajor!.Value));
+                    break;
+
+                default:
+                    appendLog("Versions are compatible.");
+                    break;
+            }
+
+            // The same header answers the certificate question (#222) - the failure that
+            // otherwise arrives as error 33111, mid-DR, with the source server possibly gone.
+            var certVerdict = await CheckCertificatesAsync(server, header, appendLog);
+            if (certVerdict is { } certificateStop) return certificateStop;
         }
         catch (Exception ex)
         {
-            // Read-only location, full disk, or a path the database name made invalid. Any of
-            // those used to take the whole app down from inside a synchronous command (#13).
-            SetError($"Could not save the execution log: {ex.Message}");
+            // The check could not run, which is not the same as the check failing. The restore
+            // itself will read the same header in a moment and report its own, better error if
+            // something is genuinely wrong with the file.
+            appendLog($"Could not compare versions: {ex.Message}");
+        }
+
+        return CredentialPreflight.Proceed;
+    }
+
+    /// <summary>
+    /// The containers this chain's files actually came from (#32).
+    ///
+    /// From the FILES rather than from what is ticked on screen: a container that was read but
+    /// contributed nothing to this chain needs no credential for this restore, and saying it does
+    /// would be a refusal nobody can act on sensibly.
+    /// </summary>
+    private IReadOnlyList<BlobContainerConfig> ChainContainers()
+    {
+        var ids = RestoreChain?.AllFiles
+            .Select(f => f.ContainerId)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Distinct()
+            .ToHashSet() ?? [];
+
+        return [.. ContainersToRead.Where(c => ids.Contains(c.Id))];
+    }
+
+    /// <summary>
+    /// Every container beyond the primary needs its own credential on the target (#32).
+    ///
+    /// <c>RESTORE ... FROM URL</c> matches a credential by URL prefix, so a chain whose full is in
+    /// one container and whose logs are in another needs a credential for BOTH - and the panel only
+    /// ever points at the primary. Without this the restore starts, reads the full, and fails on
+    /// the first log with "Cannot open backup device" - after WITH REPLACE has already dropped the
+    /// database being restored over.
+    ///
+    /// Checked, not created. Creating one needs a stored SAS this app may not have, and writing
+    /// server-side credentials nobody asked for is what #145 and #10 are both about. Refusing
+    /// before anything is touched leaves nothing to unwind.
+    /// </summary>
+    private async Task<CredentialPreflight> CheckOtherContainersHaveCredentialsAsync(
+        ServerConnection server, Action<string> appendLog)
+    {
+        var others = ChainContainers()
+            .Where(c => c.Id != SelectedContainer?.Id)
+            .ToList();
+
+        if (others.Count == 0) return CredentialPreflight.Proceed;
+
+        appendLog($"This chain spans {others.Count + 1} containers. "
+                  + $"Checking the others have credentials on {server.ServerName}...");
+
+        var missing = new List<string>();
+
+        foreach (var container in others)
+        {
+            var status = await _sqlService.CredentialExistsAsync(server, container.ContainerUrl);
+
+            if (status.CanRestoreFromUrl)
+                appendLog($"  {container.Name}: credential present.");
+            else
+                missing.Add(container.Name);
+        }
+
+        if (missing.Count == 0) return CredentialPreflight.Proceed;
+
+        return CredentialPreflight.Stop(
+            $"This restore also reads from {string.Join(" and ", missing)}, and {server.ServerName} "
+            + $"has no credential for {(missing.Count == 1 ? "it" : "them")}. RESTORE FROM URL "
+            + "matches a credential by container URL, so every container in the chain needs one. "
+            + "Select each as the container above and use Create credential, then come back - "
+            + "nothing has been changed on the server or the database.");
+    }
+
+    /// <summary>
+    /// Asks the instance the restore will run on whether it can read every file in the chain.
+    ///
+    /// On that instance and not from here, and this is the entire reason a shared path needs a
+    /// preflight of its own: this app's process can see a share the SQL Server service account
+    /// cannot, and the RESTORE runs as that account on that host. A File.Exists from here would say
+    /// yes and the restore would then fail with "Operating system error 5(Access is denied)" -
+    /// after WITH REPLACE had already dropped the database being restored over.
+    ///
+    /// The usual cause is an instance running as a local account or NT SERVICE\MSSQLSERVER, which
+    /// has no identity on the network and so cannot read ANY share. That is worth diagnosing rather
+    /// than reporting as a missing file, because it sends people to check the wrong thing.
+    /// </summary>
+    private async Task<CredentialPreflight> CheckTargetCanReadFilesAsync(
+        ServerConnection server, Action<string> appendLog)
+    {
+        var paths = RestoreChain?.AllFiles.Select(f => f.RestoreDevice).ToList() ?? [];
+        if (paths.Count == 0) return CredentialPreflight.Proceed;
+
+        appendLog($"Checking {server.ServerName} can read {paths.Count} backup file(s)...");
+
+        try
+        {
+            var checks = await _sqlService.CheckBackupFilesAsync(server, paths);
+            var failed = checks.FirstOrDefault(c => !c.CanBeRestored);
+
+            if (failed != null)
+            {
+                var refusal = failed.Explain(server.ServerName);
+                appendLog(refusal);
+                return CredentialPreflight.Stop(refusal);
+            }
+
+            appendLog($"{server.ServerName} can read all {checks.Count} file(s).");
+            return CredentialPreflight.Proceed;
+        }
+        catch (Exception ex)
+        {
+            // A check that cannot be completed is not a check that passed. Proceeding here would
+            // put the whole point of this preflight - finding out BEFORE the target is dropped -
+            // back where it was.
+            var refusal = $"Could not confirm {server.ServerName} can read the backup files: {ex.Message}";
+            appendLog(refusal);
+            return CredentialPreflight.Stop(refusal);
         }
     }
+
+
+
+
 
     /// <summary>
     /// The console plus the context needed to read it a week later. Redacted on the way out for
@@ -1924,33 +2409,11 @@ public partial class RestoreViewModel : ViewModelBase
         if (Timeline.SelectedPoint != null)
             header.AppendLine($"Point:      {Timeline.SelectedPoint.TimestampDisplay}");
         header.AppendLine($"Chain:      {RestoreChain?.Summary ?? "none"}");
-        header.AppendLine($"Outcome:    {(ExecutionComplete ? (ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
+        header.AppendLine($"Outcome:    {(Execution.ExecutionComplete ? (Execution.ExecutionSuccess ? "Succeeded" : "Did not succeed") : "Still running")}");
         header.AppendLine(new string('-', 60));
         header.AppendLine();
 
-        return LogRedactor.Redact(header + Console.Text);
+        return LogRedactor.Redact(header + Execution.Console.Text);
     }
 
-    private async Task RunArmCountdownAsync(CancellationToken ct)
-    {
-        try
-        {
-            for (int i = 5; i >= 1; i--)
-            {
-                ct.ThrowIfCancellationRequested();
-                ExecuteCountdown = i;
-                ExecuteButtonText = $"Confirm Execute ({i})";
-                await Task.Delay(1000, ct);
-            }
-
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                IsExecuteArmed = false;
-                ExecuteButtonText = "Execute on Server";
-            });
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
 }
