@@ -57,6 +57,7 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowBrowseBackups));
 
         Restore.Mode = value;
+        Backup.Mode = value;
         Settings.CurrentMode = value;
 
         // A screen that has just been hidden must not stay on display underneath a sidebar that no
