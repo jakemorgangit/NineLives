@@ -10,6 +10,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+### Added
+
+- **Run notifications to Teams, Slack, or any JSON endpoint** - a message when a backup, restore
+  or copy starts, when it finishes, and whenever there is a problem, including each database's
+  failure in a multi-database backup AT the moment it happens. Teams gets a MessageCard (works
+  with both incoming-webhook connectors and Power Automate flows), Slack gets Block Kit, and the
+  generic format is plain JSON fields. Configured in Settings with a per-endpoint test button;
+  webhook URLs never leave the machine in a configuration export (#242)
+
 ### Changed
 
 - **One console, not two.** The restore screen no longer keeps an inline copy of the run's
