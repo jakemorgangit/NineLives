@@ -640,15 +640,23 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         var ct = _cancellation.Begin();
 
+        // The run executes what was SHOWN, not what is on screen later (#280): these
+        // properties are live, the view stays editable while the halves run, and Generate
+        // stamps a fresh timestamp into the destinations - so one keystroke mid-backup used
+        // to point the restore half at a file that was never written. Same medicine as the
+        // restore screen's immutable run record: snapshot at the moment of consent.
+        var run = (Backup: BackupScript, Restore: RestoreScript,
+                   Destinations: (IReadOnlyList<string>)Destinations.ToList());
+
         try
         {
-            await RunBothHalvesAsync(ct);
+            await RunBothHalvesAsync(run.Backup, run.Restore, run.Destinations, ct);
         }
         finally
         {
             _cancellation.End();
             IsRunning = false;
-            OutcomeText = CopyOutcomeText.Describe(Outcome, Destinations.FirstOrDefault());
+            OutcomeText = CopyOutcomeText.Describe(Outcome, run.Destinations.FirstOrDefault());
 
             if (Outcome == CopyOutcome.Copied)
                 SetStatus($"Copied {SourceDatabase} to {TargetServer.ServerName} as {TargetDatabaseName}.");
@@ -657,7 +665,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
     }
 
-    private async Task RunBothHalvesAsync(CancellationToken ct)
+    private async Task RunBothHalvesAsync(
+        string backupScript, string restoreScript, IReadOnlyList<string> destinations,
+        CancellationToken ct)
     {
         // ── the source half ─────────────────────────────────────────────────────
         Append($"Backing up {SourceDatabase} on {SourceServer!.ServerName}...");
@@ -675,7 +685,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         try
         {
-            await _sql.ExecuteWithProgressAsync(SourceServer, BackupScript, Append, ct);
+            await _sql.ExecuteWithProgressAsync(SourceServer, backupScript, Append, ct);
         }
         catch (OperationCanceledException)
         {
@@ -706,7 +716,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         // SOURCE wrote the file as its service account, and the TARGET has to read it as a
         // different one. The two are routinely not the same account, and nothing before this point
         // would have noticed.
-        if (MediumIsSharedPath && !await TargetCanReadAsync(ct))
+        if (MediumIsSharedPath && !await TargetCanReadAsync(destinations, ct))
         {
             Outcome = CopyOutcome.BackupTakenRestoreFailed;
             _notifier.Notify(new RunNotification(
@@ -721,7 +731,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         try
         {
-            await _sql.ExecuteWithProgressAsync(TargetServer, RestoreScript, Append, ct);
+            await _sql.ExecuteWithProgressAsync(TargetServer, restoreScript, Append, ct);
         }
         catch (OperationCanceledException)
         {
@@ -761,13 +771,14 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// read: the backup is real and fine, and the only thing wrong is a permission on a share. So
     /// it is reported in those terms rather than as a restore that failed.
     /// </summary>
-    private async Task<bool> TargetCanReadAsync(CancellationToken ct)
+    private async Task<bool> TargetCanReadAsync(
+        IReadOnlyList<string> destinations, CancellationToken ct)
     {
         Append($"Checking {TargetServer!.ServerName} can read the backup...");
 
         try
         {
-            var checks = await _sql.CheckBackupFilesAsync(TargetServer, Destinations, ct);
+            var checks = await _sql.CheckBackupFilesAsync(TargetServer, destinations, ct);
             var failed = checks.FirstOrDefault(c => !c.CanBeRestored);
 
             if (failed == null)

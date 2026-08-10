@@ -91,6 +91,12 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- The copy runs the scripts it showed, not the ones on screen later (#280). The view stayed
+  editable while the halves ran, and a keystroke in the target-name box mid-backup
+  regenerated the restore half with fresh timestamped destinations - so the copy then
+  restored from a file that was never written, and the outcome text pointed at the wrong
+  path. The run now snapshots both scripts and the destination list at the moment of
+  consent, the same immutable-run-record medicine the restore screen takes
 - A generated script no longer survives the change that invalidated it (#278). On the backup
   and copy screens, an input change that makes regeneration impossible now CLEARS the script,
   the destinations and the run button instead of leaving the old statements displayed and

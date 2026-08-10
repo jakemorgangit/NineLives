@@ -492,6 +492,12 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// </summary>
     public int? FailOnExecuteNumber { get; set; }
 
+    /// <summary>
+    /// Runs inside each execute call, 1-based - lets a test change screen state MID-RUN, which
+    /// is how the edit-during-copy defect is reproduced deterministically (#280).
+    /// </summary>
+    public Action<int>? OnExecute { get; set; }
+
     public Task ExecuteWithProgressAsync(
         ServerConnection server, string sql, Action<string>? messageCallback = null, CancellationToken ct = default)
     {
@@ -500,6 +506,7 @@ public sealed class FakeSqlServerService : ISqlServerService
         ct.ThrowIfCancellationRequested();
         ExecutedAgainst.Add(server);
         ExecutedScripts.Add(sql);
+        OnExecute?.Invoke(ExecutedScripts.Count);
         messageCallback?.Invoke("100 percent processed.");
 
         if (FailOnExecuteNumber == ExecutedScripts.Count)
