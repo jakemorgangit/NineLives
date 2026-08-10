@@ -1022,7 +1022,17 @@
                             </Button.Content>
                         </Button>
 
-                        <!-- A different question from Check chain: that one reads headers and
+<!-- The only tested backup is a restored backup (#238): the same chain, restored
+                             to a scratch name, proven with CHECKDB, dropped. The History entry is the
+                             receipt the audit question asks for. -->
+                        <Button Content="Rehearse this restore"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding RehearseCommand}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}"
+                                ToolTip="Restores this chain to a scratch database (MyDb_rehearsal_...), runs DBCC CHECKDB to prove the data, then drops the scratch copy. The real database is never touched: fresh name, no REPLACE, files relocated to the default directories. Takes as long as a real restore plus CHECKDB." />
+
+                                                <!-- A different question from Check chain: that one reads headers and
                              checks the LSNs line up, this one reads each backup end to end and
                              checks it is intact. A truncated blob passes the first and fails this.
                              It is also the only one here that costs real time. -->

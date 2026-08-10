@@ -2117,6 +2117,100 @@ public partial class RestoreViewModel : ViewModelBase
             appendLog => PreflightAsync(server, appendLog));
     }
 
+    // ── rehearsal (#238) ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Everything a rehearsal needs to exist: a chain, a connection, and the mode that shows the
+    /// checking machinery. The rest is safety by construction inside the run itself.
+    /// </summary>
+    public bool CanRehearse =>
+        IsConnectedToServer && RestoreChain != null && !IsExecuting &&
+        AppModeCapabilities.CanVerifyAndAudit(Mode);
+
+    /// <summary>
+    /// Restores the chosen chain to a scratch name, proves it with CHECKDB, and drops it (#238) -
+    /// the only tested backup is a restored backup, and the History entry is the receipt.
+    ///
+    /// The real database is never touchable from here: the target name is generated and refused
+    /// if it exists, WITH REPLACE is never emitted, and every file MOVEs to scratch-named files
+    /// in the instance's default directories. A failure at any step stops the batch chain, so
+    /// the guarded DROP never runs and the scratch copy stands as the evidence.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRehearse))]
+    private async Task RehearseAsync()
+    {
+        var server = ConnectedServer;
+        var chain = RestoreChain;
+        if (server == null || chain == null || !CanRehearse) return;
+
+        var sourceName = Inventory.SelectedDatabaseName ?? chain.FullSet.DatabaseName ?? "database";
+        var scratch = RehearsalPlanner.ScratchName(sourceName, DateTime.Now);
+
+        IsBusy = true;
+        try
+        {
+            // Astronomically unlikely with a timestamped name - checked anyway, because the whole
+            // design promise is "cannot touch anything that exists".
+            var state = await _sqlService.GetDatabaseRecoveryStateAsync(server, scratch);
+            if (state.Exists)
+            {
+                SetError($"[{scratch}] already exists on {server.ServerName} - rehearsal refused. " +
+                         "Try again in a minute, or drop the leftover scratch copy first.");
+                return;
+            }
+
+            SetStatus($"Preparing the rehearsal of {sourceName}...");
+
+            // The real file list, so every logical file gets a scratch MOVE - device-aware, so
+            // this works for blob, shared-path and ad-hoc chains alike (#203).
+            var devices = chain.FullSet.Files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+            var files = await _sqlService.RestoreFileListOnlyAsync(server, devices);
+            if (files.Count == 0)
+            {
+                SetError("FILELISTONLY returned nothing - the rehearsal cannot relocate files it " +
+                         "cannot list.");
+                return;
+            }
+
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(server);
+            var moves = RehearsalPlanner.ScratchMoves(files, scratch, dataPath, logPath);
+
+            var restoreScript = _scriptGenerator.Generate(chain, new RestoreOptions
+            {
+                TargetDatabaseName = scratch,
+                WithReplace = false,
+                RecoveryMode = RecoveryMode.Recovery,
+                FileMoves = moves,
+                StopAt = PointInTime.Effective
+            });
+
+            var script = RehearsalPlanner.BuildScript(restoreScript, scratch);
+
+            await Execution.RunAsync(
+                new RestoreRun(
+                    server,
+                    script,
+                    scratch,
+                    sourceName,
+                    SelectedContainer?.Name,
+                    $"REHEARSAL - {chain.Summary}",
+                    Timeline.SelectedPoint?.Timestamp,
+                    "rehearsal: restore + CHECKDB + drop",
+                    RunKind.Rehearsal),
+                appendLog => PreflightAsync(server, appendLog));
+        }
+        catch (Exception ex)
+        {
+            SetError($"The rehearsal could not be prepared: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     /// <summary>
     /// The last thing checked before a restore runs, and it differs by medium.
     ///

@@ -16,6 +16,13 @@ namespace Blackcat.NineLives.ViewModels;
 /// the screen behind it stays live, and reading the target database name at the end of a run that
 /// started against a different one is the class of bug this whole seam exists to make impossible.
 /// </summary>
+/// <summary>What a run IS - a real restore, or a rehearsal of one (#238).</summary>
+public enum RunKind
+{
+    Restore = 0,
+    Rehearsal = 1
+}
+
 public sealed record RestoreRun(
     ServerConnection Server,
     string Script,
@@ -24,7 +31,8 @@ public sealed record RestoreRun(
     string? ContainerName,
     string ChainSummary,
     DateTime? RestorePointTimestamp,
-    string OptionsForLog);
+    string OptionsForLog,
+    RunKind Kind = RunKind.Restore);
 
 /// <summary>
 /// Running a restore: arming, the countdown, execution, cancellation, what to do when it fails,
@@ -232,8 +240,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // Announced AFTER the preflights: a run the preflight refused never started, and
             // "started" messages for runs that went nowhere teach people to ignore the channel.
             _notifier.Notify(new RunNotification(
-                RunPhase.Started, "Restore", run.TargetDatabase, run.Server.ServerName,
-                run.ChainSummary));
+                RunPhase.Started, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName, run.ChainSummary));
 
             await _sql.ExecuteWithProgressAsync(
                 run.Server,
@@ -272,13 +280,21 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SetStatus("Restore execution completed successfully.");
 
             _notifier.Notify(new RunNotification(
-                RunPhase.Succeeded, "Restore", run.TargetDatabase, run.Server.ServerName,
-                run.ChainSummary, DateTime.Now - startedAt));
+                RunPhase.Succeeded, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName,
+                run.Kind == RunKind.Rehearsal
+                    ? "Restored, CHECKDB passed, scratch copy dropped. The backup is proven."
+                    : run.ChainSummary,
+                DateTime.Now - startedAt));
 
             // The restore is not the end of the job (#205): nobody has verified the data yet, and
             // on a different server every SQL-auth user is orphaned. Reported while the outcome is
             // on screen, in the same shape as the recovery panel - read, then run.
-            await ReportPostRestoreAsync(run.Server, run.TargetDatabase);
+            //
+            // Not for a rehearsal (#238): its CHECKDB already ran inside the script, and the
+            // database the panel would offer statements against was deliberately dropped.
+            if (run.Kind != RunKind.Rehearsal)
+                await ReportPostRestoreAsync(run.Server, run.TargetDatabase);
         }
         catch (OperationCanceledException)
         {
@@ -299,7 +315,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SetError("Restore cancelled. The target database has been left mid-restore - see below.");
 
             _notifier.Notify(new RunNotification(
-                RunPhase.Problem, "Restore", run.TargetDatabase, run.Server.ServerName,
+                RunPhase.Problem, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName,
                 "Cancelled part-way through the chain - the target is left mid-restore.",
                 DateTime.Now - startedAt));
 
@@ -314,7 +331,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SetError($"Restore failed: {ex.Message}");
 
             _notifier.Notify(new RunNotification(
-                RunPhase.Problem, "Restore", run.TargetDatabase, run.Server.ServerName,
+                RunPhase.Problem, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName,
                 ex.Message, DateTime.Now - startedAt));
 
             // The restore has stopped part-way and the target is almost certainly not usable. Find
@@ -364,6 +382,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SourceDatabase = run.SourceDatabase,
             RestorePointTimestamp = run.RestorePointTimestamp,
             ChainSummary = run.ChainSummary,
+            Kind = run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
             Outcome = outcome,
             ErrorMessage = failure,
             Script = run.Script,
