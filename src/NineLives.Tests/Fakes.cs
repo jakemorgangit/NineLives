@@ -120,7 +120,14 @@ public sealed class FakeBlobStorageService : IBlobStorageService
     public Task<List<BackupFileInfo>> ListBackupFilesAsync(BlobContainerConfig config, CancellationToken ct = default)
         => ListBackupFilesAsync(config, null, null, ct);
 
-    public Task<List<BackupFileInfo>> ListBackupFilesAsync(
+    /// <summary>
+    /// When set, the listing waits here before returning - and honours a cancellation that
+    /// arrived while it waited, as the real paged enumeration does. Lets a test hold a load
+    /// in flight, change the world, and only then let the result try to land.
+    /// </summary>
+    public TaskCompletionSource<bool>? BeforeListReturns { get; set; }
+
+    public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
         BlobContainerConfig config, BlobListingScope? scope, IProgress<int>? progress, CancellationToken ct = default)
     {
         ListCalls++;
@@ -130,6 +137,12 @@ public sealed class FakeBlobStorageService : IBlobStorageService
         ct.ThrowIfCancellationRequested();
         if (ListThrows != null) throw ListThrows;
 
+        if (BeforeListReturns != null)
+        {
+            await BeforeListReturns.Task;
+            ct.ThrowIfCancellationRequested();
+        }
+
         var files = FilesByContainer.TryGetValue(config.Name, out var forContainer)
             ? forContainer
             : Files;
@@ -138,7 +151,7 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
         // A copy per call. The real service returns fresh objects each time, and handing the same
         // instances back twice would let one listing's ContainerId stamp overwrite another's.
-        return Task.FromResult(files.Select(Copy).ToList());
+        return files.Select(Copy).ToList();
     }
 
     /// <summary>
@@ -167,8 +180,14 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
     public ContainerSummary GetContainerSummary(List<BackupFileInfo> files) => _real.GetContainerSummary(files);
     public ContainerSummary GetSetBasedSummary(List<BackupSet> sets) => _real.GetSetBasedSummary(sets);
+    /// <summary>The time zone the last grouping was handed - pins WHOSE zone was used (#286).</summary>
+    public string? LastGroupTimeZoneId { get; private set; }
+
     public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files, string? backupServerTimeZoneId = null)
-        => _real.GroupIntoBackupSets(files, backupServerTimeZoneId);
+    {
+        LastGroupTimeZoneId = backupServerTimeZoneId;
+        return _real.GroupIntoBackupSets(files, backupServerTimeZoneId);
+    }
     public List<string> GetDiscoveredDatabases(List<BackupFileInfo> files) => _real.GetDiscoveredDatabases(files);
     public List<string> GetDiscoveredServers(List<BackupFileInfo> files) => _real.GetDiscoveredServers(files);
 }

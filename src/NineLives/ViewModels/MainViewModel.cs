@@ -512,7 +512,9 @@ public partial class MainViewModel : ViewModelBase
                 if (Restore.LoadBackupsCommand.CanExecute(null)) Restore.LoadBackupsCommand.Execute(null);
                 break;
             case Nav.BrowseBackups:
-                BlobBrowser.RefreshContainers();
+                // The full contract, not just the source lists: RefreshContainers alone left
+                // the screen to be emptied, which made F5 a wipe instead of a reload (#286).
+                if (BlobBrowser.RefreshCommand.CanExecute(null)) BlobBrowser.RefreshCommand.Execute(null);
                 break;
             case Nav.History:
                 History.Refresh();
