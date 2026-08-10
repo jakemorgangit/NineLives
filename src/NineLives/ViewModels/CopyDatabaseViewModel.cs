@@ -736,14 +736,36 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         // SOURCE wrote the file as its service account, and the TARGET has to read it as a
         // different one. The two are routinely not the same account, and nothing before this point
         // would have noticed.
-        if (MediumIsSharedPath && !await TargetCanReadAsync(destinations, ct))
+        if (MediumIsSharedPath)
         {
-            Outcome = CopyOutcome.BackupTakenRestoreFailed;
-            _notifier.Notify(new RunNotification(
-                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
-                "The backup was taken, but the target cannot read it - usually a share " +
-                "permission for the target's service account.", DateTime.Now - copyStartedAt));
-            return;
+            bool targetCanRead;
+            try
+            {
+                targetCanRead = await TargetCanReadAsync(destinations, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Stop pressed between the halves (#283). This used to fall into the
+                // readability check's catch-all and report a share-permission failure -
+                // sending the DBA to chase an ACL that is fine.
+                Append("Cancelled before the restore half began.");
+                Outcome = CopyOutcome.BackupTakenRestoreFailed;
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                    "Cancelled between the halves - the backup exists and is usable; " +
+                    "nothing was restored.", DateTime.Now - copyStartedAt));
+                return;
+            }
+
+            if (!targetCanRead)
+            {
+                Outcome = CopyOutcome.BackupTakenRestoreFailed;
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                    "The backup was taken, but the target cannot read it - usually a share " +
+                    "permission for the target's service account.", DateTime.Now - copyStartedAt));
+                return;
+            }
         }
 
         // ── the target half ─────────────────────────────────────────────────────
@@ -761,6 +783,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
                 RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
                 "Cancelled during the restore half - the backup exists, the target is mid-restore.",
                 DateTime.Now - copyStartedAt));
+            await DescribeTargetStateAsync();
             return;
         }
         catch (Exception ex)
@@ -771,10 +794,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             _notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
                 $"The restore half failed: {ex.Message}", DateTime.Now - copyStartedAt));
+            await DescribeTargetStateAsync();
             return;
         }
 
         Append("Restore complete.");
+        await ReportOrphansAsync();
         Outcome = CopyOutcome.Copied;
         _log.Info($"Copy finished: {TargetDatabaseName} on {TargetServer.ServerName}");
 
@@ -782,6 +807,55 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             RunPhase.Succeeded, "Copy", SourceDatabase!, copyRoute,
             $"Now on {TargetServer.ServerName} as {TargetDatabaseName}.",
             DateTime.Now - copyStartedAt));
+    }
+
+    /// <summary>
+    /// What state did the failed restore half leave the target in, and what gets it out (#283)
+    /// - the same questions the restore screen answers, told through this screen's console.
+    /// Best effort: the restore failure is the news, and failing to describe the aftermath
+    /// must not replace the error the user needs to read.
+    /// </summary>
+    private async Task DescribeTargetStateAsync()
+    {
+        try
+        {
+            var state = await _sql.GetDatabaseRecoveryStateAsync(TargetServer!, TargetDatabaseName!);
+            if (!state.NeedsAttention)
+            {
+                if (!state.Exists)
+                    Append($"[{TargetDatabaseName}] is not on {TargetServer!.ServerName} - " +
+                           "nothing was left behind.");
+                return;
+            }
+
+            Append(state.Explain(TargetDatabaseName!));
+            foreach (var action in state.SuggestedActions(TargetDatabaseName!))
+                Append($"  {action.Title}:  {action.Sql}");
+        }
+        catch (Exception ex)
+        {
+            Append($"Could not check the state of [{TargetDatabaseName}]: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The orphaned-user scan on the copy that WORKED (#283): a copy to a DIFFERENT server is
+    /// the canonical orphaned-login scenario - login succeeds, database access fails, and
+    /// nothing says why. One cheap query; console-only, best effort.
+    /// </summary>
+    private async Task ReportOrphansAsync()
+    {
+        try
+        {
+            var orphans = await _sql.FindOrphanedUsersAsync(TargetServer!, TargetDatabaseName!);
+            Append(PostRestoreAdvice.DescribeOrphans(orphans));
+            foreach (var orphan in orphans.Where(o => o.HasSameNamedLogin))
+                Append($"  {PostRestoreAdvice.FixOrphan(TargetDatabaseName!, orphan).Sql}");
+        }
+        catch (Exception ex)
+        {
+            Append($"Could not check [{TargetDatabaseName}] for orphaned users: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -809,6 +883,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
             Append(failed.Explain(TargetServer.ServerName));
             return false;
+        }
+        catch (OperationCanceledException)
+        {
+            // The Stop button's cancellation is the caller's story to tell (#283) - swallowing
+            // it here is how a pressed Stop got reported as a share-permission failure.
+            throw;
         }
         catch (Exception ex)
         {
