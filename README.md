@@ -4,7 +4,7 @@
 
 **Every database deserves nine lives.**
 
-Nine Lives is a modern desktop application for **backing up and restoring SQL Server databases**, to and from either Azure Blob Storage or a file share both servers can see — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 10, featuring a dark-mode UI.
+Nine Lives is a modern desktop application for **backing up, restoring, and PROVING SQL Server databases restore** — to and from Azure Blob Storage or a file share both servers can see. Point-in-time recovery with a visual timeline (down to a named marked transaction), intelligent chain detection from LSNs, striped backups, TDE awareness, restore rehearsals with receipts, an exposure dashboard, and run notifications to Teams or Slack. Built with WPF on .NET 10, featuring dark, light and high-contrast UIs.
 
 *A free tool from [Blackcat Data Solutions](https://blackcat.wales).*
 
@@ -37,6 +37,30 @@ Where a backup lives is a choice per operation, not a property of the tool:
 | **Restore** | `RESTORE ... FROM URL`  | `RESTORE ... FROM DISK`     |
 
 Neither is right in every estate. **Blob** needs no network path between the two hosts, which is often the real blocker when source and target sit in different environments. **A shared path** is faster, costs no egress, needs no SAS with write, and does not make the restore wait on an upload — where both instances can reach it.
+
+There is also a third source for the classic case neither medium covers: **a backup file somebody handed you** — a vendor's `.bak`, a file that outlived its server. Paste the path, and the file's own headers drive the same chain, options and execution as everything else.
+
+## Proof, not hope
+
+> The only tested backup is a restored backup.
+
+Everyone repeats it; almost nobody has evidence. Since v1.5, Nine Lives produces the evidence:
+
+- **Restore rehearsal** — one button restores the chosen chain to a scratch database, proves the data with `DBCC CHECKDB`, and drops the scratch copy. The History entry is the receipt an auditor asks for, and the duration is your *measured* RTO. Safety by construction: a generated name refused if it exists, never `WITH REPLACE`, every file relocated, and the cleanup runs last so any failure retains the evidence. Wrap it as an Agent job and the proof renews itself weekly.
+- **The Exposure dashboard** — *"if this server died now, everything after 14:32 is gone — up to 47m of work"*, per database, across every configured server, worst first. Never-backed-up databases, FULL recovery with no log backups, chains that stopped, servers that will not answer — silence made red. Each row shows when a rehearsal last proved it, and how long that took; each row is one click from the restore screen.
+- **Run notifications** — a message to Teams (incoming webhook or Power Automate), Slack, or any JSON endpoint when a backup, restore or copy starts, finishes, or hits a problem — including each database's failure in a multi-database backup at the moment it happens. For everyone whose focus is rightly *not* on the application while a 40-minute restore runs.
+- **The DR runbook** — one self-contained Markdown export per restore point: the chain file by file, the prerequisites in worst-day order (credential, TDE certificates by thumbprint, disk space), the exact script, what to do when it stops part-way, what finishes the job. For the change-board pack and the DR repo.
+- **The retention referee** — what a keep-N-days rule would actually do: what it keeps, what it can safely delete (with the bytes reclaimed), what must survive its own age because kept restores depend on it, and what is already broken. Report-only, deliberately: deleting stays a human act.
+
+## Safety nets
+
+Every one of these fires **before** `WITH REPLACE` drops anything:
+
+- **Disk space** — the restore's file sizes against the target's volumes, including a drive the target does not have at all.
+- **Version direction** — a newer version's backup aimed at an older server refuses by name (error 3169, caught before the run, not after the drop).
+- **TDE and encrypted backups** — the certificate question asked up front, with the missing certificate named and the export/import route spelled out, instead of error 33111 mid-DR.
+- **Chain truth** — chains build from LSNs wherever the source knows them; a differential with a missing base is not offered at all; an explicit audit verifies backups against their own headers.
+- **Readability** — shared-path and ad-hoc restores confirm the *target's service account* can actually open the files before anything runs.
 
 The whole workflow is the same either way: the same timeline, the same chain, the same options, the same script, the same execute path. Only two things ever differ — where the list of backups comes from, and how a `RESTORE` addresses a file.
 
