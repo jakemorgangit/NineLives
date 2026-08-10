@@ -12,6 +12,11 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **Export a restore runbook** - one self-contained Markdown document per restore point: the
+  chain file by file, the prerequisites in the order the worst day needs them (credential,
+  TDE/encryption certificates by thumbprint, disk space), the exact script, what to do when it
+  stops part-way, and what finishes the job. Readable with no SQL tools installed, printable for
+  the change-board pack, committable to the DR repo (#240)
 - **The Exposure dashboard: how much data would be lost, right now.** Every user database on
   every configured server, judged from its own msdb - the derived loss window ("everything after
   14:32 is gone - up to 47m of work"), traffic-lit worst-first. The silent failures are the

@@ -1845,6 +1845,50 @@ public partial class RestoreViewModel : ViewModelBase
     /// The job is created disabled and unscheduled, so what is handed over is reviewable and inert
     /// until somebody deliberately starts it.
     /// </summary>
+    /// <summary>
+    /// Writes the printed folder for the worst day (#240): the chain, the prerequisites in
+    /// order, the exact script, what to do when it fails and what finishes the job - one
+    /// self-contained Markdown file, readable on a laptop with no SQL tools installed.
+    /// </summary>
+    [RelayCommand]
+    private void ExportRunbook()
+    {
+        if (!HasScript || RestoreChain == null) return;
+
+        try
+        {
+            var runbook = RunbookBuilder.Build(new RunbookInputs
+            {
+                Chain = RestoreChain,
+                Script = GeneratedScript,
+                TargetDatabase = TargetDatabaseName,
+                ServerName = ConnectedServer?.ServerName,
+                ContainerName = SelectedContainer?.Name,
+                SourceDatabase = Inventory.SelectedDatabaseName,
+                RestorePoint = Timeline.SelectedPoint?.Timestamp,
+                FileMoves = FetchedFileMoves.ToList()
+            });
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "Export restore runbook",
+                FileName = $"runbook-{TargetDatabaseName}-{DateTime.Now:yyyyMMdd}.md",
+                Filter = "Markdown|*.md|All files|*.*",
+                DefaultExt = ".md"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            System.IO.File.WriteAllText(dialog.FileName, runbook);
+            SetStatus($"Runbook written to {dialog.FileName}. Regenerate it after any change to " +
+                      "the chain or options - a stale runbook is a wrong one that looks right.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"The runbook could not be written: {ex.Message}");
+        }
+    }
+
     [RelayCommand]
     private void CopyAsAgentJob()
     {

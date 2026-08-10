@@ -1897,6 +1897,14 @@
                                 Visibility="{Binding ShowAgentJob, Converter={StaticResource BoolToVis}}"
                                 Margin="0,0,8,0"
                                 ToolTip="Wraps this restore as a SQL Server Agent job, one step per batch. The job is created DISABLED and with no schedule - enable or start it when the restore should actually happen." />
+
+                    <!-- The printed folder for the worst day (#240). -->
+                    <Button Content="Export runbook..."
+                            Command="{Binding ExportRunbookCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,0"
+                            IsEnabled="{Binding HasScript}"
+                            ToolTip="One self-contained Markdown document: the chain file by file, the prerequisites in order (credential, certificates, disk space), the exact script, what to do when it stops part-way, and what finishes the job. For the change-board pack and the DR repo." />
                         <Button Content="{Binding Execution.ButtonText}"
                                 Style="{StaticResource DangerButton}"
                                 Command="{Binding ExecuteScriptCommand}"
