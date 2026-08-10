@@ -40,6 +40,45 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
     private readonly string _path;
     private readonly object _gate = new();
 
+    /// <summary>
+    /// Serialises writers ACROSS processes (#298). The in-process gate was correct for one
+    /// process, but the CLI made it two: a scheduled 9lives rehearse writing its receipt
+    /// while the app is open is a read-modify-write race where the last writer silently
+    /// drops the other's entry - and the receipt that vanishes is the proof the rehearsal
+    /// existed, the exact thing the exposure dashboard's Proven column reads.
+    ///
+    /// A sidecar .lock file held with FileShare.None; DeleteOnClose so a crash cannot
+    /// orphan it. Writers queue in a short retry loop. After the timeout the write proceeds
+    /// WITHOUT the lock: the overlap window is milliseconds, and losing this entry for
+    /// certain is worse than the small chance of the race the lock exists to close.
+    /// </summary>
+    private FileStream? AcquireCrossProcessLock()
+    {
+        var directory = Path.GetDirectoryName(_path)!;
+        Directory.CreateDirectory(directory);
+        var lockPath = _path + ".lock";
+
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            try
+            {
+                return new FileStream(
+                    lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
+                    bufferSize: 1, FileOptions.DeleteOnClose);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(50);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Thread.Sleep(50);
+            }
+        }
+
+        return null;
+    }
+
     public RestoreHistoryStore() : this(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "NineLives"))
@@ -65,6 +104,8 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
         {
             lock (_gate)
             {
+                using var crossProcess = AcquireCrossProcessLock();
+
                 var existing = ReadUnlocked();
 
                 // Null means the file is there and could not be read. Appending to an empty list
@@ -96,7 +137,11 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
     {
         try
         {
-            lock (_gate) { WriteUnlocked([]); }
+            lock (_gate)
+            {
+                using var crossProcess = AcquireCrossProcessLock();
+                WriteUnlocked([]);
+            }
         }
         catch
         {

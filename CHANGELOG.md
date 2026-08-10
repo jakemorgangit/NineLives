@@ -101,6 +101,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Two processes cannot lose each other's receipts** (#298). The restore history's
+  read-modify-write was serialised in-process only - and the CLI made it two processes: a
+  scheduled 9lives rehearse writing its receipt while the app is open was a race where the
+  last writer silently dropped the other's entry, and the receipt that vanished is the
+  proof the rehearsal existed - the exact thing the Proven column reads. Writers now hold a
+  sidecar lock file across the read-modify-write, queueing in a short retry loop instead of
+  clobbering; the lock deletes itself on close, so a crash cannot orphan it
 - **The CLI checks the restore fits before anything is dropped** (#297). The preflight
   ladder's fifth rung: FILELISTONLY sizes against the target's own free space, per volume,
   judged by the same check the app uses - including the volume the target does not have at
