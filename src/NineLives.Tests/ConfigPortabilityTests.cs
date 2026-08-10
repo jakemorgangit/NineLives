@@ -163,4 +163,73 @@ public class ConfigPortabilityTests
         ConfigPortability.Merge(fresh, ConfigPortability.Read(ConfigPortability.Export(Config()))!);
         Assert.Equal(AppMode.Pro, fresh.Mode);
     }
+
+    // ── imports must not destroy and must not lie (#277) ────────────────────────
+
+    /// <summary>{} used to deserialise into a plausible export and import as "Nothing new".</summary>
+    [Fact]
+    public void AnEmptyJsonObjectIsNotAnExport()
+        => Assert.Null(ConfigPortability.Read("{}"));
+
+    [Fact]
+    public void AFileFromANewerFormatIsRefusedNotMisread()
+    {
+        var json = ConfigPortability.Export(Config())
+            .Replace("\"FormatVersion\": 1", "\"FormatVersion\": 99");
+
+        Assert.Null(ConfigPortability.Read(json));
+    }
+
+    /// <summary>
+    /// The round-trip that used to destroy a credential: export on this machine, import the
+    /// same file back, and a SAS pasted into the container's URL was stripped by the merge.
+    /// The base URL still matching is what makes carrying the query safe.
+    /// </summary>
+    [Fact]
+    public void AMatchingContainerKeepsItsLocalSasQueryAcrossAnImport()
+    {
+        var local = Config();
+        local.BlobContainers[0].ContainerUrl =
+            "https://acct.blob.core.windows.net/backups?sv=2024&sig=LOCALSECRET";
+
+        var exported = ConfigPortability.Read(ConfigPortability.Export(Config()))!;
+        ConfigPortability.Merge(local, exported);
+
+        Assert.Contains("sig=LOCALSECRET", local.BlobContainers.Single().ContainerUrl);
+    }
+
+    /// <summary>A SAS is scoped to what it was issued for - a changed base cannot keep it.</summary>
+    [Fact]
+    public void AChangedBaseUrlDropsTheStaleQueryAndAsksForCredentials()
+    {
+        var local = Config();
+        local.BlobContainers[0].ContainerUrl =
+            "https://acct.blob.core.windows.net/backups?sv=2024&sig=OLD";
+
+        var incoming = Config();
+        incoming.BlobContainers[0].ContainerUrl = "https://other.blob.core.windows.net/backups";
+        var exported = ConfigPortability.Read(ConfigPortability.Export(incoming))!;
+
+        var summary = ConfigPortability.Merge(local, exported);
+
+        Assert.DoesNotContain("sig=OLD", local.BlobContainers.Single().ContainerUrl);
+        Assert.Contains(summary.NeedCredentials, n => n.Contains("backups"));
+    }
+
+    /// <summary>"Nothing new" after importing webhooks was the summary lying by omission.</summary>
+    [Fact]
+    public void WebhookCountsAppearInTheSummary()
+    {
+        var source = Config();
+        source.Webhooks.Add(new WebhookEndpoint { Id = "w1", Name = "Ops channel" });
+        var exported = ConfigPortability.Read(ConfigPortability.Export(source))!;
+
+        var fresh = new AppConfig();
+        var added = ConfigPortability.Merge(fresh, exported);
+        Assert.Equal(1, added.WebhooksAdded);
+        Assert.Contains("webhook", added.Describe());
+
+        var again = ConfigPortability.Merge(fresh, exported);
+        Assert.Equal(1, again.WebhooksUpdated);
+    }
 }

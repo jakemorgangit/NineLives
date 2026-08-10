@@ -127,27 +127,44 @@ public partial class SettingsViewModel : ViewModelBase
             var imported = ConfigPortability.Read(System.IO.File.ReadAllText(dialog.FileName));
             if (imported == null)
             {
-                SetError("That file is not a Nine Lives configuration export.");
+                SetError("That file is not a Nine Lives configuration export - or it came " +
+                         "from a newer version of the app than this one.");
                 return;
             }
 
-            var config = _credentialStore.LoadConfig();
-            if (config.LoadError != null)
-            {
-                SetError($"The local configuration could not be read, so nothing was imported: {config.LoadError}");
-                return;
-            }
+            var summary = ImportFrom(imported);
+            if (summary == null) return;
 
-            var summary = ConfigPortability.Merge(config, imported);
-            _credentialStore.SaveConfig(config);
-
-            SetStatus(summary.Describe() + " Restart screens that list servers or containers to see them.");
+            SetStatus(summary.Describe() + " Imported entries appear on the servers and " +
+                      "containers screens on their next visit.");
             _log.Info($"[config] imported from {dialog.FileName}: {summary.Describe()}");
         }
         catch (Exception ex)
         {
             SetError($"Import failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// The import minus the file dialog, so the merge-and-reload contract is testable (#277).
+    /// </summary>
+    internal ImportSummary? ImportFrom(ExportedConfig imported)
+    {
+        var config = _credentialStore.LoadConfig();
+        if (config.LoadError != null)
+        {
+            SetError($"The local configuration could not be read, so nothing was imported: {config.LoadError}");
+            return null;
+        }
+
+        var summary = ConfigPortability.Merge(config, imported);
+        _credentialStore.SaveConfig(config);
+
+        // The on-screen webhook list catches up NOW, not on restart: the next edit to any row
+        // rewrites the whole webhook list from screen state, and a stale list would erase
+        // exactly what was just imported (#277).
+        LoadWebhooks(config);
+        return summary;
     }
 
     /// <summary>True while the constructor is filling the properties from config.</summary>
