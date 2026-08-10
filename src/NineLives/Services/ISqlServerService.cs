@@ -144,6 +144,13 @@ public interface ISqlServerService
         Action<string>? messageCallback = null, CancellationToken ct = default);
 
     /// <summary>What this instance recorded backing up, from msdb (#149).</summary>
+    /// <summary>
+    /// Every user database's backup state in one round trip (#239): recovery model, and the last
+    /// full, differential and log as msdb records them. The exposure dashboard's raw material.
+    /// </summary>
+    Task<List<ExposureRow>> GetBackupExposureAsync(
+        ServerConnection server, CancellationToken ct = default);
+
     Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null, CancellationToken ct = default);
 

@@ -247,6 +247,53 @@ public class SqlServerService : ISqlServerService
     /// separately and on the target, because msdb keeps history for backups whose files were
     /// deleted, archived or pruned by a retention job long ago.
     /// </summary>
+    public async Task<List<ExposureRow>> GetBackupExposureAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        var rows = new List<ExposureRow>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 60;
+
+        // LEFT JOIN, because the databases with NO backup rows are the whole point - an INNER
+        // join would hide exactly the rows the dashboard exists to make red. database_id > 4
+        // excludes master/tempdb/model/msdb; snapshots and restoring states still list, because
+        // "it exists and is not backed up" is true of them too and the state column says why.
+        cmd.CommandText = @"
+            SELECT d.name                 AS DatabaseName,
+                   d.recovery_model_desc  AS RecoveryModel,
+                   d.state_desc           AS StateDescription,
+                   MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END) AS LastFull,
+                   MAX(CASE WHEN b.type = 'I' THEN b.backup_finish_date END) AS LastDifferential,
+                   MAX(CASE WHEN b.type = 'L' THEN b.backup_finish_date END) AS LastLog
+            FROM sys.databases AS d
+            LEFT JOIN msdb.dbo.backupset AS b
+                   ON b.database_name = d.name
+            WHERE d.database_id > 4
+              AND d.source_database_id IS NULL
+            GROUP BY d.name, d.recovery_model_desc, d.state_desc
+            ORDER BY d.name";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new ExposureRow
+            {
+                ServerName = server.ServerName,
+                DatabaseName = reader["DatabaseName"]?.ToString() ?? string.Empty,
+                RecoveryModel = reader["RecoveryModel"]?.ToString() ?? string.Empty,
+                StateDescription = reader["StateDescription"]?.ToString() ?? string.Empty,
+                LastFull = GetDateTimeFromReader(reader, "LastFull"),
+                LastDifferential = GetDateTimeFromReader(reader, "LastDifferential"),
+                LastLog = GetDateTimeFromReader(reader, "LastLog")
+            });
+        }
+
+        return rows;
+    }
+
     public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null, CancellationToken ct = default)
     {

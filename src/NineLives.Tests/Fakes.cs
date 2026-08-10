@@ -500,6 +500,19 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Paths the fake target refuses, and why. Anything not listed is readable.</summary>
     public Dictionary<string, BackupFileProblem> UnreadablePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Exposure rows per server name (#239); a server absent from the map throws.</summary>
+    public Dictionary<string, List<ExposureRow>> ExposureByServer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<List<ExposureRow>> GetBackupExposureAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (!ExposureByServer.TryGetValue(server.ServerName, out var rows))
+            throw new InvalidOperationException($"fake: {server.ServerName} is not answering");
+
+        return Task.FromResult(rows.ToList());
+    }
+
     /// <summary>What each ad-hoc file's headers say, keyed by path (#203).</summary>
     public Dictionary<string, List<BackupHistoryEntry>> FileHeaders { get; } =
         new(StringComparer.OrdinalIgnoreCase);

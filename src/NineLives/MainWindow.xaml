@@ -77,6 +77,10 @@
         <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
             <views:HistoryView />
         </DataTemplate>
+
+                <DataTemplate DataType="{x:Type vm:ExposureViewModel}">
+            <views:ExposureView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:AboutViewModel}">
             <views:AboutView />
         </DataTemplate>
@@ -306,6 +310,17 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#x1F4C2;" FontSize="15" VerticalAlignment="Center" Width="24" />
                                 <TextBlock Text="Browse Backups" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Exposure'}"
+                                     Command="{Binding NavigateToCommand}"
+                                     Visibility="{Binding ShowBrowseBackups, Converter={StaticResource BoolToVis}}"
+                                     CommandParameter="Exposure">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x1F6A6;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                                <TextBlock Text="Exposure" VerticalAlignment="Center" />
                             </StackPanel>
                         </RadioButton>
 

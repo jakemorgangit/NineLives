@@ -150,6 +150,8 @@ public partial class MainViewModel : ViewModelBase
         Nav.Backup => ShowBackup,
         Nav.CopyDatabase => ShowCopyDatabase,
         Nav.BrowseBackups => ShowBrowseBackups,
+        // The same tier as browsing: read-only insight over the estate's backups.
+        Nav.Exposure => ShowBrowseBackups,
         _ => true
     };
 
@@ -185,6 +187,7 @@ public partial class MainViewModel : ViewModelBase
     public CopyDatabaseViewModel CopyDatabase { get; }
     public RestoreViewModel Restore { get; }
     public HistoryViewModel History { get; }
+    public ExposureViewModel Exposure { get; }
     public SettingsViewModel Settings { get; }
     public AboutViewModel About { get; }
 
@@ -240,6 +243,7 @@ public partial class MainViewModel : ViewModelBase
         Backup = new BackupViewModel(_credentialStore, _sqlService, notifier: notifier);
         CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService, notifier: notifier);
         History = new HistoryViewModel(_historyStore);
+        Exposure = new ExposureViewModel(_credentialStore, _sqlService, _historyStore);
         Settings = new SettingsViewModel(_credentialStore);
         About = new AboutViewModel();
 
@@ -528,6 +532,7 @@ public partial class MainViewModel : ViewModelBase
         public const string BlobStorage = "Blob Storage";
         public const string SqlServers = "SQL Servers";
         public const string BrowseBackups = "Browse Backups";
+        public const string Exposure = "Exposure";
         public const string Backup = "Back Up";
         public const string Restore = "Restore";
         public const string CopyDatabase = "Copy Database";
@@ -536,7 +541,7 @@ public partial class MainViewModel : ViewModelBase
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Backup, Restore, CopyDatabase, History, Settings, About];
+            [BlobStorage, SqlServers, BrowseBackups, Exposure, Backup, Restore, CopyDatabase, History, Settings, About];
     }
 
     [RelayCommand]
@@ -548,6 +553,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.BlobStorage => BlobConfig,
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,
+            Nav.Exposure => Exposure,
             Nav.Backup => Backup,
             Nav.Restore => Restore,
             Nav.CopyDatabase => CopyDatabase,
