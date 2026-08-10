@@ -1,6 +1,4 @@
-﻿using System.Windows;
-using System.Windows.Interop;
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 
 namespace Blackcat.NineLives.Services;
 
@@ -25,6 +23,15 @@ internal static class EntraAuthentication
 {
     private static readonly Lock Gate = new();
     private static bool _registered;
+
+    /// <summary>
+    /// How the front end answers "which window should the prompt sit in front of?" - asked at
+    /// the moment a sign-in is needed, never captured. The WPF app assigns its window resolver
+    /// at startup; the default answers "no window", which is what a headless process truthfully
+    /// has - the broker then reports window_handle_required for Interactive instead of hanging,
+    /// while Integrated and Default carry on fine without one (#63).
+    /// </summary>
+    internal static Func<nint> PromptParent { get; set; } = static () => nint.Zero;
 
     /// <summary>
     /// Registers a provider that parents its prompt to whatever <paramref name="parentWindow"/>
@@ -66,35 +73,4 @@ internal static class EntraAuthentication
         lock (Gate) _registered = false;
     }
 
-    /// <summary>
-    /// The window the sign-in prompt should sit in front of: whichever is active, falling back to
-    /// the main window. Zero when there is no window yet, which the broker reports as the
-    /// window_handle_required error rather than crashing.
-    ///
-    /// MSAL calls this from whatever thread is acquiring the token, and WPF's window collection can
-    /// only be touched on the UI thread - hence the marshalling. It is a direct call when already
-    /// on the dispatcher, so the common case costs nothing.
-    /// </summary>
-    internal static nint ActiveWindowHandle()
-    {
-        var app = Application.Current;
-        if (app == null) return nint.Zero;
-
-        return app.Dispatcher.CheckAccess()
-            ? ResolveOnUiThread()
-            : app.Dispatcher.Invoke(ResolveOnUiThread);
-    }
-
-    private static nint ResolveOnUiThread()
-    {
-        var app = Application.Current;
-        if (app == null) return nint.Zero;
-
-        // Active first: with a modal open, a prompt parented to the main window sits BEHIND it and
-        // looks like a hang.
-        var window = app.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-            ?? app.MainWindow;
-
-        return window == null ? nint.Zero : new WindowInteropHelper(window).Handle;
-    }
 }

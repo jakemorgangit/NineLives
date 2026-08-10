@@ -1,7 +1,7 @@
-<UserControl x:Class="Blackcat.NineLives.Views.ExposureView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.ExposureView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:svc="clr-namespace:Blackcat.NineLives.Services">
+             xmlns:svc="clr-namespace:Blackcat.NineLives.Services;assembly=NineLives.Core">
 
     <!-- The exposure dashboard (#239): how much data would be lost, right now, worst first.
          Read-only by design - the screen that answers "how exposed am I?" must not also be a

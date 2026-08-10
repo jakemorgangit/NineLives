@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The engine with no UI attached (#63): discovery, chain building, script generation,
+         preflights, SQL execution, credential storage. net10.0-windows because credential
+         storage talks to the Windows Credential Manager - but deliberately NO UseWPF, so a
+         console front end can reference this without dragging a desktop framework behind it.
+         Anything that needs a Window or a Dispatcher belongs in the front ends, not here. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>NineLives.Core</AssemblyName>
+    <RootNamespace>Blackcat.NineLives</RootNamespace>
+    <Version>1.5.0</Version>
+    <Product>Nine Lives</Product>
+    <Authors>Jake Morgan</Authors>
+    <Company>Blackcat Data Solutions Ltd</Company>
+    <Copyright>Copyright (c) 2026 Jake Morgan</Copyright>
+    <Description>Nine Lives engine - backup discovery, chain building, restore script generation and execution.</Description>
+    <!-- Same reason as the app project: publish restore resolves the win-x64 graph against the
+         lock file instead of quietly rewriting it. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <!-- ObservableObject on a handful of models. The MVVM toolkit has no UI-framework
+         dependency of its own, so it does not compromise the no-WPF rule above. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient.Extensions.Azure" Version="7.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The WPF app composes with internal service members, and the tests always could.
+         Both front ends are this library's only intended callers, so the boundary that
+         matters is the assembly edge, not the access modifier. -->
+    <InternalsVisibleTo Include="NineLives" />
+    <InternalsVisibleTo Include="NineLives.Tests" />
+    <InternalsVisibleTo Include="NineLives.IntegrationTests" />
+  </ItemGroup>
+
+</Project>
