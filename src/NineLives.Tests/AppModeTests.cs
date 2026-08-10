@@ -23,13 +23,19 @@ public class AppModeTests
 
     /// <summary>Basic is what the app originally was: restore, from a container.</summary>
     [Fact]
-    public void BasicIsTheOriginalApp()
+    public void BasicIsTheRestoreScreenWithEveryOption()
     {
         Assert.False(AppModeCapabilities.CanBackUp(AppMode.Basic));
         Assert.False(AppModeCapabilities.CanUseSharedPath(AppMode.Basic));
         Assert.False(AppModeCapabilities.CanCopyBetweenServers(AppMode.Basic));
         Assert.False(AppModeCapabilities.CanVerifyAndAudit(AppMode.Basic));
-        Assert.False(AppModeCapabilities.CanRestoreToAPointInTime(AppMode.Basic));
+
+        // The ruling that reshaped this test: modes narrow which SCREENS exist, never which
+        // restore options do. WITH MOVE is needed most on restores to a DIFFERENT server - the
+        // Basic scenario itself - and hiding it made Basic restores fail with directory errors.
+        Assert.True(AppModeCapabilities.CanRestoreToAPointInTime(AppMode.Basic));
+        Assert.True(AppModeCapabilities.CanRelocateFiles(AppMode.Basic));
+        Assert.True(AppModeCapabilities.CanUseAdvancedRestoreOptions(AppMode.Basic));
     }
 
     [Fact]
