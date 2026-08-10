@@ -101,6 +101,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Every run closes on the channel** (#295). A failed SINGLE-database backup now sends the
+  close of the run with its duration, exactly as the multi-database path always has - the
+  channel used to hear "Started" and then silence forever, which teaches people the channel
+  is unreliable. The copy's six-notification lifecycle is pinned end to end: started,
+  succeeded with duration, each half's failure named, and a refused copy never claims to
+  have started
 - **Names cannot smuggle statements past the person reading the script** (#294). sysname
   permits control characters and line breaks, and the restore target is free text - a name
   containing a newline used to terminate the generated script's header comment and hand the

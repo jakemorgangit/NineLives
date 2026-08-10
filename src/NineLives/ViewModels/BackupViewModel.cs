@@ -617,6 +617,13 @@ public partial class BackupViewModel : ViewModelBase
                 // One database keeps the direct report - "1 of 1" and "the others finished" would
                 // be the multi-run's phrasing wearing the wrong trousers.
                 SetError($"The backup did not complete: {lastFailureMessage}");
+
+                // The close of the run, with its duration, exactly as the multi path sends it
+                // (#295). The per-database problem already fired as it happened; without this
+                // the channel heard the run start and never heard it END.
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Backup", run[0].Database, Server.ServerName,
+                    $"The backup did not complete: {lastFailureMessage}", elapsed));
             }
             else
             {
