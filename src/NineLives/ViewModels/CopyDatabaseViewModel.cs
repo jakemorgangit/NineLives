@@ -720,6 +720,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             IsRunning = false;
             OutcomeText = CopyOutcomeText.Describe(Outcome, run.Destinations.FirstOrDefault());
 
+            // Told, not interrupted (#289): same taskbar flash as the restore and the backup
+            // when the copy finishes while the app is behind another window.
+            WindowAttention.FlashIfInBackground();
+
             if (Outcome == CopyOutcome.Copied)
                 SetStatus($"Copied {SourceDatabase} to {TargetServer.ServerName} as {TargetDatabaseName}.");
             else if (Outcome != CopyOutcome.NotStarted)
