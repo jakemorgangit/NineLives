@@ -58,7 +58,14 @@ public class EntraSignInThreadTests(WpfFixture wpf) : IDisposable
             // this and the wait times out, which is the failure being tested for.
             if (first)
             {
-                UiRespondedDuringSignIn = UiPumped.Wait(TimeSpan.FromSeconds(5));
+                // The wait is semantically unbounded - "until the UI thread pumps" - and the
+                // bound exists only so a genuine deadlock fails instead of hanging the suite. On
+                // a healthy run the probe fires in milliseconds; the only way the bound is
+                // reached legitimately is the deadlock under test. Five seconds turned out to be
+                // reachable by a contended CI runner too (#262), which made the gate flaky - and
+                // a flaky gate teaches people to rerun without reading. Thirty is still a fast
+                // failure for a real deadlock and far beyond any runner stall seen.
+                UiRespondedDuringSignIn = UiPumped.Wait(TimeSpan.FromSeconds(30));
                 stopAfterFirst.Cancel();
             }
 
