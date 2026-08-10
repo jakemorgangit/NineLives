@@ -91,6 +91,11 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- "All user databases" means it now (#279): the database list the backup screen ticks and
+  the copy screen offers is filtered to online user databases - no more tempdb (which cannot
+  be backed up at all), no master offered for copying, no RESTORING or OFFLINE databases
+  guaranteeing a red summary on the one-click patch-night path. Same predicate the exposure
+  query always used, now in one more place it belonged
 - Every long operation owns its cancellation (#281). Three screens shared one token across
   operations that can overlap, so the List databases button silently cancelled a running
   backup or copy, and a finished operation disposed the survivor's token - the container-wide
