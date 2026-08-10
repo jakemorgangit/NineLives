@@ -500,6 +500,15 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Paths the fake target refuses, and why. Anything not listed is readable.</summary>
     public Dictionary<string, BackupFileProblem> UnreadablePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Marks per database name (#243).</summary>
+    public Dictionary<string, List<LogMark>> LogMarksByDatabase { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<List<LogMark>> GetLogMarksAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+        => Task.FromResult(
+            LogMarksByDatabase.TryGetValue(database, out var marks) ? marks.ToList() : []);
+
     /// <summary>Percent values the polling execute reports before completing (#user CHECKDB feedback).</summary>
     public List<double> PollPercents { get; set; } = [50];
 

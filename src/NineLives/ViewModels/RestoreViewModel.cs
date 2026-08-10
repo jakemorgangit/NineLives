@@ -849,9 +849,15 @@ public partial class RestoreViewModel : ViewModelBase
         // The STOPAT target feeds the generated script, so any change to it has to reach the
         // script (#115 seam 3). Skipped while SetWindow is rewriting several properties at once -
         // the caller updates once at the end rather than four times through a half-built state.
-        PointInTime.PropertyChanged += (_, _) =>
+        PointInTime.PropertyChanged += (_, e) =>
         {
             if (PointInTime.IsUpdating) return;
+
+            // The other half of the mark/time exclusivity (#243): turning the clock-time target
+            // on clears the mark, exactly as choosing a mark turned the clock off.
+            if (e.PropertyName == nameof(PointInTimeViewModel.Use) && PointInTime.Use)
+                SelectedLogMark = null;
+
             Steps.Options.Invalidate();
             UpdateRestoreSummary();
         };
@@ -1789,6 +1795,10 @@ public partial class RestoreViewModel : ViewModelBase
         var blocked =
             chain == null
                 ? "Select a restore point above and the script appears here."
+            : SelectedLogMark != null && chain.LogSets.Count == 0
+                ? "The marked transaction lives in a log backup, and this chain has none - " +
+                  "restoring it would silently replay everything the mark was meant to stop. " +
+                  "Pick a restore point with log backups, or clear the mark."
             : string.IsNullOrWhiteSpace(TargetDatabaseName)
                 ? "Enter a target database name and the script appears here."
             : PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null
@@ -1811,6 +1821,8 @@ public partial class RestoreViewModel : ViewModelBase
         // ended up, and where the files land - each worked out somewhere that knows about the
         // chain or the server.
         var options = Options.Build(TargetDatabaseName, PointInTime.Effective, BuildFileMoves());
+        options.StopAtMark = SelectedLogMark?.Name;
+        options.StopBeforeMark = StopBeforeMark;
 
         GeneratedScript = _scriptGenerator.Generate(chain!, options);
         HasScript = true;
@@ -2155,6 +2167,64 @@ public partial class RestoreViewModel : ViewModelBase
                 $"WITH REPLACE={Options.WithReplace}, recovery={Options.RecoveryMode}, " +
                 $"stopAt={PointInTime.Effective?.ToString("s") ?? "none"}"),
             appendLog => PreflightAsync(server, appendLog));
+    }
+
+    // ── marked transactions (#243) ──────────────────────────────────────────────
+
+    /// <summary>The marks msdb knows for the selected database, newest first.</summary>
+    [ObservableProperty]
+    private System.Collections.ObjectModel.ObservableCollection<LogMark> _logMarks = [];
+
+    /// <summary>
+    /// The mark to stop at. Choosing one turns the time-based target OFF - a mark and a clock
+    /// time are the same mechanism aimed differently, and two targets on one restore is a script
+    /// that stops where the READER did not decide.
+    /// </summary>
+    [ObservableProperty]
+    private LogMark? _selectedLogMark;
+
+    partial void OnSelectedLogMarkChanged(LogMark? value)
+    {
+        if (value != null && PointInTime.Use) PointInTime.Use = false;
+        UpdateRestoreSummary();
+    }
+
+    /// <summary>STOPBEFOREMARK by default: "undo the deployment" is what the mark was planted for.</summary>
+    [ObservableProperty]
+    private bool _stopBeforeMark = true;
+
+    partial void OnStopBeforeMarkChanged(bool value) => UpdateRestoreSummary();
+
+    /// <summary>
+    /// Reads logmarkhistory for the selected database (#243). On demand, because most databases
+    /// have no marks and the combo should not cost a round trip to prove it.
+    /// </summary>
+    [RelayCommand]
+    private async Task LoadLogMarksAsync()
+    {
+        var server = ConnectedServer;
+        var database = Inventory.SelectedDatabaseName;
+
+        if (server == null || string.IsNullOrWhiteSpace(database))
+        {
+            SetError("Connect to a server and choose a database first - the marks live in its msdb.");
+            return;
+        }
+
+        try
+        {
+            var marks = await _sqlService.GetLogMarksAsync(server, database!);
+            LogMarks = new System.Collections.ObjectModel.ObservableCollection<LogMark>(marks);
+
+            SetStatus(marks.Count == 0
+                ? $"No marked transactions recorded for {database}. Marks are planted with " +
+                  "BEGIN TRANSACTION ... WITH MARK before risky work."
+                : $"{marks.Count} marked transaction(s) found for {database}.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not read the marks: {ex.Message}");
+        }
     }
 
     // ── retention (#241) ────────────────────────────────────────────────────────

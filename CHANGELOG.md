@@ -51,6 +51,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Changed
 
+- **Restore to a marked transaction (STOPATMARK/STOPBEFOREMARK)** - the sharper point-in-time
+  tool: plant a mark with BEGIN TRANSACTION ... WITH MARK before risky work, and afterwards the
+  restore target is the transaction itself, found from msdb's own logmarkhistory, not a clock
+  time reconstructed from chat messages. Stops just BEFORE the mark by default (the deployment
+  never happened); the mark and the clock time are mutually exclusive on screen, and a mark with
+  no log chain refuses with the reason (#243)
 - **The retention referee: what would an age-based deletion rule actually do?** Report-only,
   over the loaded backups: what a keep-N-days rule keeps, what it can safely delete (with the
   bytes reclaimed), what must survive its own age because kept restores depend on it - the base

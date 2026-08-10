@@ -1691,6 +1691,28 @@
                                         </Style>
                                     </TextBlock.Style>
                                 </TextBlock>
+
+                                <!-- The sharper point-in-time tool (#243): restore to a NAMED
+                                     transaction planted before risky work, not a clock time
+                                     reconstructed afterwards. -->
+                                <TextBlock Text="MARKED TRANSACTIONS" Style="{StaticResource LabelText}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                                    <Button Content="Find marks"
+                                            Command="{Binding LoadLogMarksCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Padding="10,5" Margin="0,0,8,0"
+                                            ToolTip="Reads msdb.dbo.logmarkhistory on the connected server for the selected database. Marks are planted with BEGIN TRANSACTION ... WITH MARK before risky work." />
+                                    <ComboBox ItemsSource="{Binding LogMarks}"
+                                              SelectedItem="{Binding SelectedLogMark}"
+                                              DisplayMemberPath="Display"
+                                              Style="{StaticResource DarkComboBox}"
+                                              MinWidth="320" />
+                                </StackPanel>
+                                <CheckBox Content="Stop just BEFORE the mark (the deployment never happened)"
+                                          IsChecked="{Binding StopBeforeMark}"
+                                          Style="{StaticResource DarkCheckBox}"
+                                          Margin="0,0,0,16"
+                                          ToolTip="STOPBEFOREMARK recovers to the instant before the marked transaction began - undoing it. Unticked, STOPATMARK includes the marked transaction itself." />
                             </StackPanel>
 
                             <TextBlock Text="STATS PERCENT" Style="{StaticResource LabelText}" />

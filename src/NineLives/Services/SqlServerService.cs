@@ -1389,6 +1389,34 @@ public class SqlServerService : ISqlServerService
             reader["OwnerName"] as string);
     }
 
+    public async Task<List<LogMark>> GetLogMarksAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        var marks = new List<LogMark>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"
+            SELECT TOP 50 mark_name, description, mark_time
+            FROM msdb.dbo.logmarkhistory
+            WHERE database_name = @database
+            ORDER BY mark_time DESC";
+        cmd.Parameters.AddWithValue("@database", database);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            marks.Add(new LogMark(
+                reader["mark_name"]?.ToString() ?? string.Empty,
+                reader["description"] as string,
+                GetDateTimeFromReader(reader, "mark_time") ?? DateTime.MinValue));
+        }
+
+        return marks;
+    }
+
     public async Task ExecuteWithPercentPollingAsync(
         ServerConnection server, string sql, IProgress<double>? percent = null,
         CancellationToken ct = default)
