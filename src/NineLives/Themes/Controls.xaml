@@ -578,10 +578,15 @@
                                       Focusable="False"
                                       ClickMode="Press"
                                       IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
+                        <!-- ContentTemplateSelector forwarded like the stock template does:
+                             DisplayMemberPath works through the items control's template
+                             SELECTOR, so a closed box without it falls back to ToString()
+                             while the open list shows the right member (#269). -->
                         <ContentPresenter x:Name="ContentSite"
                                           IsHitTestVisible="False"
                                           Content="{TemplateBinding SelectionBoxItem}"
                                           ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
                                           ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                           Margin="12,8,28,8"
                                           VerticalAlignment="Center"

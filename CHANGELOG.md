@@ -35,6 +35,17 @@ more detail on the user-facing changes; this file is the short history.
   belongs to the rehearsal alone; a failed run still retains its scratch copy as evidence until
   the next run has been seen (#259)
 
+### Fixed
+
+- Find marks now asks the SOURCE instance's msdb on shared-path and ad-hoc restores - marked
+  transactions are recorded where they ran, so asking the target answered "no marks" when the
+  truth was "wrong catalogue". Blob still asks the connected server, which is the only
+  catalogue that medium has (#268)
+- A combo's closed box now shows the same text as its open list. The custom combo template
+  dropped the template selector that DisplayMemberPath works through, so combos bound to
+  objects rendered their raw type name once closed - the marked-transactions picker being the
+  first to show it in daylight
+
 ## [1.5.0] - 2026-08-10
 
 ### Added
