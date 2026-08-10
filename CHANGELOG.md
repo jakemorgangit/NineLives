@@ -101,6 +101,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The connected server survives its own lifecycle honestly** (#291). Deleting it is
+  recognised by identity, not by a caption captured at connect time - renaming the connected
+  server and then deleting it used to leave the status bar claiming "Connected to X" while
+  the restore screen still held the deleted object as its target. Editing the connected
+  entry's address, auth mode, login, encryption or password now DROPS the connection with an
+  explanation - the old settings were proven, the new ones are not - while a rename alone
+  keeps it. And renaming onto an existing name is refused, exactly as creating one is, so no
+  two entries can share a caption
 - **The busy strip and the taskbar flash treat all three runs alike** (#289). The global
   busy indicator - which exists so "is it doing something?" does not depend on scroll
   position - now lights for backups and copies, the two longest-running screens it ignored.

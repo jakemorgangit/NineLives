@@ -314,10 +314,27 @@ public partial class ServerManagerViewModel : ViewModelBase
         {
             server = SelectedServer!;
 
+            // The same rule the new path enforces, excluding self (#291): a rename onto an
+            // existing name was allowed, after which every display-text comparison anywhere
+            // in the app was ambiguous between the two.
+            if (Servers.Any(x => !ReferenceEquals(x, server) &&
+                                 x.Name.Equals(EditName, StringComparison.OrdinalIgnoreCase)))
+            {
+                SetError("A server with this name already exists.");
+                return;
+            }
+
             // Snapshot before mutating, so a refused save can put the model back rather than
             // leaving it showing values that were never persisted.
             restore = Snapshot(server);
         }
+
+        // What the connection was proven against, before the mutation below (#291). A changed
+        // address, auth mode, login, or encryption setting makes the proven connection a claim
+        // about settings that no longer exist.
+        var editingConnected = !IsNew && _connected != null && ReferenceEquals(server, _connected);
+        var beforeConnection = (server.ServerName, server.AuthMode, server.Username,
+                                server.Encrypt, server.TrustServerCertificate);
 
         server.Name = EditName;
         // Mutate in place - assigning a new collection raises no notification on a POCO, so the
@@ -377,8 +394,46 @@ public partial class ServerManagerViewModel : ViewModelBase
 
         SelectedServer = server;
         IsEditing = false;
+
+        if (editingConnected)
+        {
+            var afterConnection = (server.ServerName, server.AuthMode, server.Username,
+                                   server.Encrypt, server.TrustServerCertificate);
+            var passwordReplaced = server.AuthMode.NeedsStoredPassword() &&
+                                   !string.IsNullOrWhiteSpace(EditPassword);
+
+            if (beforeConnection != afterConnection || passwordReplaced)
+            {
+                // The old settings were proven; these are not. Silently repointing the SAME
+                // object at untested settings left every screen reporting a connection nobody
+                // had tested (#291).
+                IsConnected = false;
+                MarkConnected(null);
+                ConnectedServerDisplay = string.Empty;
+                ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
+                {
+                    IsConnected = false,
+                    ServerName = string.Empty
+                });
+                SetStatus("Server saved. Its connection settings changed, so the previous " +
+                          "connection no longer stands - connect again to prove the new ones.");
+                return;
+            }
+
+            // A rename keeps the proven connection - the caption follows the new name.
+            ConnectedServerDisplay = server.DisplayText;
+        }
+
         SetStatus("Server saved successfully.");
     }
+
+    /// <summary>
+    /// The delete confirmation, injectable because the dialog is the one step a headless
+    /// test cannot click - the lifecycle around it is what needs the pins (#291).
+    /// </summary>
+    internal Func<string, bool> ConfirmDelete { get; set; } = message =>
+        MessageBox.Show(message, "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
 
     [RelayCommand]
     private void Delete()
@@ -391,12 +446,9 @@ public partial class ServerManagerViewModel : ViewModelBase
             ? "\n\nIts stored SQL password will be deleted from Windows Credential Manager."
             : string.Empty;
 
-        var confirm = MessageBox.Show(
+        if (!ConfirmDelete(
             $"Remove the server \"{SelectedServer.Name}\"?{secretNote}\n\n" +
-            "Nothing on the SQL Server itself is affected.",
-            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-
-        if (confirm != MessageBoxResult.Yes) return;
+            "Nothing on the SQL Server itself is affected.")) return;
 
         // Take the server out of the config first and only destroy its stored password once that
         // write has landed. The other order threw the password away and then, if the save failed,
@@ -416,7 +468,11 @@ public partial class ServerManagerViewModel : ViewModelBase
         if (removed.AuthMode.NeedsStoredPassword())
             _credentialStore.DeleteSecret(removed.CredentialKey);
 
-        if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
+        // By identity, not caption (#291): Save mutates Name in place, so after a rename the
+        // display text never matched - the status bar kept saying "Connected to X" while the
+        // restore screen still held the deleted object as its target.
+        if (IsConnected && _connected != null &&
+            (ReferenceEquals(removed, _connected) || removed.Id == _connected.Id))
         {
             IsConnected = false;
             MarkConnected(null);
@@ -528,11 +584,15 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
     }
 
+    /// <summary>The entry the live connection was proven against - by object, not by caption.</summary>
+    private ServerConnection? _connected;
+
     /// <summary>
     /// Exactly one server carries the connected marker, so the list can never show two.
     /// </summary>
     private void MarkConnected(ServerConnection? connected)
     {
+        _connected = connected;
         foreach (var server in Servers)
             server.IsConnectedServer = ReferenceEquals(server, connected);
     }
