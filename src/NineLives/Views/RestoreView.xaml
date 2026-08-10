@@ -348,9 +348,14 @@
 
                         <StackPanel Grid.Column="1" Margin="0,0,12,0">
                             <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                            <!-- Greyed until an instance is chosen (#319): a pre-filled list
+                                 mixed every server's databases, and picking from it meant
+                                 guessing whose history the timeline would show. -->
                             <ComboBox ItemsSource="{Binding Inventory.DiscoveredDatabases}"
                                       SelectedItem="{Binding Inventory.SelectedDatabaseName}"
-                                      Style="{StaticResource DarkComboBox}" />
+                                      IsEnabled="{Binding Inventory.HasDatabaseChoices}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      ToolTip="Waits for the server/instance on the left - the databases listed are the chosen instance's own." />
                         </StackPanel>
                     </Grid>
 
@@ -614,7 +619,44 @@
                 </StackPanel>
             </Border>
 
-            <!-- Step 2: Restore Point Selection -->
+            <!-- Step 2: Target instance (#318). WHERE the restore runs used to be implicit -
+                 whatever the SQL Servers screen last connected to - and a missing answer only
+                 surfaced as an execute-time error. Now it is a step: pre-answered (and still
+                 changeable) when a connection already exists, asked outright when it does not. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding Steps.Target.IsVisible, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Target}" />
+                    <StackPanel Visibility="{Binding Steps.Target.IsExpanded, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="The instance the restore will run ON. Connecting on the SQL Servers screen answers this for you; otherwise pick a saved server here."
+                                   Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,12" />
+                        <TextBlock Text="TARGET SQL SERVER" Style="{StaticResource LabelText}" />
+                        <ComboBox ItemsSource="{Binding TargetServers}"
+                                  SelectedItem="{Binding SelectedTargetServer}"
+                                  Style="{StaticResource DarkComboBox}"
+                                  MinWidth="320"
+                                  MaxWidth="420"
+                                  HorizontalAlignment="Left"
+                                  ToolTip="The instance the restore runs on. The credential check below the script and the preflights all test this server.">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0"
+                                   Visibility="{Binding HasNoTargetServers, Converter={StaticResource BoolToVis}}">
+                            <Run Text="No saved servers yet. Add one on the SQL Servers screen and it will appear here." />
+                        </TextBlock>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Step 3: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Steps.Point.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
@@ -1385,7 +1427,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- Step 3: Restore Options -->
+            <!-- Step 4: Restore Options -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Steps.Options.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
@@ -1932,7 +1974,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- Step 4: Generate + Execute -->
+            <!-- Step 5: Generate + Execute -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Steps.Execute.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>

@@ -246,6 +246,34 @@ public partial class RestoreViewModel : ViewModelBase
     private ServerConnection? _connectedServer;
 
     /// <summary>
+    /// The saved servers the target step offers (#318) - the same list the Servers screen
+    /// manages, refreshed with the rest of the config-derived lists.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ServerConnection> _targetServers = [];
+
+    /// <summary>
+    /// The chosen target. Setting it here or connecting on the Servers screen are the same
+    /// decision made in two places, so each reflects into the other - the preflights, the
+    /// execution and the credential panel all keep reading ConnectedServer, which both feed.
+    /// </summary>
+    [ObservableProperty]
+    private ServerConnection? _selectedTargetServer;
+
+    /// <summary>The step's empty-list hint - no saved servers means the combo has nothing to offer.</summary>
+    public bool HasNoTargetServers => TargetServers.Count == 0;
+
+    partial void OnTargetServersChanged(ObservableCollection<ServerConnection> value) =>
+        OnPropertyChanged(nameof(HasNoTargetServers));
+
+    partial void OnSelectedTargetServerChanged(ServerConnection? value)
+    {
+        Steps.Target.Report(value != null, value?.Name ?? string.Empty);
+        if (value != null && !ReferenceEquals(_connectedServer, value))
+            ConnectedServer = value;
+    }
+
+    /// <summary>
     /// The instance every server call on this screen runs against.
     ///
     /// Setting it re-checks the credential, rather than leaving the caller to remember: forgetting
@@ -260,6 +288,13 @@ public partial class RestoreViewModel : ViewModelBase
             _connectedServer = value;
             Credential.Server = value;
             _ = Credential.RefreshAsync();
+
+            // The Servers screen's connect answers the target step too (#318): already
+            // connected means the question is pre-answered, visibly and changeably.
+            if (!ReferenceEquals(SelectedTargetServer, value))
+                SelectedTargetServer = value == null
+                    ? null
+                    : TargetServers.FirstOrDefault(s => s.Id == value.Id) ?? value;
         }
     }
 
@@ -838,6 +873,18 @@ public partial class RestoreViewModel : ViewModelBase
                 RefreshSteps();
         };
 
+        // A chosen target survives source backtracking (#318). Changing the source withdraws
+        // every later step's completion - the container cannot know the target is an independent
+        // decision - so when the step is offered again this puts the answer still sitting in the
+        // combo straight back, and the user lands on the restore point, not on a question they
+        // already answered.
+        Steps.Target.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RestoreStep.IsVisible) &&
+                Steps.Target.IsVisible && !Steps.Target.IsComplete && SelectedTargetServer != null)
+                Steps.Target.Report(true, SelectedTargetServer.Name);
+        };
+
         // The selection now lives on the timeline (#115 seam 2), which is a different object, so
         // this is a subscription rather than a generated partial hook.
         Timeline.PropertyChanged += (_, e) =>
@@ -888,6 +935,17 @@ public partial class RestoreViewModel : ViewModelBase
         SourceServers = new ObservableCollection<ServerConnection>(config.Servers);
         if (previousSource != null)
             SourceServer = SourceServers.FirstOrDefault(x => x.Id == previousSource);
+
+        // The target step offers the same saved list (#318). A selection survives the rebuild by
+        // identity; a target chosen on the Servers screen before this screen ever loaded is
+        // re-pointed at the config instance so the combo shows it as the answer.
+        var previousTarget = SelectedTargetServer?.Id ?? ConnectedServer?.Id;
+        TargetServers = new ObservableCollection<ServerConnection>(config.Servers);
+        if (previousTarget != null)
+        {
+            var match = TargetServers.FirstOrDefault(x => x.Id == previousTarget);
+            if (match != null) SelectedTargetServer = match;
+        }
 
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
