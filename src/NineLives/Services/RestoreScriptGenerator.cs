@@ -135,7 +135,13 @@ public class RestoreScriptGenerator
         //
         // The UI bounds the target to within the SELECTED log's window, so earlier logs in the
         // chain end before it and are applied in full - no gap is introduced.
-        if (usePit && options.StopAt.HasValue)
+        // A mark and a time are the same mechanism with a different target, so the mark rides
+        // in exactly STOPAT's position and inherits its repeat-on-every-log rule (#243). The
+        // mark wins when both are somehow set - it is the more deliberate of the two.
+        if (!string.IsNullOrWhiteSpace(options.StopAtMark))
+            sb.AppendLine($"         {(options.StopBeforeMark ? "STOPBEFOREMARK" : "STOPATMARK")} = " +
+                          $"N'{TSql.EscapeLiteral(options.StopAtMark)}',");
+        else if (usePit && options.StopAt.HasValue)
             sb.AppendLine($"         STOPAT = '{options.StopAt.Value:yyyy-MM-ddTHH:mm:ss}',");
 
         sb.AppendLine($"         {recoveryClause},");

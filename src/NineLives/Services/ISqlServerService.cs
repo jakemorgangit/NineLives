@@ -65,6 +65,13 @@ public interface ISqlServerService
     Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default);
 
     /// <summary>
+    /// The marked transactions msdb knows for a database (#243) - name, description and when.
+    /// Almost no tooling reads logmarkhistory, which is why almost nobody uses marks.
+    /// </summary>
+    Task<List<LogMark>> GetLogMarksAsync(
+        ServerConnection server, string database, CancellationToken ct = default);
+
+    /// <summary>
     /// Runs one statement while a second connection polls sys.dm_exec_requests for its
     /// percent_complete - which DBCC CHECKDB and RESTORE both report. Best effort: no
     /// VIEW SERVER STATE means no percentage, and the statement still runs.

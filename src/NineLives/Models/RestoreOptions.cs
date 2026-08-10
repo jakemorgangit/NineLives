@@ -18,6 +18,21 @@ public class RestoreOptions
     public bool DisconnectSessions { get; set; } = true;
     public int StatsPercent { get; set; } = 10;
     public DateTime? StopAt { get; set; }
+
+    /// <summary>
+    /// The named transaction to stop at, instead of a clock time (#243). For planned risky work
+    /// that began with BEGIN TRANSACTION ... WITH MARK, the mark IS the target - not a time
+    /// reconstructed afterwards from chat messages and guilt. Mutually exclusive with StopAt;
+    /// the mark wins if both are somehow set.
+    /// </summary>
+    public string? StopAtMark { get; set; }
+
+    /// <summary>
+    /// STOPBEFOREMARK instead of STOPATMARK: recover to just BEFORE the marked transaction -
+    /// the deployment never happened - rather than to just after it began. Before is the
+    /// default, because "undo the deployment" is what the mark was planted for.
+    /// </summary>
+    public bool StopBeforeMark { get; set; } = true;
     public bool KeepReplication { get; set; }
     public bool EnableBroker { get; set; }
     public bool NewBroker { get; set; }
