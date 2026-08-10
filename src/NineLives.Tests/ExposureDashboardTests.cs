@@ -166,12 +166,19 @@ public class ExposureDashboardTests
             TargetDatabase = "MyDb_rehearsal_20260809_2100",
             Kind = "Rehearsal",
             Outcome = RestoreOutcome.Succeeded,
+            StartedAt = new DateTime(2026, 8, 9, 21, 16, 0),
             CompletedAt = new DateTime(2026, 8, 9, 21, 30, 0)
         });
 
         await vm.RefreshCommand.ExecuteAsync(null);
 
-        Assert.Equal(new DateTime(2026, 8, 9, 21, 30, 0), vm.Rows.Single().LastProven);
+        var proven = vm.Rows.Single();
+        Assert.Equal(new DateTime(2026, 8, 9, 21, 30, 0), proven.LastProven);
+
+        // The receipt measured the real restore-plus-CHECKDB time - the RTO number that
+        // conversations otherwise invent - and the cell says it.
+        Assert.Equal(TimeSpan.FromMinutes(14), proven.MeasuredRestore);
+        Assert.Contains("took 14m", proven.ProvenDisplay);
     }
 
     /// <summary>

@@ -175,13 +175,21 @@ public partial class ExposureViewModel : ViewModelBase
                             e.SourceDatabase != null)
                 .GroupBy(e => (e.ServerName, e.SourceDatabase!),
                     StringTupleComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.Max(e => e.CompletedAt),
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(e => e.CompletedAt).First(),
                     StringTupleComparer.OrdinalIgnoreCase);
 
             foreach (var row in rows)
             {
-                if (proofs.TryGetValue((row.ServerName, row.DatabaseName), out var provenAt))
-                    row.LastProven = provenAt;
+                if (!proofs.TryGetValue((row.ServerName, row.DatabaseName), out var proof)) continue;
+
+                row.LastProven = proof.CompletedAt;
+
+                // The receipt measured the real restore-plus-CHECKDB time - the RTO number that
+                // conversations otherwise invent.
+                if (proof.CompletedAt > proof.StartedAt)
+                    row.MeasuredRestore = proof.CompletedAt - proof.StartedAt;
             }
         }
         catch
