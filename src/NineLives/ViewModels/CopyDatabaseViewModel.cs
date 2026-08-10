@@ -700,6 +700,27 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         var copyStartedAt = DateTime.Now;
         var copyRoute = $"{SourceServer.ServerName} \u2192 {TargetServer.ServerName}";
 
+        // Blob needs the credential on BOTH ends (#284) - the source to write, the target to
+        // read - and both are checkable before the source is read at full speed. Refusing
+        // here beats Msg 3201 after the backup half ran.
+        if (MediumIsBlob && Container != null)
+        {
+            foreach (var end in new[] { SourceServer, TargetServer })
+            {
+                var preflight = await BlobCredentialPreflight.EnsureAsync(
+                    _store, _sql, _log, Container, end, Append);
+                if (!preflight.CanProceed)
+                {
+                    Outcome = CopyOutcome.NotStarted;
+                    _notifier.Notify(new RunNotification(
+                        RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                        preflight.Refusal));
+                    SetError(preflight.Refusal!);
+                    return;
+                }
+            }
+        }
+
         _notifier.Notify(new RunNotification(
             RunPhase.Started, "Copy", SourceDatabase!, copyRoute, $"as {TargetDatabaseName}"));
 

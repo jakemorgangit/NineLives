@@ -506,6 +506,26 @@ public partial class BackupViewModel : ViewModelBase
         var ct = _runCancellation.Begin();
         var started = DateTime.Now;
 
+        // BACKUP TO URL needs the credential on THIS instance (#284) - asked before the first
+        // statement, because Msg 3201 after the arm-and-confirm is the class of late refusal
+        // this screen exists to kill.
+        if (MediumIsBlob && Container != null)
+        {
+            var preflight = await BlobCredentialPreflight.EnsureAsync(
+                _store, _sql, _log, Container, Server, Append);
+            if (!preflight.CanProceed)
+            {
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Backup",
+                    MultiSelect ? $"{PickedDatabases.Count} database(s)" : SelectedDatabase ?? "backup",
+                    Server.ServerName, preflight.Refusal));
+                SetError(preflight.Refusal!);
+                _runCancellation.End();
+                IsRunning = false;
+                return;
+            }
+        }
+
         // Database-at-a-time, deliberately (#208): a failure on the sixth database names the
         // sixth database and the rest still run - the patch-night semantics. One database is the
         // one-item case of the same loop.
