@@ -263,6 +263,14 @@ public partial class MainViewModel : ViewModelBase
             _ = Restore.AcceptHandoffAsync(handoff);
         };
 
+        // The dashboard's rows get the same one-click path (#202's pattern): a red row's
+        // distance to being acted on is one click, or the screen is guilt rather than a to-do.
+        Exposure.RestoreRequested += handoff =>
+        {
+            NavigateTo(Nav.Restore);
+            _ = Restore.AcceptHandoffAsync(handoff);
+        };
+
         // Changing the mode from Settings has to move the app immediately - a sidebar that still
         // offers a screen the new mode hides, or a screen left on display underneath one that no
         // longer lists it, is worse than not offering the setting (#176).

@@ -108,6 +108,15 @@
                                     <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
                                                Text="{Binding LastProven, StringFormat='Proven: {0:MM-dd HH:mm}', TargetNullValue='Proven: never rehearsed'}"
                                                ToolTip="When a rehearsal (#238) last PROVED this database restores. Arithmetic says what could restore; only a rehearsal says it does." />
+
+                                    <Button Content="Open in Restore"
+                                            Command="{Binding DataContext.RestoreFromRowCommand,
+                                                      RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Padding="10,4" Margin="0,6,0,0"
+                                            HorizontalAlignment="Left"
+                                            ToolTip="Jumps to the Restore screen with this server's backup history loaded and this database selected - one click from seeing to acting. From there, Rehearse proves it." />
                                 </StackPanel>
                             </Grid>
                         </Border>
