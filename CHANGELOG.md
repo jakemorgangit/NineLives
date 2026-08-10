@@ -12,6 +12,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **Restore rehearsal: prove a backup restores, with a receipt.** One button restores the chosen
+  chain to a scratch database, proves the data with DBCC CHECKDB, and drops the scratch copy -
+  the History entry records what was proven, when, and how long it took. Safety by construction:
+  a generated name refused if it exists, never WITH REPLACE, every file relocated to
+  scratch-named files, and the guarded DROP runs last so any failure retains the scratch copy as
+  evidence. Rehearsals announce themselves through the run notifications (#238)
 - **Run notifications to Teams, Slack, or any JSON endpoint** - a message when a backup, restore
   or copy starts, when it finishes, and whenever there is a problem, including each database's
   failure in a multi-database backup AT the moment it happens. Teams gets a MessageCard (works
