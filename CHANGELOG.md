@@ -85,6 +85,14 @@ more detail on the user-facing changes; this file is the short history.
   the screen loaded - the worst case being import, then Connect, and every imported server
   gone. Both screens also catch up with outside additions on navigation, and only deletions
   made on the screen itself delete (#276)
+- Imports no longer destroy and no longer lie (#277): the webhook list refreshes immediately
+  after an import, so the next row edit cannot erase what was just imported; a matching
+  container keeps the SAS pasted into its local URL (the same protection webhook URLs always
+  had), unless the base URL changed - a SAS is scoped to what it was issued for; the summary
+  counts webhooks; and a file without a format version - an empty JSON object used to import
+  as "Nothing new" - is refused as not an export, as is a file from a newer format. Theme and
+  the update/log preferences are no longer exported, because the import never applied them -
+  a file must not carry what the import discards
 - Find marks now asks the SOURCE instance's msdb on shared-path and ad-hoc restores - marked
   transactions are recorded where they ran, so asking the target answered "no marks" when the
   truth was "wrong catalogue". Blob still asks the connected server, which is the only
