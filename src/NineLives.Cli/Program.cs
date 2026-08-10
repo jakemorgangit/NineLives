@@ -15,6 +15,16 @@ internal static class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
 
+        // Ctrl+C cancels the run rather than killing the story (#296): the execution verbs
+        // turn the token into a Cancelled receipt, a Problem notification and exit 130. Cancel
+        // is marked handled so the runtime does not tear the process down mid-sentence.
+        using var interrupt = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            interrupt.Cancel();
+        };
+
         if (rawArgs.Length == 0
             || rawArgs[0] is "--help" or "-h" or "-?" or "/?")
         {
@@ -94,8 +104,8 @@ internal static class Program
                 "script" => await ScriptVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "validate" => await ValidateVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "exposure" => await ExposureVerb.RunAsync(args, services, Console.Out, Console.Error),
-                "restore" => await RestoreVerb.RunAsync(args, services, Console.Out, Console.Error),
-                "rehearse" => await RehearseVerb.RunAsync(args, services, Console.Out, Console.Error),
+                "restore" => await RestoreVerb.RunAsync(args, services, Console.Out, Console.Error, interrupt.Token),
+                "rehearse" => await RehearseVerb.RunAsync(args, services, Console.Out, Console.Error, interrupt.Token),
                 _ => ExitCodes.Usage
             };
         }

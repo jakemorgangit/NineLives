@@ -76,7 +76,8 @@ internal static class RestoreVerb
             "0   restored - or, without --execute, generated with nothing refused",
             "2   refused by a preflight, or the restore itself failed",
             "3   the source or target could not be reached at all",
-            "64  usage"
+            "64  usage",
+            "130 cancelled with Ctrl+C - the receipt says Cancelled, the channel was told"
         ],
         Examples:
         [
@@ -89,7 +90,8 @@ internal static class RestoreVerb
         ]);
 
     public static async Task<int> RunAsync(
-        CliArguments args, CliServices services, TextWriter output, TextWriter errors)
+        CliArguments args, CliServices services, TextWriter output, TextWriter errors,
+        CancellationToken ct = default)
     {
         if (args.Get("database") == null || args.Get("target") == null)
         {
@@ -195,13 +197,13 @@ internal static class RestoreVerb
 
         return await ExecuteAsync(
             services, target, script, sourceDatabase, targetDatabase, point, stopAt,
-            chain, args.Get("container"), errors);
+            chain, args.Get("container"), errors, ct);
     }
 
     private static async Task<int> ExecuteAsync(
         CliServices services, ServerConnection target, string script, string sourceDatabase,
         string targetDatabase, RestorePoint point, DateTime? stopAt, BackupChain chain,
-        string? containerName, TextWriter errors)
+        string? containerName, TextWriter errors, CancellationToken ct)
     {
         var startedAt = DateTime.Now;
         var log = new System.Text.StringBuilder();
@@ -219,7 +221,7 @@ internal static class RestoreVerb
 
         try
         {
-            await services.Sql.ExecuteWithProgressAsync(target, script, Progress);
+            await services.Sql.ExecuteWithProgressAsync(target, script, Progress, ct);
 
             var completedAt = DateTime.Now;
             services.History.Append(new RestoreHistoryEntry
@@ -243,7 +245,39 @@ internal static class RestoreVerb
 
             errors.WriteLine($"Done: '{targetDatabase}' restored on {target.ServerName} in " +
                              $"{(completedAt - startedAt).TotalSeconds:0}s.");
+            await services.Notifier.DrainAsync(NotificationDrain);
             return ExitCodes.Ok;
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C mid-restore (#296): the process is ending, but the story must not - the
+            // receipt says Cancelled, the channel hears about it, and the exit code is the
+            // conventional 128+SIGINT so a wrapping script can tell interruption from failure.
+            var completedAt = DateTime.Now;
+            log.AppendLine("Cancelled from the terminal.");
+            services.History.Append(new RestoreHistoryEntry
+            {
+                StartedAt = startedAt,
+                CompletedAt = completedAt,
+                ServerName = target.ServerName,
+                TargetDatabase = targetDatabase,
+                SourceDatabase = sourceDatabase,
+                ContainerName = containerName,
+                RestorePointTimestamp = stopAt ?? point.Timestamp,
+                ChainSummary = point.TypeDisplay,
+                Outcome = RestoreOutcome.Cancelled,
+                ErrorMessage = "Cancelled from the terminal.",
+                Script = script,
+                Log = log.ToString()
+            });
+            services.Notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Restore", sourceDatabase, target.ServerName,
+                "Cancelled from the terminal - check the target database's state before " +
+                "retrying.", completedAt - startedAt));
+            await services.Notifier.DrainAsync(NotificationDrain);
+            errors.WriteLine("CANCELLED. The history entry records how far it got - check " +
+                             "the target database's state before retrying.");
+            return ExitCodes.Interrupted;
         }
         catch (Exception ex)
         {
@@ -272,7 +306,11 @@ internal static class RestoreVerb
             errors.WriteLine($"FAILED: {ex.Message}");
             errors.WriteLine("The history entry records how far it got - check the target " +
                              "database's state before retrying.");
+            await services.Notifier.DrainAsync(NotificationDrain);
             return ExitCodes.Failed;
         }
     }
+
+    /// <summary>Long enough for a slow webhook, short enough that a dead one cannot hold the exit.</summary>
+    private static readonly TimeSpan NotificationDrain = TimeSpan.FromSeconds(10);
 }

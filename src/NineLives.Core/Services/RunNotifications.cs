@@ -38,6 +38,15 @@ public sealed record RunNotification(
 public interface IRunNotifier
 {
     void Notify(RunNotification notification);
+
+    /// <summary>
+    /// Waits - bounded - for notifications already handed to Notify to actually deliver (#296).
+    /// Notify stays fire-and-forget, which is right in the app where the process lives on; a
+    /// short-lived process must drain before exiting or the completion events - the ones the
+    /// 3am story exists for - die with it. The timeout keeps a dead endpoint from holding the
+    /// process hostage: this waits for deliveries, it does not guarantee them.
+    /// </summary>
+    Task DrainAsync(TimeSpan timeout);
 }
 
 /// <summary>For screens constructed without notification wiring - the tests, mostly.</summary>
@@ -45,4 +54,5 @@ public sealed class NullRunNotifier : IRunNotifier
 {
     public static readonly NullRunNotifier Instance = new();
     public void Notify(RunNotification notification) { }
+    public Task DrainAsync(TimeSpan timeout) => Task.CompletedTask;
 }

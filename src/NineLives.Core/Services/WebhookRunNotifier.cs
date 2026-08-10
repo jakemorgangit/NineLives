@@ -20,6 +20,14 @@ public sealed class WebhookRunNotifier : IRunNotifier
     private readonly OperationLog _log;
     private readonly WebhookNotifier _notifier;
 
+    /// <summary>
+    /// Deliveries still in flight, so a short-lived process can drain them before exiting
+    /// (#296). Completed entries are pruned as new ones start; the lock guards the list, not
+    /// the deliveries.
+    /// </summary>
+    private readonly List<Task> _inFlight = [];
+    private readonly Lock _gate = new();
+
     public WebhookRunNotifier(ICredentialStore store, OperationLog log, WebhookNotifier? notifier = null)
     {
         _store = store;
@@ -43,7 +51,7 @@ public sealed class WebhookRunNotifier : IRunNotifier
 
         if (endpoints.Count == 0) return;
 
-        _ = Task.Run(async () =>
+        var delivery = Task.Run(async () =>
         {
             try
             {
@@ -54,5 +62,26 @@ public sealed class WebhookRunNotifier : IRunNotifier
                 _log.Warn($"[notify] delivery failed: {ex.Message}");
             }
         });
+
+        lock (_gate)
+        {
+            _inFlight.RemoveAll(t => t.IsCompleted);
+            _inFlight.Add(delivery);
+        }
+    }
+
+    public async Task DrainAsync(TimeSpan timeout)
+    {
+        Task[] pending;
+        lock (_gate)
+        {
+            pending = _inFlight.Where(t => !t.IsCompleted).ToArray();
+        }
+
+        if (pending.Length == 0) return;
+
+        // WhenAny against the clock: a dead endpoint must not hold a scheduled task's process
+        // open. The deliveries own their exceptions (logged above), so WhenAll cannot throw.
+        await Task.WhenAny(Task.WhenAll(pending), Task.Delay(timeout));
     }
 }

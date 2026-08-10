@@ -30,4 +30,10 @@ internal static class ExitCodes
 
     /// <summary>Bad invocation: unknown verb, missing option, malformed time. BSD's EX_USAGE.</summary>
     public const int Usage = 64;
+
+    /// <summary>
+    /// Ctrl+C. The Unix convention (128+SIGINT), so a wrapping script tells an operator's
+    /// interruption from a failure - they call for different next steps (#296).
+    /// </summary>
+    public const int Interrupted = 130;
 }
