@@ -8,7 +8,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.5.0] - 2026-08-10
 
 ### Added
 
@@ -30,6 +30,18 @@ more detail on the user-facing changes; this file is the short history.
   a generated name refused if it exists, never WITH REPLACE, every file relocated to
   scratch-named files, and the guarded DROP runs last so any failure retains the scratch copy as
   evidence. Rehearsals announce themselves through the run notifications (#238)
+- **Restore to a marked transaction (STOPATMARK/STOPBEFOREMARK)** - the sharper point-in-time
+  tool: plant a mark with BEGIN TRANSACTION ... WITH MARK before risky work, and afterwards the
+  restore target is the transaction itself, found from msdb's own logmarkhistory, not a clock
+  time reconstructed from chat messages. Stops just BEFORE the mark by default (the deployment
+  never happened); the mark and the clock time are mutually exclusive on screen, and a mark with
+  no log chain refuses with the reason (#243)
+- **The retention referee: what would an age-based deletion rule actually do?** Report-only,
+  over the loaded backups: what a keep-N-days rule keeps, what it can safely delete (with the
+  bytes reclaimed), what must survive its own age because kept restores depend on it - the base
+  full outside the window, the newest differential under it, and the bridge logs that carry the
+  chain to the window's edge - and what is already broken. Before a lifecycle rule finds out via
+  error 3136 (#241)
 - **Run notifications to Teams, Slack, or any JSON endpoint** - a message when a backup, restore
   or copy starts, when it finishes, and whenever there is a problem, including each database's
   failure in a multi-database backup AT the moment it happens. Teams gets a MessageCard (works
@@ -51,18 +63,8 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Changed
 
-- **Restore to a marked transaction (STOPATMARK/STOPBEFOREMARK)** - the sharper point-in-time
-  tool: plant a mark with BEGIN TRANSACTION ... WITH MARK before risky work, and afterwards the
-  restore target is the transaction itself, found from msdb's own logmarkhistory, not a clock
-  time reconstructed from chat messages. Stops just BEFORE the mark by default (the deployment
-  never happened); the mark and the clock time are mutually exclusive on screen, and a mark with
-  no log chain refuses with the reason (#243)
-- **The retention referee: what would an age-based deletion rule actually do?** Report-only,
-  over the loaded backups: what a keep-N-days rule keeps, what it can safely delete (with the
-  bytes reclaimed), what must survive its own age because kept restores depend on it - the base
-  full outside the window, the newest differential under it, and the bridge logs that carry the
-  chain to the window's edge - and what is already broken. Before a lifecycle rule finds out via
-  error 3136 (#241)
+
+
 - **The Generate Script button is gone** - the script has built itself live on every option
   change for a while, which made the button a ritual with no effect. When the pane is empty it
   now says why, passively, where the script would be ("Enter a target database name and the
