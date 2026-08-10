@@ -101,6 +101,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The CLI checks the restore fits before anything is dropped** (#297). The preflight
+  ladder's fifth rung: FILELISTONLY sizes against the target's own free space, per volume,
+  judged by the same check the app uses - including the volume the target does not have at
+  all, which is a MOVE problem rather than a free-space problem. Space is evidence, so
+  --force downgrades the refusal to a loud warning; the shortfall is named either way. The
+  CLI is the front end most often aimed at a freshly provisioned VM with small disks, and a
+  restore that runs out of disk fails AFTER WITH REPLACE has dropped what it was replacing
 - **Every run closes on the channel** (#295). A failed SINGLE-database backup now sends the
   close of the run with its duration, exactly as the multi-database path always has - the
   channel used to hear "Started" and then silence forever, which teaches people the channel
