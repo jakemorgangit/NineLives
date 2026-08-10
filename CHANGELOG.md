@@ -79,6 +79,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- The SQL Servers and Blob Storage screens now MERGE their saves into the configuration on
+  disk instead of replacing it wholesale. Importing a config (or adding entries with the CLI)
+  and then saving anything on either screen used to silently delete everything added since
+  the screen loaded - the worst case being import, then Connect, and every imported server
+  gone. Both screens also catch up with outside additions on navigation, and only deletions
+  made on the screen itself delete (#276)
 - Find marks now asks the SOURCE instance's msdb on shared-path and ad-hoc restores - marked
   transactions are recorded where they ran, so asking the target answered "no marks" when the
   truth was "wrong catalogue". Blob still asks the connected server, which is the only

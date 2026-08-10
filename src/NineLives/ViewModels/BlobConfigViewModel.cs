@@ -175,6 +175,31 @@ public partial class BlobConfigViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Containers deleted on THIS screen since the last successful save (#276) - the merge in
+    /// SaveContainers would otherwise resurrect them from the fresh config.
+    /// </summary>
+    private readonly HashSet<string> _pendingDeletes = [];
+
+    /// <summary>
+    /// Catches the list up with entries added elsewhere - Settings' import, the CLI's
+    /// add-container - since this screen loaded (#276). Called on navigation, like every other
+    /// screen's refresh; skipped mid-edit so the open editor's selection survives.
+    /// </summary>
+    public void RefreshFromConfig()
+    {
+        if (IsEditing || IsBusy) return;
+
+        var config = _credentialStore.LoadConfig();
+        var onDisk = config.BlobContainers.Select(c => c.Id).ToHashSet();
+        if (onDisk.SetEquals(Containers.Select(c => c.Id))) return;
+
+        var selectedId = SelectedContainer?.Id;
+        LoadContainers();
+        SelectedContainer = Containers.FirstOrDefault(c => c.Id == selectedId)
+                            ?? Containers.FirstOrDefault();
+    }
+
+    /// <summary>
     /// Persists the container list. Returns false and sets the error when the write failed, so
     /// callers do not go on to report success - the config save used to swallow everything and
     /// the UI said "saved successfully" whether or not anything reached the disk.
@@ -184,8 +209,28 @@ public partial class BlobConfigViewModel : ViewModelBase
         try
         {
             var config = _credentialStore.LoadConfig();
-            config.BlobContainers = [.. Containers];
+
+            // Merge, never replace (#276). Assigning [.. Containers] deleted anything the
+            // import or the CLI's add-container had written since this screen loaded. Known
+            // entries come from this screen, edits included; unseen entries are kept; only
+            // the ledger's local deletions are dropped.
+            var mine = Containers.Where(c => c.Id != null).ToDictionary(c => c.Id!);
+            var merged = new List<BlobContainerConfig>();
+            foreach (var existing in config.BlobContainers)
+            {
+                if (existing.Id != null && _pendingDeletes.Contains(existing.Id)) continue;
+                merged.Add(existing.Id != null && mine.TryGetValue(existing.Id, out var ours)
+                    ? ours
+                    : existing);
+            }
+
+            foreach (var container in Containers)
+                if (!merged.Any(m => ReferenceEquals(m, container)))
+                    merged.Add(container);
+
+            config.BlobContainers = merged;
             _credentialStore.SaveConfig(config);
+            _pendingDeletes.Clear();
             return true;
         }
         catch (Exception ex)
@@ -637,9 +682,11 @@ public partial class BlobConfigViewModel : ViewModelBase
         // container in config.json pointing at a credential that no longer exists.
         var removed = SelectedContainer;
         Containers.Remove(removed);
+        if (removed.Id != null) _pendingDeletes.Add(removed.Id);
         if (!SaveContainers())
         {
             Containers.Add(removed);
+            if (removed.Id != null) _pendingDeletes.Remove(removed.Id);
             SelectedContainer = removed;
             return;
         }

@@ -595,6 +595,13 @@ public partial class MainViewModel : ViewModelBase
             // Re-read on every visit: a restore run since the last look must be here, and the
             // history is written by the Restore screen rather than by this one.
             History.Refresh();
+        else if (viewName is Nav.SqlServers)
+            // Catches up with servers the import or the CLI's add-server wrote since the last
+            // visit (#276) - without this, the screen's next save wrote its stale list over them.
+            ServerManager.RefreshFromConfig();
+        else if (viewName is Nav.BlobStorage)
+            // Same for containers, same reason (#276).
+            BlobConfig.RefreshFromConfig();
     }
 }
 
