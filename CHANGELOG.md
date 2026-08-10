@@ -25,6 +25,10 @@ more detail on the user-facing changes; this file is the short history.
   generic format is plain JSON fields. Configured in Settings with a per-endpoint test button;
   webhook URLs never leave the machine in a configuration export (#242)
 
+- The backup metadata inspector now states which SQL Server version took the backup and what
+  protects it - TDE, backup encryption, or "Not encrypted", because absence is information too
+  (#222)
+
 ### Changed
 
 - **One console, not two.** The restore screen no longer keeps an inline copy of the run's

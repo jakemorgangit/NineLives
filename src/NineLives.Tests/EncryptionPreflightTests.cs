@@ -63,6 +63,18 @@ public class EncryptionPreflightTests
         Assert.Contains("encrypted", both);
     }
 
+    /// <summary>
+    /// Part 4 of #222: what protects a backup is said where the header is shown, and absence is
+    /// stated too - "not encrypted" is information, not the lack of it.
+    /// </summary>
+    [Fact]
+    public void TheMetadataInspectorNamesTheProtection()
+    {
+        Assert.Contains("TDE-encrypted",
+            EncryptionGuidance.DescribeProtection(Thumbprint, null));
+        Assert.Empty(EncryptionGuidance.DescribeProtection(null, null));
+    }
+
     // ── the restore preflight ───────────────────────────────────────────────────
 
     private static ServerConnection Server(string name = "SRV02") =>
