@@ -8,6 +8,17 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Added
+
+- **Scheduled rehearsals: the proof renews itself.** The rehearsal wrapped as a disabled,
+  unscheduled Agent job - add a weekly schedule and every run restores the chain to a stable
+  scratch name, proves it with CHECKDB, and drops it, receipts accumulating in the job history.
+  Each run clears its own previous leftover first, which is safe precisely because the name
+  belongs to the rehearsal alone; a failed run still retains its scratch copy as evidence until
+  the next run has been seen (#259)
+
 ## [1.5.0] - 2026-08-10
 
 ### Added

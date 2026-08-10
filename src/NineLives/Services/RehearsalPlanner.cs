@@ -27,6 +27,42 @@ public static class RehearsalPlanner
         $"{database}_rehearsal_{now:yyyyMMdd_HHmm}";
 
     /// <summary>
+    /// The STABLE scratch name a scheduled rehearsal reuses (#259). A job runs the same text
+    /// weekly, so a timestamp baked in at generation would collide with its own leftovers on the
+    /// second run - instead the name is fixed, and each run begins by clearing its own previous
+    /// evidence, which by then has been seen in the job history.
+    /// </summary>
+    public static string ScheduledScratchName(string database) =>
+        $"{database}_rehearsal_scheduled";
+
+    /// <summary>
+    /// The scheduled form of the rehearsal script (#259): identical to the clicked form, plus a
+    /// guarded PRE-drop of the previous run's leftover - safe precisely because the name is the
+    /// rehearsal's own, never a real database's.
+    /// </summary>
+    public static string BuildScheduledScript(string restoreScript, string scratchName)
+    {
+        var quoted = TSql.QuoteName(scratchName);
+        var literal = TSql.EscapeLiteral(scratchName);
+
+        var preamble =
+$@"-- ============================================================
+-- Scheduled rehearsal. This name belongs to the rehearsal alone,
+-- so clearing last week's leftover - retained if last week FAILED,
+-- and visible in this job's history - is safe by construction.
+-- ============================================================
+IF DB_ID('{literal}') IS NOT NULL
+BEGIN
+    ALTER DATABASE {quoted} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE {quoted};
+END
+GO
+
+";
+        return preamble + BuildScript(restoreScript, scratchName);
+    }
+
+    /// <summary>
     /// Every logical file, relocated to a scratch-named file in the default directories. The
     /// rehearsal must be incapable of writing where the real database lives.
     /// </summary>
