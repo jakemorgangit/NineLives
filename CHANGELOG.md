@@ -62,6 +62,13 @@ more detail on the user-facing changes; this file is the short history.
   the per-verb exit codes, worked examples. The reference lives inside the exe, where it
   cannot drift from the parser it describes, and a test holds each page to the verb's own
   option list - an undocumented flag or a documented-but-refused one both fail the build
+- **Provisioning from nothing**: `add-server` and `add-container` create the configuration
+  from the command line on a machine the app has never run on - a Terraform clone, a DR
+  bubble. Validated by default (the server asked its version, the container asked to answer
+  with exactly the recorded SAS - a SAS looks right for weeks after it expired), converging
+  on re-run, secrets in the Credential Manager and never echoed, with
+  `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` as the script-friendly alternative to flags.
+  A point-in-time clone is three chained lines whose only variable is the moment
 
 ### Changed
 

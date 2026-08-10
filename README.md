@@ -97,6 +97,14 @@ Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-b
 
 The full reference ships inside the exe: `9lives help` for the overview, `9lives help restore` (or any verb) for the complete page - every option, the behaviour, the exit codes, examples. Documentation that lives in the binary cannot drift from it, and a test holds every page to the parser's own option lists.
 
+**Provisioning from nothing.** A freshly built VM - a Terraform clone, a DR bubble, a scratch environment - has no app config and nobody at a screen. `add-server` and `add-container` create the configuration from the command line, validated by default: the server is asked its version (address, credentials and permissions proven in one round trip), the container is asked to answer with exactly the recorded SAS - because a SAS is a string that looks right for weeks after it expired. Both converge on re-run, secrets can ride in `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` instead of flags, and a chained script stops at the first failed validation. The whole template is three lines, and the only variable is the moment:
+
+```
+9lives add-server --name target --address localhost --user svc_restore --password %SQL_PW%
+9lives add-container --name backups --url https://acct.blob.core.windows.net/sqlbackups --sas %SAS%
+9lives restore --container backups --database Sales --target target --at "%POINT_IN_TIME%" --execute
+```
+
 Two verbs execute, and they are built out of refusals: `restore` and `rehearse` run nothing without `--execute`; overwriting an existing database is said with `--with-replace`, its own flag that `--force` cannot substitute for; and the same preflights the app fires - file readability, version direction (error 3169), the TDE certificate (error 33111) - refuse before anything is dropped, `--force` being the deliberate override for evidence only. Executed runs land in the app's History and notify the same webhooks, so `9lives rehearse --execute` on a schedule is nightly proof with receipts - no SQL Agent required.
 
 ## Features
