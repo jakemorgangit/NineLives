@@ -66,17 +66,19 @@ public static class AppModeCapabilities
     public static bool CanUseSharedPath(AppMode mode) => mode >= AppMode.Standard;
 
     /// <summary>
-    /// Restoring to a moment rather than to a backup.
-    ///
-    /// Standard, and it was the hardest call here. Point-in-time is close to the heart of what this
-    /// app is for, but it is also the thing somebody restoring last night's full will never touch -
-    /// and STOPAT with nothing selected is a checkbox that does nothing, which is its own kind of
-    /// clutter.
+    /// Restoring to a moment rather than to a backup. Every mode: the modes narrow which SCREENS
+    /// exist, not which restore options do - a Basic user restoring to just-before-the-mistake is
+    /// the app's founding scenario, not an advanced one.
     /// </summary>
-    public static bool CanRestoreToAPointInTime(AppMode mode) => mode >= AppMode.Standard;
+    public static bool CanRestoreToAPointInTime(AppMode mode) => true;
 
-    /// <summary>Relocating the database files. Needed whenever the target's layout differs.</summary>
-    public static bool CanRelocateFiles(AppMode mode) => mode >= AppMode.Standard;
+    /// <summary>
+    /// Relocating the database files (WITH MOVE). Every mode, decisively: it is needed whenever
+    /// the target's layout differs from the source's, which is most restores onto a DIFFERENT
+    /// server - the Basic scenario itself. Hiding it made Basic restores fail with directory
+    /// errors that Standard would not have hit.
+    /// </summary>
+    public static bool CanRelocateFiles(AppMode mode) => true;
 
     /// <summary>
     /// The chain checks, the VERIFYONLY pass and the header audit.
@@ -99,8 +101,12 @@ public static class AppModeCapabilities
     /// <summary>Handing a restore over as an Agent job.</summary>
     public static bool CanScriptAsAgentJob(AppMode mode) => mode >= AppMode.Pro;
 
-    /// <summary>The less common RESTORE options - KEEP_REPLICATION, the broker flags, CHECKSUM.</summary>
-    public static bool CanUseAdvancedRestoreOptions(AppMode mode) => mode >= AppMode.Pro;
+    /// <summary>
+    /// The less common RESTORE options - KEEP_REPLICATION, the broker flags, CHECKSUM. Every
+    /// mode, same ruling as MOVE: restore OPTIONS are the trade of the restore screen, and the
+    /// modes gate screens and machinery, not the statement somebody can write.
+    /// </summary>
+    public static bool CanUseAdvancedRestoreOptions(AppMode mode) => true;
 
     // ── what a mode is, in words ────────────────────────────────────────────────
 
@@ -138,7 +144,7 @@ public static class AppModeCapabilities
         AppMode.Basic =>
         [
             "Pick a container, pick a restore point, restore",
-            "The full restore chain worked out for you",
+            "Every restore option - a moment in time, relocated files, the lot",
             "Nothing else on screen"
         ],
 
@@ -146,8 +152,7 @@ public static class AppModeCapabilities
         [
             "Taking a backup, to blob or a file share",
             "Restoring from a path both servers can see",
-            "Restoring to a moment in time",
-            "Putting the database files somewhere else"
+            "Browsing backups, and the exposure dashboard"
         ],
 
         _ =>

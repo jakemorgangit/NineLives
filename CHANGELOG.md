@@ -51,6 +51,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Changed
 
+- **Every restore option is available in every mode.** Point-in-time, relocating files (WITH
+  MOVE), the advanced WITH options and additional containers no longer hide behind Standard or
+  Pro: the modes narrow which screens exist, never which restore options do. WITH MOVE is needed
+  most on restores to a different server - the Basic scenario itself - and hiding it made Basic
+  restores fail with directory errors the wider modes would not have hit
+
 - **One console, not two.** The restore screen no longer keeps an inline copy of the run's
   output behind the execution window - every line and panel was rendered twice. The window is
   the console; a "View the last run's output" button reopens it over the same record, and the
