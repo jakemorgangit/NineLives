@@ -91,6 +91,12 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- BACKUP TO URL and the copy now ask the credential question the restore always asked
+  (#284): the backup checks the source instance before its first statement, the copy checks
+  BOTH ends before the source is read at full speed - a missing credential is created, an
+  existing usable one (managed identity included) is left strictly alone, and an existing
+  unusable one refuses with the way out named, instead of Msg 3201 after the arm-and-confirm.
+  The decision now lives in one Core service all three screens share
 - Copy failures get the restore screen's follow-through (#283): a Stop pressed between the
   halves is reported as the cancellation it is - not as a share-permission failure sending
   somebody to chase an ACL that is fine; a failed restore half now says what state the
