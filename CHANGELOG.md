@@ -101,6 +101,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The exposure sweep answers to the user** (#287). It can be STOPPED - a Stop button while
+  it runs, and Esc reaches it - where a dozen servers with several unreachable used to mean
+  minutes of timeouts with no exit; stopping keeps the previous sweep's rows, and is never
+  dressed up as a server failure. A sweep that fails says so on the dashboard instead of
+  dying unobserved behind the first-visit auto-sweep, and that auto-sweep now runs once per
+  session as promised: "has swept" is a real flag, no longer inferred from an empty row list
+  that re-triggered a full estate sweep on every visit whenever the answer WAS empty. The
+  "as of" clock carries the date, an unreachable row is a property rather than a magic
+  caption, and the one-click handoff hands the restore screen the exact connection whose
+  sweep produced the row - two entries for the same instance with different credentials no
+  longer collapse into whichever came first
 - **The browser no longer mixes two sources' answers** (#286). Changing the container,
   medium or source server mid-listing cancels the in-flight load instead of letting the
   stale result land under the new source's name - and the set grouping runs with the

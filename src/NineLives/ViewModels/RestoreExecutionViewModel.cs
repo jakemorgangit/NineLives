@@ -573,6 +573,14 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     [ObservableProperty]
     private double _actionPercent = -1;
 
+    /// <summary>
+    /// Which action the percent bar currently belongs to. Progress&lt;T&gt; POSTS its callbacks,
+    /// so a report made just before an action completed can arrive after the finally block has
+    /// reset the bar - and a stale 99% about a finished action would sit there claiming the
+    /// next action's progress. Bumped when an action ends; late reports check it and drop.
+    /// </summary>
+    private int _actionEpoch;
+
     [ObservableProperty]
     private bool _isRunningAction;
 
@@ -603,6 +611,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         RaiseCancelStateChanged();
 
         IsRunningAction = true;
+        var epoch = _actionEpoch;
         ActionPercent = -1;
         ActionOutcome = string.Empty;
         TaskbarState = System.Windows.Shell.TaskbarItemProgressState.Normal;
@@ -616,6 +625,10 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // panel runs - so the bar moves for exactly the actions long enough to need one.
             var progress = new Progress<double>(p =>
             {
+                // Posted asynchronously, so it can arrive after this action already ended -
+                // about the run that is over, not the one that may have started since.
+                if (epoch != _actionEpoch) return;
+
                 ActionPercent = p;
                 TaskbarValue = p / 100.0;
             });
@@ -651,6 +664,9 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         }
         finally
         {
+            // Before the resets, so a late-posted percent report cannot un-reset them.
+            _actionEpoch++;
+
             IsRunningAction = false;
             ActionPercent = -1;
             TaskbarState = System.Windows.Shell.TaskbarItemProgressState.None;

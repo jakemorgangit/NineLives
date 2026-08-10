@@ -20,6 +20,12 @@ public sealed class ExposureRow
     public string RecoveryModel { get; init; } = string.Empty;
     public string StateDescription { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The server would not answer, so this row is an alarm about silence rather than a judged
+    /// database (#287). A property rather than a magic string compared in two places.
+    /// </summary>
+    public bool IsUnreachable { get; init; }
+
     public DateTime? LastFull { get; init; }
     public DateTime? LastDifferential { get; init; }
     public DateTime? LastLog { get; init; }

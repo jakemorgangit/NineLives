@@ -22,6 +22,7 @@ public partial class ExposureViewModel : ViewModelBase
     private readonly ISqlServerService _sql;
     private readonly IRestoreHistoryStore _history;
     private readonly OperationLog _log;
+    private readonly OperationCancellation _sweepCancellation = new();
 
     public ExposureViewModel(
         ICredentialStore store, ISqlServerService sql, IRestoreHistoryStore history,
@@ -45,9 +46,36 @@ public partial class ExposureViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSweeping;
 
-    /// <summary>The connections behind the rows, by server name - the handoff needs the object.</summary>
-    private Dictionary<string, ServerConnection> _serversByName =
-        new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>True while a sweep is running and has not been asked to stop (#287).</summary>
+    [ObservableProperty]
+    private bool _canCancelSweep;
+
+    /// <summary>
+    /// Whether a sweep has ever been ATTEMPTED (#287). The shell's first-visit auto-sweep used
+    /// to infer this from Rows.Count == 0 - so an estate that answered "no rows" (or a sweep
+    /// that failed) re-triggered a full sweep of every server on every later visit, the exact
+    /// opposite of "Refresh stays deliberate after the first".
+    /// </summary>
+    public bool HasSwept { get; private set; }
+
+    /// <summary>
+    /// Stops an in-progress sweep. A dozen servers with several unreachable is minutes of
+    /// timeouts, and until now there was no way out of it.
+    /// </summary>
+    [RelayCommand]
+    private void StopSweep()
+    {
+        _sweepCancellation.Cancel();
+        CanCancelSweep = false;
+        SetStatus("Cancelling...");
+    }
+
+    /// <summary>
+    /// The connection each row's numbers actually came from (#287). By row identity, not by
+    /// server name: two entries for the same instance with different credentials are different
+    /// connections, and the one-click handoff must hand over the one that produced the row.
+    /// </summary>
+    private Dictionary<ExposureRow, ServerConnection> _ownerByRow = new();
 
     /// <summary>Raised when somebody wants to act on a row. The shell wires it (#202's pattern).</summary>
     public event Action<BrowseHandoff>? RestoreRequested;
@@ -61,8 +89,8 @@ public partial class ExposureViewModel : ViewModelBase
     [RelayCommand]
     private void RestoreFromRow(ExposureRow? row)
     {
-        if (row == null || row.StateDescription == "UNREACHABLE") return;
-        if (!_serversByName.TryGetValue(row.ServerName, out var server)) return;
+        if (row == null || row.IsUnreachable) return;
+        if (!_ownerByRow.TryGetValue(row, out var server)) return;
 
         RestoreRequested?.Invoke(new BrowseHandoff(
             BackupMedium.SharedPath, null, server, row.ServerName, row.DatabaseName));
@@ -78,7 +106,9 @@ public partial class ExposureViewModel : ViewModelBase
     [RelayCommand]
     private async Task RefreshAsync()
     {
+        var ct = _sweepCancellation.Begin();
         IsSweeping = true;
+        CanCancelSweep = true;
         ClearStatus();
 
         try
@@ -103,39 +133,50 @@ public partial class ExposureViewModel : ViewModelBase
             }
 
             var now = DateTime.Now;
-            _serversByName = servers
-                .GroupBy(s => s.ServerName, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
             var sweeps = servers.Select(async server =>
             {
                 try
                 {
-                    return await _sql.GetBackupExposureAsync(server);
+                    return (server, rows: await _sql.GetBackupExposureAsync(server, ct));
+                }
+                catch (OperationCanceledException)
+                {
+                    // Stopping is the user's doing, not the server's silence - it must not
+                    // fabricate an UNREACHABLE alarm row.
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     _log.Warn($"[exposure] {server.ServerName}: {ex.Message}");
-                    return
+                    return (server, rows: (List<ExposureRow>)
                     [
                         new ExposureRow
                         {
                             ServerName = server.ServerName,
                             DatabaseName = "(server did not answer)",
                             StateDescription = "UNREACHABLE",
+                            IsUnreachable = true,
                             Level = ExposureLevel.Alarm,
                             Verdict = $"The server would not answer: {ex.Message} Its databases' " +
                                       "exposure is UNKNOWN, which is not the same as fine."
                         }
-                    ];
+                    ]);
                 }
             }).ToList();
 
             var results = await Task.WhenAll(sweeps);
-            var rows = results.SelectMany(r => r).ToList();
+
+            var owners = new Dictionary<ExposureRow, ServerConnection>();
+            foreach (var (server, serverRows) in results)
+                foreach (var row in serverRows)
+                    owners[row] = server;
+            _ownerByRow = owners;
+
+            var rows = results.SelectMany(r => r.rows).ToList();
 
             // The advisor judges everything that answered; unreachable rows arrive pre-judged.
-            foreach (var row in rows.Where(r => r.StateDescription != "UNREACHABLE"))
+            foreach (var row in rows.Where(r => !r.IsUnreachable))
                 ExposureAdvisor.Judge(row, now);
 
             AttachRehearsalReceipts(rows);
@@ -153,11 +194,26 @@ public partial class ExposureViewModel : ViewModelBase
                 ? $"All {rows.Count} database(s) across {servers.Count} server(s) are inside their windows."
                 : $"{alarms} alarm(s), {warnings} warning(s) across {servers.Count} server(s) - worst first.";
 
-            LastRefreshed = $"as of {now:HH:mm:ss}";
+            LastRefreshed = $"as of {now:yyyy-MM-dd HH:mm:ss}";
+        }
+        catch (OperationCanceledException)
+        {
+            // The rows on screen are the previous sweep's complete answer; stopping this one
+            // does not invalidate them.
+            SetStatus("Sweep cancelled.");
+        }
+        catch (Exception ex)
+        {
+            // The auto-sweep is fired without an awaiter, so anything escaping here used to
+            // vanish - an empty dashboard with no explanation (#287).
+            SetError($"The sweep failed: {ex.Message}");
         }
         finally
         {
+            HasSwept = true;
+            _sweepCancellation.End();
             IsSweeping = false;
+            CanCancelSweep = false;
         }
     }
 

@@ -604,13 +604,38 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Dictionary<string, List<ExposureRow>> ExposureByServer { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public Task<List<ExposureRow>> GetBackupExposureAsync(
+    /// <summary>When set, the sweep waits here per server - and honours a cancellation that
+    /// arrived while it waited, as the real query does (#287).</summary>
+    public TaskCompletionSource<bool>? BeforeExposureReturns { get; set; }
+
+    public async Task<List<ExposureRow>> GetBackupExposureAsync(
         ServerConnection server, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        if (BeforeExposureReturns != null)
+        {
+            await BeforeExposureReturns.Task;
+            ct.ThrowIfCancellationRequested();
+        }
+
         if (!ExposureByServer.TryGetValue(server.ServerName, out var rows))
             throw new InvalidOperationException($"fake: {server.ServerName} is not answering");
 
-        return Task.FromResult(rows.ToList());
+        // Fresh instances per call, as the real query produces - two connections to the same
+        // instance must not share row objects, or the sweep cannot tell whose answer is whose.
+        return rows.Select(r => new ExposureRow
+        {
+            ServerName = r.ServerName,
+            DatabaseName = r.DatabaseName,
+            RecoveryModel = r.RecoveryModel,
+            StateDescription = r.StateDescription,
+            IsUnreachable = r.IsUnreachable,
+            LastFull = r.LastFull,
+            LastDifferential = r.LastDifferential,
+            LastLog = r.LastLog,
+            Level = r.Level,
+            Verdict = r.Verdict
+        }).ToList();
     }
 
     /// <summary>What each ad-hoc file's headers say, keyed by path (#203).</summary>
