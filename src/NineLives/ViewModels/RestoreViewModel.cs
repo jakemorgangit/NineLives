@@ -1652,42 +1652,12 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Explicit Generate. Same work as the live rebuild, but it says why nothing was produced -
-    /// the live path stays silent because reporting an error on every keystroke would be noise.
+    /// Why the script pane is empty, shown where the script would be (#user). The Generate
+    /// button used to carry these as error dialogs; the script builds itself live now, so the
+    /// explanation lives passively where the eye already is.
     /// </summary>
-    [RelayCommand]
-    private void GenerateScript()
-    {
-        if (RestoreChain == null)
-        {
-            SetError("No valid restore chain. Load backups and select a restore point first.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(TargetDatabaseName))
-        {
-            SetError("Please enter a target database name.");
-            return;
-        }
-
-        // Refuse to silently fall back to a full-chain restore when the user asked to stop at a
-        // time we could not use - that would replay exactly the transactions they meant to skip.
-        if (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
-        {
-            SetError($"Point-in-time target is not valid. {PointInTime.Message}");
-            return;
-        }
-
-        if (!Options.HasStandbyFileIfNeeded)
-        {
-            SetError("STANDBY needs an undo file path. Without one the script would end in " +
-                     "STANDBY = '', which fails after the database has already been overwritten.");
-            return;
-        }
-
-        RegenerateScript();
-        if (HasScript) SetStatus("Script generated successfully.");
-    }
+    [ObservableProperty]
+    private string _scriptBlockedReason = string.Empty;
 
     /// <summary>
     /// The WITH MOVE clauses the restore would use, or an empty list when it is not moving files.
@@ -1812,10 +1782,25 @@ public partial class RestoreViewModel : ViewModelBase
         // Leave the script alone mid-restore - it is the record of what is actually running.
         if (IsExecuting) return;
 
-        if (RestoreChain == null
-            || string.IsNullOrWhiteSpace(TargetDatabaseName)
-            || (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
-            || !Options.HasStandbyFileIfNeeded)
+        // When nothing can be produced, say which input is missing - quietly, as a hint where
+        // the script would be, because this now happens live rather than on a button press and
+        // an error dialog per keystroke would be noise.
+        var chain = RestoreChain;
+        var blocked =
+            chain == null
+                ? "Select a restore point above and the script appears here."
+            : string.IsNullOrWhiteSpace(TargetDatabaseName)
+                ? "Enter a target database name and the script appears here."
+            : PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null
+                ? $"The point-in-time target is not valid yet. {PointInTime.Message}"
+            : !Options.HasStandbyFileIfNeeded
+                ? "STANDBY needs an undo file path - without one the script would end in " +
+                  "STANDBY = '', which fails after the database has already been overwritten."
+            : null;
+
+        ScriptBlockedReason = blocked ?? string.Empty;
+
+        if (blocked != null)
         {
             GeneratedScript = string.Empty;
             HasScript = false;
@@ -1827,7 +1812,7 @@ public partial class RestoreViewModel : ViewModelBase
         // chain or the server.
         var options = Options.Build(TargetDatabaseName, PointInTime.Effective, BuildFileMoves());
 
-        GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
+        GeneratedScript = _scriptGenerator.Generate(chain!, options);
         HasScript = true;
     }
 

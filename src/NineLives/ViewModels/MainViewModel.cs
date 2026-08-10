@@ -495,13 +495,6 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Ctrl+G: generate the restore script. Only the Restore screen generates anything.</summary>
-    [RelayCommand]
-    private void GenerateScript()
-    {
-        if (CurrentViewName != Nav.Restore) return;
-        if (Restore.GenerateScriptCommand.CanExecute(null)) Restore.GenerateScriptCommand.Execute(null);
-    }
 
     /// <summary>
     /// Esc: stop whatever is running.
