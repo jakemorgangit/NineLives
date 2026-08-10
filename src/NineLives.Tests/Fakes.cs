@@ -490,12 +490,16 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>The MOVE clauses the last verification was given (#129).</summary>
     public List<FileMoveOption> VerifiedWithMoves { get; private set; } = [];
 
+    /// <summary>Whether each verification said WITH CHECKSUM - pins WHOSE setting was used (#293).</summary>
+    public List<bool> VerifiedWithChecksum { get; } = [];
+
     public Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, bool withChecksum = false,
         IReadOnlyList<FileMoveOption>? fileMoves = null, CancellationToken ct = default)
     {
         VerifiedUrls.AddRange(blobUrls);
         VerifiedWithMoves = fileMoves?.ToList() ?? [];
+        VerifiedWithChecksum.Add(withChecksum);
         VerifyTokens.Add(ct);
         OnVerify?.Invoke(ct);
 

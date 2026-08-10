@@ -55,6 +55,46 @@ public class BackupFollowThroughTests
 
     // ── verify what was written ─────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verify proves the run that happened, not the checkbox of the moment (#293). Ticking
+    /// checksum AFTER a no-checksum backup used to fail a perfectly fine backup; unticking
+    /// after a checksum backup silently degraded the verify.
+    /// </summary>
+    [Fact]
+    public async Task VerifyUsesTheChecksumTheBackupRanWith()
+    {
+        var (vm, sql) = New();
+        await vm.LoadDatabasesCommand.ExecuteAsync(null);
+        vm.SelectedDatabase = "MyDb";
+        vm.Checksum = true;
+        vm.GenerateCommand.Execute(null);
+        await vm.ExecuteCommand.ExecuteAsync(null);
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        // The checkbox moves on; the run already happened WITH CHECKSUM.
+        vm.Checksum = false;
+        await vm.VerifyLastBackupCommand.ExecuteAsync(null);
+
+        Assert.Equal([true], sql.VerifiedWithChecksum);
+    }
+
+    /// <summary>SQL Server caps backup devices at 64 - a typo of 640 used to become a
+    /// statement the server rejects after the arm-and-confirm (#293).</summary>
+    [Fact]
+    public void StripesCannotLeaveTheDeviceRange()
+    {
+        var (vm, _) = New();
+
+        vm.Stripes = 640;
+        Assert.Equal(64, vm.Stripes);
+
+        vm.Stripes = 0;
+        Assert.Equal(1, vm.Stripes);
+
+        vm.Stripes = 8;
+        Assert.Equal(8, vm.Stripes);
+    }
+
     /// <summary>A successful run leaves the verify offer behind.</summary>
     [Fact]
     public async Task ASuccessfulBackupOffersToVerifyIt()
