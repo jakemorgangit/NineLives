@@ -56,4 +56,8 @@ public class WebhookEndpoint
 
     [JsonIgnore]
     public bool IsUsable => !string.IsNullOrWhiteSpace(Url);
+
+    /// <summary>Where this endpoint's URL lives in the vault once saved as a secret (#317).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string CredentialKey => $"NineLives:Webhook:{Id}";
 }

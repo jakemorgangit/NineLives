@@ -18,7 +18,7 @@ public sealed class WebhookRunNotifier : IRunNotifier
 {
     private readonly ICredentialStore _store;
     private readonly OperationLog _log;
-    private readonly WebhookNotifier _notifier;
+    private readonly WebhookNotifier? _injected;
 
     /// <summary>
     /// Deliveries still in flight, so a short-lived process can drain them before exiting
@@ -32,15 +32,20 @@ public sealed class WebhookRunNotifier : IRunNotifier
     {
         _store = store;
         _log = log;
-        _notifier = notifier ?? new WebhookNotifier();
+        _injected = notifier;
     }
 
     public void Notify(RunNotification notification)
     {
         List<WebhookEndpoint> endpoints;
+        WebhookProxySettings? proxy;
         try
         {
-            endpoints = _store.LoadConfig().Webhooks.Where(w => w.IsUsable).ToList();
+            var config = _store.LoadConfig();
+            // Hydrated clones (#317): saved URLs live in the vault, resolved at send time,
+            // and the config's own objects never carry the secret.
+            endpoints = WebhookTransport.HydrateUsable(config.Webhooks, _store);
+            proxy = config.WebhookProxy;
         }
         catch
         {
@@ -55,7 +60,19 @@ public sealed class WebhookRunNotifier : IRunNotifier
         {
             try
             {
-                await _notifier.NotifyAsync(endpoints, notification, line => _log.Info(line));
+                // The injected notifier (tests) is used as-is; the real one is built per
+                // delivery with the configured transport (#316), so a proxy change in
+                // Settings applies to the very next send.
+                if (_injected != null)
+                {
+                    await _injected.NotifyAsync(endpoints, notification, line => _log.Info(line));
+                }
+                else
+                {
+                    using var handler = WebhookTransport.BuildHandler(proxy, _store);
+                    var notifier = new WebhookNotifier(handler);
+                    await notifier.NotifyAsync(endpoints, notification, line => _log.Info(line));
+                }
             }
             catch (Exception ex)
             {
