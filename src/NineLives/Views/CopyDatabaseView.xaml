@@ -198,6 +198,18 @@
                 <StackPanel>
                     <TextBlock Text="4. Run it" Style="{StaticResource SubHeaderText}" />
 
+                    <!-- Can the target even ACCEPT it (#210's law). Unlike disk space, nothing
+                         can change between generating and running that makes this legal. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,10,0,0"
+                            Background="{DynamicResource DangerPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource ErrorBrush}"
+                            BorderThickness="1"
+                            Visibility="{Binding HasVersionWarning, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding VersionWarning}"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource BodyText}" />
+                    </Border>
+
                     <!-- Will the target be able to READ it (#222). TDE rides along inside every
                          backup, and a copy of an encrypted database is only as good as the
                          target's certificate - warned here, before the backup half runs. -->

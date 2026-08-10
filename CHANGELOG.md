@@ -12,6 +12,10 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- The copy screen now checks the version direction at script generation - its restore half runs
+  outside the restore preflights, so a 2025 source aimed at a 2022 target used to fail with
+  error 3169 only AFTER the backup half had run. The warning says plainly that the copy cannot
+  work and which way it can
 - **The Proven column now carries the measured RTO** - "Proven: 08-09 21:30 (took 14m 00s)".
   The rehearsal times the real restore plus CHECKDB, which is the number RTO conversations are
   otherwise made up from, and the dashboard shows it beside the exposure it answers

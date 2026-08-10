@@ -297,8 +297,13 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>What GetProductMajorVersionAsync answers - 16 is SQL Server 2022 (#210).</summary>
     public int? ProductMajorVersion { get; set; } = 16;
 
+    /// <summary>Per-server overrides, for the checks that compare two servers' versions.</summary>
+    public Dictionary<string, int?> MajorVersionByServer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(ProductMajorVersion);
+        => Task.FromResult(
+            MajorVersionByServer.TryGetValue(server.ServerName, out var v) ? v : ProductMajorVersion);
 
     /// <summary>What GetDatabaseOverviewAsync answers (#205).</summary>
     public DatabaseOverview? DatabaseOverview { get; set; } = new(150, "FULL", "sa");
