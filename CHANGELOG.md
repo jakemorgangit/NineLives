@@ -85,6 +85,12 @@ more detail on the user-facing changes; this file is the short history.
   the screen loaded - the worst case being import, then Connect, and every imported server
   gone. Both screens also catch up with outside additions on navigation, and only deletions
   made on the screen itself delete (#276)
+- The CLI's endings are trustworthy now (#296). Completion webhooks no longer race process
+  exit - the execution verbs drain pending deliveries (bounded, ten seconds) before
+  returning, so the success and problem messages actually arrive from a process that exits
+  the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
+  Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
+  script can tell an operator's interruption from a failure
 - A generated script no longer survives the change that invalidated it (#278). On the backup
   and copy screens, an input change that makes regeneration impossible now CLEARS the script,
   the destinations and the run button instead of leaving the old statements displayed and

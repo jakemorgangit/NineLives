@@ -195,7 +195,16 @@ public sealed class FakeRunNotifier : IRunNotifier
 {
     public List<RunNotification> Sent { get; } = [];
 
+    /// <summary>How many times a caller drained - the CLI's exit path must, or deliveries die with the process (#296).</summary>
+    public int DrainCalls { get; private set; }
+
     public void Notify(RunNotification notification) => Sent.Add(notification);
+
+    public Task DrainAsync(TimeSpan timeout)
+    {
+        DrainCalls++;
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class FakeSqlServerService : ISqlServerService
@@ -486,6 +495,9 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Task ExecuteWithProgressAsync(
         ServerConnection server, string sql, Action<string>? messageCallback = null, CancellationToken ct = default)
     {
+        // Same guard the VERIFYONLY fake carries, same reason: without it a test passes
+        // against a caller that ignores the token entirely (#296).
+        ct.ThrowIfCancellationRequested();
         ExecutedAgainst.Add(server);
         ExecutedScripts.Add(sql);
         messageCallback?.Invoke("100 percent processed.");

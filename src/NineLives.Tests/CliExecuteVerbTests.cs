@@ -48,12 +48,12 @@ public class CliExecuteVerbTests
     };
 
     private static async Task<(int exit, string output, string errors)> Run(
-        Func<CliArguments, CliServices, TextWriter, TextWriter, Task<int>> verb,
-        VerbSpec spec, string[] args, CliServices services)
+        Func<CliArguments, CliServices, TextWriter, TextWriter, CancellationToken, Task<int>> verb,
+        VerbSpec spec, string[] args, CliServices services, CancellationToken ct = default)
     {
         var output = new StringWriter();
         var errors = new StringWriter();
-        var exit = await verb(CliArguments.Parse(args, spec), services, output, errors);
+        var exit = await verb(CliArguments.Parse(args, spec), services, output, errors, ct);
         return (exit, output.ToString(), errors.ToString());
     }
 

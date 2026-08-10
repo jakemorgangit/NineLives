@@ -62,7 +62,8 @@ internal static class RehearseVerb
             "0   PROVEN - restored, CHECKDB clean, scratch dropped (or, without --execute, printed)",
             "2   NOT PROVEN - the failure is recorded, the scratch copy retained as evidence",
             "3   the source or target could not be reached, or FILELISTONLY answered nothing",
-            "64  usage"
+            "64  usage",
+            "130 cancelled with Ctrl+C - recorded, told to the channel, scratch retained if begun"
         ],
         Examples:
         [
@@ -73,7 +74,8 @@ internal static class RehearseVerb
         ]);
 
     public static async Task<int> RunAsync(
-        CliArguments args, CliServices services, TextWriter output, TextWriter errors)
+        CliArguments args, CliServices services, TextWriter output, TextWriter errors,
+        CancellationToken ct = default)
     {
         if (args.Get("database") == null || args.Get("target") == null)
         {
@@ -177,7 +179,7 @@ internal static class RehearseVerb
 
         try
         {
-            await services.Sql.ExecuteWithProgressAsync(target, script, Progress);
+            await services.Sql.ExecuteWithProgressAsync(target, script, Progress, ct);
 
             var completedAt = DateTime.Now;
             services.History.Append(new RestoreHistoryEntry
@@ -204,7 +206,39 @@ internal static class RehearseVerb
             errors.WriteLine($"PROVEN: '{sourceDatabase}' restores. Took " +
                              $"{(completedAt - startedAt).TotalSeconds:0}s - that is the " +
                              "measured RTO, and the receipt is in the app's History.");
+            await services.Notifier.DrainAsync(NotificationDrain);
             return ExitCodes.Ok;
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C mid-rehearsal (#296): recorded as Cancelled, told to the channel, and
+            // exited with 128+SIGINT - and the scratch copy note still applies, because the
+            // interruption may have landed after its restore began.
+            var completedAt = DateTime.Now;
+            log.AppendLine("Cancelled from the terminal.");
+            services.History.Append(new RestoreHistoryEntry
+            {
+                StartedAt = startedAt,
+                CompletedAt = completedAt,
+                ServerName = target.ServerName,
+                TargetDatabase = scratch,
+                SourceDatabase = sourceDatabase,
+                ContainerName = args.Get("container"),
+                RestorePointTimestamp = stopAt ?? point.Timestamp,
+                ChainSummary = point.TypeDisplay,
+                Kind = "Rehearsal",
+                Outcome = RestoreOutcome.Cancelled,
+                ErrorMessage = "Cancelled from the terminal.",
+                Script = script,
+                Log = log.ToString()
+            });
+            services.Notifier.Notify(new RunNotification(
+                RunPhase.Problem, "Rehearsal", sourceDatabase, target.ServerName,
+                "Cancelled from the terminal.", completedAt - startedAt));
+            await services.Notifier.DrainAsync(NotificationDrain);
+            errors.WriteLine($"CANCELLED. If the scratch restore had begun, '{scratch}' is " +
+                             "retained - inspect, then drop it.");
+            return ExitCodes.Interrupted;
         }
         catch (Exception ex)
         {
@@ -234,7 +268,11 @@ internal static class RehearseVerb
             errors.WriteLine($"NOT PROVEN: {ex.Message}");
             errors.WriteLine($"The scratch copy '{scratch}' is retained as evidence when the " +
                              "failure happened after its restore began - inspect, then drop it.");
+            await services.Notifier.DrainAsync(NotificationDrain);
             return ExitCodes.Failed;
         }
     }
+
+    /// <summary>Long enough for a slow webhook, short enough that a dead one cannot hold the exit.</summary>
+    private static readonly TimeSpan NotificationDrain = TimeSpan.FromSeconds(10);
 }

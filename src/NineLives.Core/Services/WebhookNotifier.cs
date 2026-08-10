@@ -204,8 +204,10 @@ public class WebhookNotifier
     /// <summary>
     /// Posts to every endpoint that wants this phase. Failures go to <paramref name="log"/> and
     /// nowhere else - the run this describes must never be affected by its announcement.
+    /// Virtual for the drain pin (#296): proving DrainAsync waits needs a delivery that takes
+    /// a measurable moment, and the only honest slow delivery in a test is a substituted one.
     /// </summary>
-    public async Task NotifyAsync(
+    public virtual async Task NotifyAsync(
         IReadOnlyList<WebhookEndpoint> endpoints, RunNotification notification, Action<string>? log = null)
     {
         foreach (var endpoint in endpoints)
