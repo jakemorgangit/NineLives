@@ -631,6 +631,10 @@ public sealed class FakeSqlServerService : ISqlServerService
     public async Task<List<BackupFileCheck>> CheckBackupFilesAsync(
         ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default)
     {
+        // Observed for the same reason the execute fake observes its token (#283): a pressed
+        // Stop reaches this check mid-copy, and a fake that ignores it lets a viewmodel
+        // misreport the cancellation without any test noticing.
+        ct.ThrowIfCancellationRequested();
         var results = new List<BackupFileCheck>();
         foreach (var path in paths)
         {

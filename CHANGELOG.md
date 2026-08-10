@@ -91,6 +91,13 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- Copy failures get the restore screen's follow-through (#283): a Stop pressed between the
+  halves is reported as the cancellation it is - not as a share-permission failure sending
+  somebody to chase an ACL that is fine; a failed restore half now says what state the
+  target is in (RESTORING, RECOVERY_PENDING, single-user) with the statements that get it
+  out; and a copy that worked runs the orphaned-user scan - a copy to a different server
+  being the canonical orphaned-login scenario. The copy's notification lifecycle gains its
+  first tests while here
 - A copy onto the same instance is refused up front, with the way out named (#282). The
   copy's restore carries no MOVE clauses - right for a different server, fatal on the same
   one, where the files land on the live source's own paths and SQL Server fails with
