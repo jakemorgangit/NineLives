@@ -1970,6 +1970,17 @@ public partial class RestoreViewModel : ViewModelBase
             sb.AppendLine($"First LSN: {header.FirstLsn?.ToString() ?? "(null)"}");
             sb.AppendLine($"Last LSN: {header.LastLsn?.ToString() ?? "(null)"}");
             sb.AppendLine($"Database backup LSN: {header.DatabaseBackupLsn?.ToString() ?? "(null)"}");
+
+            if (header.SoftwareVersionMajor is int major)
+                sb.AppendLine($"Taken on: {VersionCompatibility.Describe(major)}");
+
+            // What protects it (#222 part 4): the certificate question, answered where the header
+            // is on screen instead of only failing later. Absence is stated too - "not encrypted"
+            // is information, not the lack of it.
+            var protection = EncryptionGuidance.DescribeProtection(
+                header.TdeThumbprint, header.EncryptorThumbprint);
+            sb.AppendLine($"Protection: {(protection.Length == 0 ? "Not encrypted." : protection)}");
+
             BackupMetadataSummary = sb.ToString();
             SetStatus("Header read. See the metadata below.");
         }
