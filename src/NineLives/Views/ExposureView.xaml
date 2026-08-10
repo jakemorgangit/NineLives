@@ -106,8 +106,8 @@
                                     <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
                                                Text="{Binding LastLog, StringFormat='Log: {0:MM-dd HH:mm}', TargetNullValue='Log: never'}" />
                                     <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
-                                               Text="{Binding LastProven, StringFormat='Proven: {0:MM-dd HH:mm}', TargetNullValue='Proven: never rehearsed'}"
-                                               ToolTip="When a rehearsal (#238) last PROVED this database restores. Arithmetic says what could restore; only a rehearsal says it does." />
+                                               Text="{Binding ProvenDisplay}"
+                                               ToolTip="When a rehearsal (#238) last PROVED this database restores, and how long the restore plus CHECKDB took - the measured RTO. Arithmetic says what could restore; only a rehearsal says it does." />
 
                                     <Button Content="Open in Restore"
                                             Command="{Binding DataContext.RestoreFromRowCommand,

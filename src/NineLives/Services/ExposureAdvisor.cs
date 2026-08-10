@@ -27,6 +27,20 @@ public sealed class ExposureRow
     /// <summary>When a rehearsal last PROVED this database restores, from the app's own receipts.</summary>
     public DateTime? LastProven { get; set; }
 
+    /// <summary>
+    /// How long that rehearsal took - restore plus CHECKDB, measured, not estimated. The number
+    /// RTO conversations are otherwise made up from, and the rehearsal produces it for free.
+    /// </summary>
+    public TimeSpan? MeasuredRestore { get; set; }
+
+    /// <summary>The Proven cell: date plus the measured time, or the honest "never rehearsed".</summary>
+    public string ProvenDisplay =>
+        LastProven == null
+            ? "Proven: never rehearsed"
+            : MeasuredRestore is { } d
+                ? $"Proven: {LastProven:MM-dd HH:mm} (took {ExposureAdvisor.Age(LastProven.Value - d, LastProven.Value)})"
+                : $"Proven: {LastProven:MM-dd HH:mm}";
+
     // Filled by the advisor.
     public ExposureLevel Level { get; set; }
     public string Verdict { get; set; } = string.Empty;

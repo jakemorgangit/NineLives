@@ -12,6 +12,9 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The Proven column now carries the measured RTO** - "Proven: 08-09 21:30 (took 14m 00s)".
+  The rehearsal times the real restore plus CHECKDB, which is the number RTO conversations are
+  otherwise made up from, and the dashboard shows it beside the exposure it answers
 - **The exposure dashboard's rows act, not just alarm** - "Open in Restore" on every reachable
   row jumps to the restore screen with that server's backup history loaded and the database
   selected, one click from seeing to acting. From there, Rehearse proves it. A red row's
