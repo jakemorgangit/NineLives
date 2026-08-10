@@ -31,6 +31,12 @@ public sealed class ExportedConfig
     /// <summary>Endpoints travel as shapes - name, format, toggles - with their URLs stripped.</summary>
     public List<WebhookEndpoint> Webhooks { get; set; } = [];
 
+    /// <summary>
+    /// The delivery route travels as addressing only (#316): mode, URL, username. The proxy
+    /// password is a secret and stays in the vault, like every secret.
+    /// </summary>
+    public WebhookProxySettings? WebhookProxy { get; set; }
+
     // Mode is the one preference that travels: nullable, so "this machine never chose" is a
     // real state the merge can respect. Theme and the update/log settings used to be exported
     // too but were never applied on import - an export that carries what the import discards
@@ -99,7 +105,15 @@ public static class ConfigPortability
             Webhooks = config.Webhooks
                 .Select(w => { var c = CloneViaJson(w); c.Url = string.Empty; return c; })
                 .ToList(),
-            Mode = config.Mode
+            Mode = config.Mode,
+            WebhookProxy = config.WebhookProxy == null
+                ? null
+                : new WebhookProxySettings
+                {
+                    Mode = config.WebhookProxy.Mode,
+                    Url = config.WebhookProxy.Url,
+                    Username = config.WebhookProxy.Username
+                }
         };
 
         return JsonSerializer.Serialize(exported, Options);
@@ -217,6 +231,10 @@ public static class ConfigPortability
         // The one travelling preference: mode is taken from the file ONLY on a machine that
         // never chose one. Overwriting a choice this machine made is not an import's business.
         target.Mode ??= imported.Mode;
+
+        // Same rule for the delivery route (#316): it arrives only where none was chosen, and
+        // its password never travels - the custom proxy asks for it again on the new machine.
+        target.WebhookProxy ??= imported.WebhookProxy;
 
         return new ImportSummary(
             containersAdded, containersUpdated, serversAdded, serversUpdated,

@@ -313,9 +313,14 @@ public class AppConfig
 
     /// <summary>
     /// Where run notifications go (#242): Teams, Slack, or any JSON endpoint. The URLs are
-    /// secrets in all but name and never leave this machine in an export (#213).
+    /// secrets in all but name and never leave this machine in an export (#213); once saved
+    /// through the Settings screen they live in Windows Credential Manager and this list's
+    /// entries carry no URL at all (#317).
     /// </summary>
     public List<WebhookEndpoint> Webhooks { get; set; } = [];
+
+    /// <summary>How webhook deliveries reach the network (#316). Null means the system default.</summary>
+    public WebhookProxySettings? WebhookProxy { get; set; }
 
     /// <summary>Where the window was when the app closed, or null before the first close (#211).</summary>
     public WindowGeometry? Window { get; set; }

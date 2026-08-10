@@ -70,6 +70,18 @@ more detail on the user-facing changes; this file is the short history.
   `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` as the script-friendly alternative to flags.
   A point-in-time clone is three chained lines whose only variable is the moment
 
+- **Webhook deliveries can take a route** (#316): the machine's own proxy settings (the
+  default, and what always happened), no proxy at all, or an explicit proxy URL with
+  credentials - the password in Windows Credential Manager like every secret. One setting
+  beside the webhook list, used by every send: the app's runs, the test button, and the
+  CLI's alike. The route travels in an export as addressing only; the secret asks again on
+  the new machine
+- **Webhook URLs get the secret treatment** (#317): pasted, then committed with an explicit
+  Save - and from that moment obfuscated, stored in Windows Credential Manager, out of
+  config.json, and never displayed again. Replacing one means saving a new one. Deliveries
+  hydrate the URL at send time on clones; existing configs keep working from their in-file
+  URL until the row is next saved, which migrates it
+
 ### Changed
 
 - The engine - every service and model - now lives in NineLives.Core, a library with no UI

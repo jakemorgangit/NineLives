@@ -37,14 +37,70 @@ public partial class SettingsViewModel : ViewModelBase
     {
         Webhooks.Clear();
         foreach (var endpoint in config.Webhooks)
-            Webhooks.Add(new WebhookEndpointViewModel(endpoint, SaveWebhooks, TestWebhookAsync));
+            Webhooks.Add(new WebhookEndpointViewModel(
+                endpoint, _credentialStore, SaveWebhooks, TestWebhookAsync));
+
+        var proxy = config.WebhookProxy;
+        ProxyMode = proxy?.Mode ?? WebhookProxyMode.SystemDefault;
+        ProxyUrl = proxy?.Url ?? string.Empty;
+        ProxyUsername = proxy?.Username ?? string.Empty;
+    }
+
+    // ── how deliveries reach the network (#316) ────────────────────────────────
+
+    public IReadOnlyList<WebhookProxyMode> ProxyModes { get; } =
+        [WebhookProxyMode.SystemDefault, WebhookProxyMode.Direct, WebhookProxyMode.Custom];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsProxyDetails))]
+    private WebhookProxyMode _proxyMode = WebhookProxyMode.SystemDefault;
+
+    public bool ShowsProxyDetails => ProxyMode == WebhookProxyMode.Custom;
+
+    [ObservableProperty]
+    private string _proxyUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _proxyUsername = string.Empty;
+
+    /// <summary>Typed, saved, cleared - the password is never read back out of the vault.</summary>
+    [ObservableProperty]
+    private string _proxyPasswordInput = string.Empty;
+
+    /// <summary>
+    /// Commits the delivery route (#316). The password goes to Windows Credential Manager and
+    /// the input clears; the mode, URL and username go to the config file - they are
+    /// addressing, not secrets.
+    /// </summary>
+    [RelayCommand]
+    private void SaveProxy()
+    {
+        Save(config =>
+        {
+            config.WebhookProxy = new WebhookProxySettings
+            {
+                Mode = ProxyMode,
+                Url = string.IsNullOrWhiteSpace(ProxyUrl) ? null : ProxyUrl.Trim(),
+                Username = string.IsNullOrWhiteSpace(ProxyUsername) ? null : ProxyUsername.Trim()
+            };
+        }, "The delivery route could not be saved");
+
+        if (!string.IsNullOrWhiteSpace(ProxyPasswordInput))
+        {
+            _credentialStore.SaveSecret(
+                WebhookTransport.ProxyCredentialKey, ProxyUsername, ProxyPasswordInput);
+            ProxyPasswordInput = string.Empty;
+        }
+
+        WebhookTestResult = "Delivery route saved. The next send - test or real - uses it.";
     }
 
     [RelayCommand]
     private void AddWebhook()
     {
         var endpoint = new WebhookEndpoint { Name = $"Endpoint {Webhooks.Count + 1}" };
-        Webhooks.Add(new WebhookEndpointViewModel(endpoint, SaveWebhooks, TestWebhookAsync));
+        Webhooks.Add(new WebhookEndpointViewModel(
+            endpoint, _credentialStore, SaveWebhooks, TestWebhookAsync));
         SaveWebhooks();
     }
 
@@ -66,7 +122,20 @@ public partial class SettingsViewModel : ViewModelBase
     private async Task TestWebhookAsync(WebhookEndpointViewModel row)
     {
         WebhookTestResult = $"Sending a test to {row.Name}...";
-        var error = await new WebhookNotifier().SendTestAsync(row.Model);
+
+        // Same transport and same hydration as a real delivery (#316, #317): a test that
+        // bypasses the proxy or reads a different URL proves nothing about the run.
+        var url = WebhookTransport.ResolveUrl(row.Model, _credentialStore);
+        if (url == null)
+        {
+            WebhookTestResult = $"{row.Name}: no URL saved yet.";
+            return;
+        }
+
+        var hydrated = WebhookTransport.HydrateUsable([row.Model], _credentialStore).Single();
+        using var handler = WebhookTransport.BuildHandler(
+            _credentialStore.LoadConfig().WebhookProxy, _credentialStore);
+        var error = await new WebhookNotifier(handler).SendTestAsync(hydrated);
         WebhookTestResult = error == null
             ? $"Test sent to {row.Name} - check the channel."
             : $"{row.Name}: {error}";
