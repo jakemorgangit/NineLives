@@ -226,7 +226,20 @@ public class SqlServerService : ISqlServerService
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT name FROM sys.databases ORDER BY name";
+
+        // User databases, online, and not snapshots - the same predicate the exposure query
+        // keeps, for the same reasons (#279). This list feeds "All user databases" on the
+        // backup screen and the copy screen's source dropdown: unfiltered, one click ticked
+        // tempdb (BACKUP DATABASE [tempdb] fails outright, Msg 3147) and every RESTORING or
+        // OFFLINE database, so the one-click patch-night path was guaranteed a red summary -
+        // and master was offered as a thing to copy onto another server.
+        cmd.CommandText = @"
+            SELECT name
+            FROM sys.databases
+            WHERE database_id > 4
+              AND source_database_id IS NULL
+              AND state_desc = 'ONLINE'
+            ORDER BY name";
         var databases = new List<string>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))

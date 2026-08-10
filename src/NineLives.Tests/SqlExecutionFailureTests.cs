@@ -49,6 +49,23 @@ public class SqlExecutionFailureTests
 
     private static SqlServerService Service() => new(new CredentialStore());
 
+    /// <summary>
+    /// The list that feeds "All user databases" and the copy's source dropdown (#279). Only a
+    /// real instance can prove the predicate: the fake returns whatever a test puts in it, so
+    /// this class of defect is invisible to the unit suite - tempdb was offered for backup
+    /// (Msg 3147 guaranteed) and master offered for copying.
+    /// </summary>
+    [RequiresSqlFact]
+    public async Task TheDatabaseListExcludesSystemDatabases()
+    {
+        var databases = await Service().GetDatabaseListAsync(TestServer());
+
+        Assert.DoesNotContain("master", databases, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tempdb", databases, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("model", databases, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("msdb", databases, StringComparer.OrdinalIgnoreCase);
+    }
+
     // Severity 16 is the band that matters: SQL Server reports almost every restore failure
     // there (3201 cannot open backup device, 3013 terminating abnormally, 4305 log too recent,
     // 3136 differential base mismatch).

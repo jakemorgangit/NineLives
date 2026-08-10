@@ -241,6 +241,11 @@ public sealed class FakeSqlServerService : ISqlServerService
         => Task.FromResult("Microsoft SQL Server 2022");
 
     /// <summary>What the fake instance says it holds.</summary>
+    /// <summary>
+    /// Whatever a test puts here - which means the REAL query's user-databases-only filter
+    /// (#279) is invisible to the unit suite. The live pin in SqlExecutionFailureTests is
+    /// what proves the predicate; tests here should stock this with user databases only.
+    /// </summary>
     public List<string> DatabaseList { get; set; } = [];
 
     public Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
