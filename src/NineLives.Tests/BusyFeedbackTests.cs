@@ -249,4 +249,40 @@ public class GlobalBusyTests
 
         Assert.Contains("Restoring", vm.BusyText);
     }
+
+    /// <summary>The two longest-running screens were the ones the indicator ignored (#289).</summary>
+    [Fact]
+    public void ABackupRunReachesTheWindow()
+    {
+        var vm = new MainViewModel(new FakeCredentialStore());
+
+        vm.Backup.IsRunning = true;
+        Assert.True(vm.IsBusy);
+        Assert.Equal("Running the backup...", vm.BusyText);
+
+        vm.Backup.IsRunning = false;
+        Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
+    public void ACopyRunReachesTheWindow()
+    {
+        var vm = new MainViewModel(new FakeCredentialStore());
+
+        vm.CopyDatabase.IsRunning = true;
+        Assert.True(vm.IsBusy);
+        Assert.Equal("Copying the database...", vm.BusyText);
+    }
+
+    [Fact]
+    public void ARestoreOutranksABackupRun()
+    {
+        var vm = new MainViewModel(new FakeCredentialStore());
+
+        vm.Backup.IsRunning = true;
+        vm.Restore.TargetDatabaseName = "MyDb_Restored";
+        vm.Restore.Execution.IsExecuting = true;
+
+        Assert.Contains("Restoring", vm.BusyText);
+    }
 }

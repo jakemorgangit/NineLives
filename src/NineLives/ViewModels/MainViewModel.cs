@@ -366,8 +366,13 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void RefreshBusy()
     {
+        // Backup and copy are the two other screens that RUN something long (#289) - the
+        // indicator exists so "is it doing something?" does not depend on scroll position,
+        // and the two longest-running screens were the ones it ignored.
         var text =
             Restore.IsBusyWithAnything ? Restore.BusyDescription
+            : Backup.IsRunning ? "Running the backup..."
+            : CopyDatabase.IsRunning ? "Copying the database..."
             : BlobConfig.IsBusy ? "Testing the container connection..."
             : BlobBrowser.IsBusy ? "Listing the container..."
             : ServerManager.IsBusy ? "Connecting to SQL Server..."

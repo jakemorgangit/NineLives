@@ -645,6 +645,10 @@ public partial class BackupViewModel : ViewModelBase
         {
             _runCancellation.End();
             IsRunning = false;
+
+            // Told, not interrupted (#289): the restore already flashes the taskbar when it
+            // finishes behind another window, and a backup is exactly as worth coming back to.
+            WindowAttention.FlashIfInBackground();
         }
     }
 

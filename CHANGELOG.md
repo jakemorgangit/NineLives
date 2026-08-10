@@ -101,6 +101,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The busy strip and the taskbar flash treat all three runs alike** (#289). The global
+  busy indicator - which exists so "is it doing something?" does not depend on scroll
+  position - now lights for backups and copies, the two longest-running screens it ignored.
+  And the taskbar attention flash on finishing behind another window, written for exactly
+  the alt-tabbed-away case, now fires for a finished backup and a finished copy as it always
+  did for a restore
 - **The handoff tells the truth** (#288). Clicking "Open in Restore" while a restore is
   RUNNING is refused with an explanation instead of wiping the run's chain and timeline off
   the screen - the handoff may not do what the regenerate button already refuses. What
