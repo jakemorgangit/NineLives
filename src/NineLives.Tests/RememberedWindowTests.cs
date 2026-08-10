@@ -128,11 +128,14 @@ public class RememberedWindowTests
     }
 
     /// <summary>
-    /// Closing from the launch cards records no screen - the cards are a question, not a place,
-    /// and recording them would land the next session on a screen that is not one.
+    /// Closing from the launch cards keeps the remembered screen (#290). The cards are a
+    /// question, not a place - which is exactly why they must not be RECORDED and equally
+    /// why closing on them must not ERASE the real place already remembered. This pin used
+    /// to assert null here, and since the cards show at every start, that wiped the memory
+    /// for anyone who opened the app and closed it without clicking through.
     /// </summary>
     [Fact]
-    public void ClosingFromTheCardsRecordsNoScreen()
+    public void ClosingFromTheCardsKeepsTheRememberedScreen()
     {
         var store = new FakeCredentialStore();
         store.Config.Mode = AppMode.Pro;
@@ -143,7 +146,7 @@ public class RememberedWindowTests
 
         main.SaveShutdownState(At(0, 0));
 
-        Assert.Null(store.Config.LastScreen);
+        Assert.Equal(MainViewModel.Nav.History, store.Config.LastScreen);
     }
 
     /// <summary>A config that would not load is not written back (#7's rule, respected here too).</summary>

@@ -91,6 +91,10 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- Closing the app on the launch mode-cards no longer erases the remembered screen (#290).
+  The cards show at every start, so opening the app and closing it without clicking through
+  wiped the last-screen memory and the next launch forgot where its owner works. No choice
+  made now means nothing recorded - not "record nothing"
 - BACKUP TO URL and the copy now ask the credential question the restore always asked
   (#284): the backup checks the source instance before its first statement, the copy checks
   BOTH ends before the source is read at full speed - a missing credential is created, an

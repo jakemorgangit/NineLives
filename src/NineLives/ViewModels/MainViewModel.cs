@@ -132,7 +132,11 @@ public partial class MainViewModel : ViewModelBase
             if (config.LoadError != null) return;
 
             config.Window = geometry;
-            config.LastScreen = IsChoosingMode ? null : CurrentViewName;
+            // Closing on the launch mode-cards leaves the remembered screen alone (#290): the
+            // cards are up at every start, so writing null here wiped #211's memory whenever
+            // the app was closed without clicking through - and the next launch forgot where
+            // its owner worked. No choice made means nothing to record, not "record nothing".
+            if (!IsChoosingMode) config.LastScreen = CurrentViewName;
             _credentialStore.SaveConfig(config);
         }
         catch
