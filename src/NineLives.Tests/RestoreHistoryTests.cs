@@ -229,6 +229,64 @@ public class RestoreHistoryTests : IDisposable
         Assert.False(vm.IsClearArmed);
         Assert.Single(store.Load());
     }
+
+    // ── two processes, one file (#298) ──────────────────────────────────────────
+
+    /// <summary>
+    /// The CLI made this two-process: a scheduled 9lives rehearse writes its receipt while
+    /// the app is open. Two stores on one path are two processes in miniature - separate
+    /// in-process gates, same file - and last-writer-wins used to silently drop entries.
+    /// </summary>
+    [Fact]
+    public async Task TwoWritersOnOnePathLoseNothing()
+    {
+        var a = Store();
+        var b = Store();
+
+        var writes = new List<Task>();
+        for (var i = 0; i < 25; i++)
+        {
+            var n = i;
+            writes.Add(Task.Run(() => a.Append(Entry($"FromA_{n}"))));
+            writes.Add(Task.Run(() => b.Append(Entry($"FromB_{n}"))));
+        }
+        await Task.WhenAll(writes);
+
+        var all = Store().Load();
+        Assert.Equal(50, all.Count);
+        for (var i = 0; i < 25; i++)
+        {
+            Assert.Contains(all, e => e.TargetDatabase == $"FromA_{i}");
+            Assert.Contains(all, e => e.TargetDatabase == $"FromB_{i}");
+        }
+    }
+
+    /// <summary>A writer waits for the holder instead of clobbering - and then lands.</summary>
+    [Fact]
+    public async Task AWriterQueuesBehindTheLockHolderAndStillLands()
+    {
+        var store = Store();
+        store.Append(Entry("First"));
+
+        var lockPath = Path.Combine(_dir, "restore-history.json.lock");
+
+        // Another process, in miniature: hold the sidecar exclusively, release shortly after.
+        var holder = new FileStream(
+            lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        var append = Task.Run(() => store.Append(Entry("Second")));
+
+        // The append is retrying against the held lock - not lost, not clobbering.
+        await Task.Delay(200);
+        Assert.False(append.IsCompleted);
+
+        holder.Dispose();
+        await append;
+
+        var all = Store().Load();
+        Assert.Equal(2, all.Count);
+        Assert.Contains(all, e => e.TargetDatabase == "Second");
+    }
 }
 
 /// <summary>
