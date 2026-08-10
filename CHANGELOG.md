@@ -101,6 +101,16 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The browser no longer mixes two sources' answers** (#286). Changing the container,
+  medium or source server mid-listing cancels the in-flight load instead of letting the
+  stale result land under the new source's name - and the set grouping runs with the
+  container that was ASKED, not a re-read of the selection, so a mid-flight switch can no
+  longer skew filename-less timestamps by the other container's time zone. A round trip to
+  another screen and back keeps the listing (the refresh compares identities before
+  reassigning selections), F5 now RELOADS the listing instead of emptying it, a cancelled
+  reload keeps the previous complete answer whole - rows and restore button in agreement -
+  the remembered container survives a rename by matching on Id, and both media report the
+  same thing in the status line: the source's total databases
 - The SQL Servers and Blob Storage screens now MERGE their saves into the configuration on
   disk instead of replacing it wholesale. Importing a config (or adding entries with the CLI)
   and then saving anything on either screen used to silently delete everything added since

@@ -136,11 +136,18 @@ public partial class BlobBrowserViewModel : ViewModelBase
     [ObservableProperty]
     private ServerConnection? _sourceServer;
 
-    partial void OnSourceServerChanged(ServerConnection? value) => Clear();
+    partial void OnSourceServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
+    {
+        // RefreshContainers rebuilds the list with fresh instances on every visit to this
+        // screen; the same saved server under a new reference is not a change of source, and
+        // clearing on it emptied the listing on every round trip away and back (#286).
+        if (oldValue?.Id == newValue?.Id) return;
+        Clear();
+    }
 
     public void RefreshContainers()
     {
-        var previous = SelectedContainer?.Name;
+        var previous = SelectedContainer?.Id;
         var previousServer = SourceServer?.Id;
         var config = _credentialStore.LoadConfig();
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
@@ -157,12 +164,16 @@ public partial class BlobBrowserViewModel : ViewModelBase
         }
 
         if (previous != null)
-            SelectedContainer = Containers.FirstOrDefault(c => c.Name == previous);
+            SelectedContainer = Containers.FirstOrDefault(c => c.Id == previous);
         if (SelectedContainer == null && Containers.Count > 0)
             SelectedContainer = Containers[0];
     }
 
-    partial void OnSelectedContainerChanged(BlobContainerConfig? value) => Clear();
+    partial void OnSelectedContainerChanged(BlobContainerConfig? oldValue, BlobContainerConfig? newValue)
+    {
+        if (oldValue?.Id == newValue?.Id) return;
+        Clear();
+    }
 
     /// <summary>
     /// Empties the screen. Called whenever the SOURCE changes, whichever part of it changed.
@@ -172,6 +183,12 @@ public partial class BlobBrowserViewModel : ViewModelBase
     /// </summary>
     private void Clear()
     {
+        // What is loading belongs to the source that was asked. Without this, changing the
+        // container mid-listing let the stale result land under the new selection - and the
+        // grouping then ran with the new container's time zone, skewing every filename-less
+        // timestamp by the zone difference.
+        _loadCancellation.Cancel();
+
         _allFiles.Clear();
         _allSets.Clear();
         FilteredFiles.Clear();
@@ -205,9 +222,16 @@ public partial class BlobBrowserViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void Refresh()
+    private async Task RefreshAsync()
     {
         RefreshContainers();
+
+        // Reload whatever is listed, which is F5's documented contract. The identity-aware
+        // change hooks above keep the refresh from clearing first, so this is a reload rather
+        // than a wipe-then-load.
+        if ((MediumIsBlob && SelectedContainer != null) ||
+            (MediumIsSharedPath && SourceServer != null))
+            await LoadBackupsAsync();
     }
 
     [RelayCommand]
@@ -237,9 +261,15 @@ public partial class BlobBrowserViewModel : ViewModelBase
                 return;
             }
 
-            _allFiles = await _blobService.ListBackupFilesAsync(SelectedContainer!, ct);
-            _allSets = _blobService.GroupIntoBackupSets(
-                _allFiles, SelectedContainer?.BackupServerTimeZoneId);
+            // Captured before the await: the answer belongs to the container that was asked.
+            // Re-reading the selection after the await grouped container A's files with
+            // container B's time zone when the selection changed mid-listing.
+            var container = SelectedContainer!;
+            var files = await _blobService.ListBackupFilesAsync(container, ct);
+            ct.ThrowIfCancellationRequested();
+
+            _allFiles = files;
+            _allSets = _blobService.GroupIntoBackupSets(files, container.BackupServerTimeZoneId);
             HasFiles = _allFiles.Count > 0;
 
             var servers = _blobService.GetDiscoveredServers(_allFiles);
@@ -259,14 +289,17 @@ public partial class BlobBrowserViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            // Listing is read-only, so there is nothing to undo or explain - just say it stopped.
+            // Listing is read-only, so there is nothing to undo or explain - just say it
+            // stopped. The rows still on screen are the previous complete answer for this same
+            // source (a source change would have cleared them), so HasFiles reflects THEM -
+            // half old rows with the restore button gone was neither truth.
             SetStatus("Loading cancelled.");
-            HasFiles = false;
+            HasFiles = _allFiles.Count > 0;
         }
         catch (Exception ex)
         {
             SetError($"Failed to load backups: {ex.Message}");
-            HasFiles = false;
+            HasFiles = _allFiles.Count > 0;
         }
         finally
         {
@@ -287,6 +320,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     {
         var source = SourceServer!;
         var history = await _sqlService.ReadBackupHistoryAsync(source, null, ct);
+        ct.ThrowIfCancellationRequested();
         var sets = BackupHistoryInventory.ToSets(history, BackupPathMapping.None);
 
         _allSets = sets;
@@ -307,6 +341,10 @@ public partial class BlobBrowserViewModel : ViewModelBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
 
+        // The total before the server auto-pick narrows the visible list - the blob path
+        // reports the container's total, so the history path reports the instance's.
+        var totalDatabases = DiscoveredDatabases.Count;
+
         if (DiscoveredServers.Count > 0)
             SelectedServer = DiscoveredServers[0];
         else if (DiscoveredDatabases.Count > 0)
@@ -318,7 +356,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
         SetStatus(sets.Count == 0
             ? $"{source.ServerName} has no backup history."
             : $"Read {_allFiles.Count} file(s) in {sets.Count} backup set(s) from "
-              + $"{source.ServerName} across {DiscoveredDatabases.Count} database(s).");
+              + $"{source.ServerName} across {totalDatabases} database(s).");
     }
 
     /// <summary>
