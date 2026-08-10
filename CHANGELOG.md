@@ -57,6 +57,11 @@ more detail on the user-facing changes; this file is the short history.
   Executed runs land in the same History the app lists and notify the same webhooks -
   `9lives rehearse --execute` on a schedule is nightly proof with receipts, no SQL Agent
   required
+- **The CLI documents itself**: `9lives help` for the overview, `9lives help restore` (or
+  any verb, or `--help` after one) for the full page - every option explained, the behaviour,
+  the per-verb exit codes, worked examples. The reference lives inside the exe, where it
+  cannot drift from the parser it describes, and a test holds each page to the verb's own
+  option list - an undocumented flag or a documented-but-refused one both fail the build
 
 ### Changed
 

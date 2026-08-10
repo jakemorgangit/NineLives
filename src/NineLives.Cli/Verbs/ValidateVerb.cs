@@ -21,7 +21,44 @@ internal static class ValidateVerb
         "Check every chain is intact; the exit code is the answer",
         "9lives validate (--container NAME | --server NAME) [--database DB] [--json]",
         Valued: ["container", "server", "database"],
-        Switches: ["json"]);
+        Switches: ["json"],
+        Options:
+        [
+            ("--container NAME", "A blob container configured in the app."),
+            ("--server NAME", "A configured server, read from its msdb history."),
+            ("--database DB", "Narrow to one database. Omitted, every database the source " +
+                "holds is judged - which is what a nightly check wants."),
+            ("--json", "Verdicts as JSON on stdout: database, intact, points, reaches, " +
+                "stranded (the reasons, spelled out).")
+        ],
+        Notes:
+        [
+            "The chain builder already refuses to offer what SQL Server would reject - a " +
+            "differential whose base full is not in hand, a log run broken before it. This " +
+            "verb makes those refusals VISIBLE: a set silently absent from the points list " +
+            "looks fine right up until the restore that needed it. Every stranded set is " +
+            "named with the error it prevents (a baseless differential is error 3136 at " +
+            "restore time; a disconnected log is a chain that stops early).",
+            "Chain logic only, deliberately, so it is cheap enough to run every night: " +
+            "nothing here opens a backup file. Whether each file is actually READABLE is " +
+            "the app's audit; whether every byte truly restores is what rehearse proves.",
+            "BROKEN in the table means at least one stranded set or a database whose " +
+            "backups reach nowhere at all."
+        ],
+        ExitCodes:
+        [
+            "0   every chain intact",
+            "2   something is broken - the stderr lines say what and why",
+            "3   the source could not be read at all",
+            "64  usage"
+        ],
+        Examples:
+        [
+            ("9lives validate --server SRV01",
+                "every database SRV01 backs up, judged in one exit code"),
+            ("9lives validate --container backups --database Sales --json",
+                "one database's verdict, for tooling")
+        ]);
 
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)

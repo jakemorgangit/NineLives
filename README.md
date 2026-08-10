@@ -95,6 +95,8 @@ Five read-only verbs. `list` says what a source holds; `points` is the timeline 
 
 Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-by-chain, `3` could not answer, `64` usage. `--json` on the read verbs makes the output composable with jq and friends.
 
+The full reference ships inside the exe: `9lives help` for the overview, `9lives help restore` (or any verb) for the complete page - every option, the behaviour, the exit codes, examples. Documentation that lives in the binary cannot drift from it, and a test holds every page to the parser's own option lists.
+
 Two verbs execute, and they are built out of refusals: `restore` and `rehearse` run nothing without `--execute`; overwriting an existing database is said with `--with-replace`, its own flag that `--force` cannot substitute for; and the same preflights the app fires - file readability, version direction (error 3169), the TDE certificate (error 33111) - refuse before anything is dropped, `--force` being the deliberate override for evidence only. Executed runs land in the app's History and notify the same webhooks, so `9lives rehearse --execute` on a schedule is nightly proof with receipts - no SQL Agent required.
 
 ## Features

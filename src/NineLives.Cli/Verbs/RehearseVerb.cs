@@ -22,7 +22,55 @@ internal static class RehearseVerb
         "9lives rehearse (--container NAME | --server NAME) --database DB --target SERVER " +
         "[--at \"yyyy-MM-dd HH:mm:ss\"] [--execute]",
         Valued: ["container", "server", "database", "at", "target"],
-        Switches: ["execute"]);
+        Switches: ["execute"],
+        Options:
+        [
+            ("--container NAME", "A blob container configured in the app, as the source."),
+            ("--server NAME", "A configured server's msdb history, as the source."),
+            ("--database DB", "The database to PROVE. Required. The scratch copy is named " +
+                "after it: MyDb becomes MyDb_rehearsal_20260810_0930."),
+            ("--target SERVER", "The configured server the scratch restore runs on. " +
+                "Required. Its default data and log paths receive the relocated files."),
+            ("--at TIME", "Prove the chain to this moment. Omitted, the newest reachable " +
+                "point - which is the honest answer to \"could I restore what I have NOW?\""),
+            ("--execute", "Actually run it. Without this, the full rehearsal script prints " +
+                "and nothing is touched.")
+        ],
+        Notes:
+        [
+            "\"The only tested backup is a restored backup.\" Everyone repeats it; this verb " +
+            "produces the evidence: restore the chain to a scratch database, prove the data " +
+            "with DBCC CHECKDB, drop the scratch copy. The elapsed time is a MEASURED " +
+            "restore time - the number RTO conversations are otherwise made up from.",
+            "Safety by construction, same as the app's rehearsal: the scratch name is " +
+            "generated and honest about what it is, the restore refuses if that name " +
+            "somehow exists, WITH REPLACE never appears, every file is relocated to the " +
+            "target's defaults so nothing collides with the real database, and the cleanup " +
+            "runs LAST - a failed rehearsal retains the scratch copy as evidence to " +
+            "inspect, then drop.",
+            "The receipt lands in the same History the app reads, as a Rehearsal entry: " +
+            "the exposure dashboard's Proven column and measured RTO fill in from it, and " +
+            "webhook notifications name the database being proven, not the scratch copy. " +
+            "Scheduled - Task Scheduler, a CI job, anything that can run an exe nightly - " +
+            "this is proof that renews itself, with no SQL Agent required.",
+            "The app can also wrap this same loop as a disabled SQL Agent job (Rehearsal " +
+            "as Agent job, on the restore screen) for estates that prefer receipts in the " +
+            "job history."
+        ],
+        ExitCodes:
+        [
+            "0   PROVEN - restored, CHECKDB clean, scratch dropped (or, without --execute, printed)",
+            "2   NOT PROVEN - the failure is recorded, the scratch copy retained as evidence",
+            "3   the source or target could not be reached, or FILELISTONLY answered nothing",
+            "64  usage"
+        ],
+        Examples:
+        [
+            ("9lives rehearse --container backups --database Sales --target SRV02 --execute",
+                "prove Sales restores, right now, receipt in History"),
+            ("9lives rehearse --server SRV01 --database Sales --target SRV02",
+                "print the rehearsal script without running it")
+        ]);
 
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)

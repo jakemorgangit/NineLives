@@ -16,7 +16,43 @@ internal static class PointsVerb
         "The restore points a database's chains can reach",
         "9lives points (--container NAME | --server NAME) --database DB [--json]",
         Valued: ["container", "server", "database"],
-        Switches: ["json"]);
+        Switches: ["json"],
+        Options:
+        [
+            ("--container NAME", "A blob container configured in the app."),
+            ("--server NAME", "A configured server, read from its msdb history."),
+            ("--database DB", "Which database's chains to compute. Required - points are " +
+                "per-database by nature. The list verb says what names exist."),
+            ("--json", "Points as JSON on stdout: timestamp, type, chain, files, approximate.")
+        ],
+        Notes:
+        [
+            "Every discrete moment a VALID chain reaches, computed by the same chain builder " +
+            "the app's timeline is drawn from: each full, each differential with its base " +
+            "full in hand, each log connected LSN-to-LSN back to an anchor. If a moment is " +
+            "not in this list, no chain in the source reaches it - which is exactly what a " +
+            "DR pipeline wants to assert BEFORE it needs the moment, not during.",
+            "A trailing ~ marks a timestamp inferred from the blob's name or write time " +
+            "rather than read from a backup header - close, but not the header's word. The " +
+            "app's audit reads the headers when it matters.",
+            "STOPAT moments BETWEEN log points are reachable too - the script and restore " +
+            "verbs handle that windowing; this verb lists the discrete points the windows " +
+            "hang off."
+        ],
+        ExitCodes:
+        [
+            "0   points listed",
+            "2   nothing in the source forms a valid chain for this database",
+            "3   the source could not be read at all",
+            "64  usage"
+        ],
+        Examples:
+        [
+            ("9lives points --container backups --database Sales",
+                "the timeline as a table"),
+            ("9lives points --server SRV01 --database Sales --json",
+                "the timeline for tooling")
+        ]);
 
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)

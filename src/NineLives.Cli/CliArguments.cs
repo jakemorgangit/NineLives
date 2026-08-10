@@ -1,21 +1,31 @@
 namespace Blackcat.NineLives.Cli;
 
 /// <summary>
-/// What a verb accepts: which options take a value, which are bare switches. The parser
-/// validates against this rather than guessing, so "--json 2026-08-01" is an error about an
-/// unexpected value instead of a silently swallowed timestamp.
+/// What a verb accepts - and what it MEANS. The parser validates against the option lists, so
+/// "--json 2026-08-01" is an error about an unexpected value instead of a silently swallowed
+/// timestamp; the documentation fields are what "9lives help verb" renders. Both live on the
+/// same record, beside the verb they describe, so the reference the exe carries cannot drift
+/// from the parser the exe runs - and a test holds the two to each other.
 /// </summary>
 /// <param name="Name">The verb itself, e.g. "points".</param>
-/// <param name="Summary">One line for the help screen.</param>
+/// <param name="Summary">One line for the overview screen.</param>
 /// <param name="Usage">The synopsis line shown on usage errors and in help.</param>
 /// <param name="Valued">Options that take a value: "container", "at", ...</param>
 /// <param name="Switches">Options that stand alone: "json", ...</param>
+/// <param name="Options">Each option's term and explanation, e.g. ("--at TIME", "...").</param>
+/// <param name="Notes">Behaviour paragraphs for the verb's help page, wrapped at render.</param>
+/// <param name="ExitCodes">This verb's exit codes, each "N  meaning".</param>
+/// <param name="Examples">Command and one-line meaning pairs.</param>
 internal sealed record VerbSpec(
     string Name,
     string Summary,
     string Usage,
     string[] Valued,
-    string[] Switches);
+    string[] Switches,
+    (string Term, string Help)[] Options,
+    string[] Notes,
+    string[] ExitCodes,
+    (string Command, string Meaning)[] Examples);
 
 /// <summary>
 /// One parsed command line, validated against a <see cref="VerbSpec"/>. Pure and small on
