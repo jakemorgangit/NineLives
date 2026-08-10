@@ -348,9 +348,14 @@
 
                         <StackPanel Grid.Column="1" Margin="0,0,12,0">
                             <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                            <!-- Greyed until an instance is chosen (#319): a pre-filled list
+                                 mixed every server's databases, and picking from it meant
+                                 guessing whose history the timeline would show. -->
                             <ComboBox ItemsSource="{Binding Inventory.DiscoveredDatabases}"
                                       SelectedItem="{Binding Inventory.SelectedDatabaseName}"
-                                      Style="{StaticResource DarkComboBox}" />
+                                      IsEnabled="{Binding Inventory.HasDatabaseChoices}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      ToolTip="Waits for the server/instance on the left - the databases listed are the chosen instance's own." />
                         </StackPanel>
                     </Grid>
 

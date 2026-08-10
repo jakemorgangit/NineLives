@@ -374,7 +374,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
             ApplyCachedAudit();
 
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(_allBackups));
-            DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(_allBackups));
+            OfferDatabasesForSelection();
 
             RefreshUnclassifiedCount();
             RebuildWorkingSet();
@@ -400,9 +400,58 @@ public partial class BackupInventoryViewModel : ViewModelBase
         }
     }
 
+
+    /// <summary>
+    /// The database list waits for an instance (#319). With several instances discovered, a
+    /// pre-filled list mixes every server's databases - two instances that both back up a
+    /// database called Sales is the everyday DR pair, and picking from the mixed list means
+    /// guessing whose history the timeline will show. So: no instance dimension at all -
+    /// offer everything; exactly one - choose it, since a question with a single answer
+    /// should not gate anything; several - the databases wait.
+    /// </summary>
+    private void OfferDatabasesForSelection()
+    {
+        if (DiscoveredServers.Count == 1)
+        {
+            SelectedServerName = DiscoveredServers[0];
+            return;
+        }
+
+        SelectedServerName = null;
+
+        if (DiscoveredServers.Count == 0)
+        {
+            DiscoveredDatabases = new ObservableCollection<string>(_allSets
+                .Where(x => !string.IsNullOrEmpty(x.DatabaseName))
+                .Select(x => x.DatabaseName!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            return;
+        }
+
+        DiscoveredDatabases = [];
+    }
+
+    /// <summary>Lets the view grey the database picker out while it is waiting (#319).</summary>
+    public bool HasDatabaseChoices => DiscoveredDatabases.Count > 0;
+
+    partial void OnDiscoveredDatabasesChanged(
+        System.Collections.ObjectModel.ObservableCollection<string> value)
+        => OnPropertyChanged(nameof(HasDatabaseChoices));
+
     partial void OnSelectedServerNameChanged(string? value)
     {
         if (_allSets.Count == 0) return;
+
+        // Deselecting the instance empties the list again (#319) - except when there was no
+        // instance dimension to begin with, where the guard in OfferDatabasesForSelection
+        // already offered everything.
+        if (string.IsNullOrEmpty(value) && DiscoveredServers.Count > 1)
+        {
+            DiscoveredDatabases = [];
+            RebuildWorkingSet();
+            return;
+        }
 
         // Compare the FULL server identity. Matching on the host alone made selecting
         // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that only
@@ -546,7 +595,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
             ApplyCachedAudit();
 
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(files));
-            DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(files));
+            OfferDatabasesForSelection();
             BackupsLoaded = files.Count > 0;
 
             RefreshUnclassifiedCount();
@@ -706,11 +755,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
 
-        DiscoveredDatabases = new ObservableCollection<string>(
-            sets.Select(s => s.DatabaseName)
-                .Where(n => !string.IsNullOrEmpty(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+        OfferDatabasesForSelection();
 
         BackupsLoaded = sets.Count > 0;
 
@@ -747,11 +792,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
 
-        DiscoveredDatabases = new ObservableCollection<string>(
-            sets.Select(s => s.DatabaseName)
-                .Where(n => !string.IsNullOrEmpty(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+        OfferDatabasesForSelection();
 
         BackupsLoaded = sets.Count > 0;
 
