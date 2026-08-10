@@ -517,6 +517,48 @@
                                    Style="{StaticResource BodyText}" />
                     </Border>
 
+            <!-- Retention referee (#241): what a keep-N-days rule would do - report-only, because
+                 the app that makes restores safe should not also be the app that deletes backups. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="RETENTION" Style="{StaticResource LabelText}" />
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,10"
+                               Text="What would an age-based deletion rule do to these backups? The answer is not obvious: restores INSIDE the window depend on the newest full OUTSIDE it, and on the logs that bridge the gap. This names what must survive its own age - before a lifecycle rule finds out via error 3136." />
+
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="KEEP" Style="{StaticResource LabelText}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBox Text="{Binding RetentionKeepDays, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DarkTextBox}"
+                                 Width="60" VerticalContentAlignment="Center" />
+                        <TextBlock Text="DAYS" Style="{StaticResource LabelText}" VerticalAlignment="Center" Margin="8,0,12,0" />
+                        <Button Content="What would that rule do?"
+                                Command="{Binding AdviseRetentionCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="12,6" />
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding RetentionSummary}"
+                               Style="{StaticResource BodyText}"
+                               TextWrapping="Wrap"
+                               Margin="0,10,0,0" />
+
+                    <ItemsControl ItemsSource="{Binding RetentionWarnings}" Margin="0,6,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"
+                                           Style="{StaticResource SecondaryText}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,2" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
                     <!-- Reported, not corrected. A database full of these almost always means the
                          PATH PATTERN is wrong, and fixing each symptom quietly would hide it. -->
                     <ItemsControl ItemsSource="{Binding Inventory.AuditFindings}" Margin="0,10,0,0">

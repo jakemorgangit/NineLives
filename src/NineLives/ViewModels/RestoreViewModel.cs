@@ -2157,6 +2157,52 @@ public partial class RestoreViewModel : ViewModelBase
             appendLog => PreflightAsync(server, appendLog));
     }
 
+    // ── retention (#241) ────────────────────────────────────────────────────────
+
+    /// <summary>The window a rule would keep, in days. 30 is the commonest policy default.</summary>
+    [ObservableProperty]
+    private int _retentionKeepDays = 30;
+
+    [ObservableProperty]
+    private string _retentionSummary = string.Empty;
+
+    /// <summary>The sets a rule must NOT delete despite their age, each with its reason.</summary>
+    [ObservableProperty]
+    private System.Collections.ObjectModel.ObservableCollection<string> _retentionWarnings = [];
+
+    public bool CanAdviseRetention => Inventory.AllSets.Count > 0;
+
+    /// <summary>
+    /// What a keep-N-days rule would do to the loaded backups (#241): what goes, what must stay
+    /// despite its age because kept restores depend on it, and what is already broken.
+    ///
+    /// Report-only, deliberately: the app that exists to make restores safe should not also be
+    /// the app that deletes backups. Deleting stays a human act, done elsewhere, with this
+    /// report in hand.
+    /// </summary>
+    [RelayCommand]
+    private void AdviseRetention()
+    {
+        if (Inventory.AllSets.Count == 0)
+        {
+            RetentionSummary = "Load backups first - the advisor judges what is on screen.";
+            return;
+        }
+
+        var findings = RetentionAdvisor.Advise(Inventory.AllSets, RetentionKeepDays, DateTime.Now);
+
+        RetentionSummary = RetentionAdvisor.Summarise(findings, RetentionKeepDays);
+
+        RetentionWarnings = new System.Collections.ObjectModel.ObservableCollection<string>(
+            findings
+                .Where(f => f.Verdict is RetentionVerdict.KeepDespiteAge or RetentionVerdict.Broken)
+                .Select(f => $"{f.Set.DatabaseName} {f.Set.Type} {f.Set.Timestamp:yyyy-MM-dd HH:mm} - " +
+                             (f.Verdict == RetentionVerdict.Broken ? "ALREADY BROKEN: " : "MUST KEEP: ") +
+                             f.Reason));
+
+        _log.Info($"[retention] {RetentionSummary}");
+    }
+
     // ── rehearsal (#238) ────────────────────────────────────────────────────────
 
     /// <summary>
