@@ -144,6 +144,19 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>The geometry the last session saved, for the window to apply before first paint.</summary>
     public WindowGeometry? SavedGeometry { get; private set; }
 
+    /// <summary>
+    /// The dashboard answers "how exposed am I?" - arriving at an empty screen that needs a
+    /// button press first is the screen failing its own question. First visit sweeps
+    /// automatically; after that Refresh is deliberate, because a sweep touches every server.
+    /// </summary>
+    private ExposureViewModel SweepExposureOnFirstVisit()
+    {
+        if (Exposure.Rows.Count == 0 && !Exposure.IsSweeping)
+            _ = Exposure.RefreshCommand.ExecuteAsync(null);
+
+        return Exposure;
+    }
+
     /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
     public bool IsViewAvailable(string viewName) => viewName switch
     {
@@ -554,7 +567,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.BlobStorage => BlobConfig,
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,
-            Nav.Exposure => Exposure,
+            Nav.Exposure => SweepExposureOnFirstVisit(),
             Nav.Backup => Backup,
             Nav.Restore => Restore,
             Nav.CopyDatabase => CopyDatabase,

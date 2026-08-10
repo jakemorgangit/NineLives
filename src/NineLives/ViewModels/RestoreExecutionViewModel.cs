@@ -182,6 +182,13 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// </param>
     public async Task RunAsync(RestoreRun run, Func<Action<string>, Task<CredentialPreflight>> preflight)
     {
+        // What the notifications call the run. A rehearsal's TARGET is the scratch copy, which
+        // is an implementation detail - the thing being PROVEN is the source database, and that
+        // is the name a Teams channel can recognise.
+        var subject = run.Kind == RunKind.Rehearsal && !string.IsNullOrWhiteSpace(run.SourceDatabase)
+            ? run.SourceDatabase!
+            : run.TargetDatabase;
+
         Disarm();
 
         // The recovery steps that may follow must agree with the run that produced them, even if
@@ -241,7 +248,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // "started" messages for runs that went nowhere teach people to ignore the channel.
             _notifier.Notify(new RunNotification(
                 RunPhase.Started, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
-                run.TargetDatabase, run.Server.ServerName, run.ChainSummary));
+                subject, run.Server.ServerName, run.ChainSummary));
 
             await _sql.ExecuteWithProgressAsync(
                 run.Server,
@@ -281,7 +288,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             _notifier.Notify(new RunNotification(
                 RunPhase.Succeeded, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
-                run.TargetDatabase, run.Server.ServerName,
+                subject, run.Server.ServerName,
                 run.Kind == RunKind.Rehearsal
                     ? "Restored, CHECKDB passed, scratch copy dropped. The backup is proven."
                     : run.ChainSummary,
@@ -316,7 +323,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             _notifier.Notify(new RunNotification(
                 RunPhase.Problem, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
-                run.TargetDatabase, run.Server.ServerName,
+                subject, run.Server.ServerName,
                 "Cancelled part-way through the chain - the target is left mid-restore.",
                 DateTime.Now - startedAt));
 
@@ -332,7 +339,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             _notifier.Notify(new RunNotification(
                 RunPhase.Problem, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
-                run.TargetDatabase, run.Server.ServerName,
+                subject, run.Server.ServerName,
                 ex.Message, DateTime.Now - startedAt));
 
             // The restore has stopped part-way and the target is almost certainly not usable. Find
