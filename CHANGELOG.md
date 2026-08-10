@@ -35,6 +35,19 @@ more detail on the user-facing changes; this file is the short history.
   belongs to the rehearsal alone; a failed run still retains its scratch copy as evidence until
   the next run has been seen (#259)
 
+### Added
+
+- **The CLI: 9lives.exe** (#63). The restore engine from a terminal - the same chain
+  calculation, striped-set grouping and script generation the app runs, against the same
+  configured containers, servers and credentials. Five read-only verbs: `list` (what a source
+  holds), `points` (the timeline as text or JSON), `script` (validated restore T-SQL to
+  stdout, STOPAT and marked-transaction targets included), `validate` (is every chain intact -
+  the exit code is the answer), and `exposure` (the dashboard's sweep with the worst level as
+  the exit code, so a scheduled task turns quiet log-backup silence into a red pipeline).
+  Distinct exit codes for warn, broken, could-not-answer and usage, because a pipeline
+  branches on numbers, not prose. Nothing executes against an instance - execution verbs
+  arrive later behind their own explicit flags
+
 ### Changed
 
 - The engine - every service and model - now lives in NineLives.Core, a library with no UI
