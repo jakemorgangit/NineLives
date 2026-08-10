@@ -54,6 +54,16 @@ public class WebhookEndpoint
     /// <summary>It failed, was cancelled, or hit a problem mid-run.</summary>
     public bool NotifyProblems { get; set; } = true;
 
+    /// <summary>When the last delivery attempt happened - a test or a real run alike.</summary>
+    public DateTime? LastDeliveryAt { get; set; }
+
+    /// <summary>
+    /// "delivered", or the error text (#292). Delivery failures land only in the operation
+    /// log by design, so without this a webhook broken for weeks looked identical in
+    /// Settings to one that works.
+    /// </summary>
+    public string? LastDeliveryOutcome { get; set; }
+
     [JsonIgnore]
     public bool IsUsable => !string.IsNullOrWhiteSpace(Url);
 

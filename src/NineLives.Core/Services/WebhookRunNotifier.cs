@@ -63,15 +63,20 @@ public sealed class WebhookRunNotifier : IRunNotifier
                 // The injected notifier (tests) is used as-is; the real one is built per
                 // delivery with the configured transport (#316), so a proxy change in
                 // Settings applies to the very next send.
+                // The stamp makes silent breakage visible in Settings (#292): every
+                // attempt records when and how it went, per endpoint, test and run alike.
+                Action<WebhookEndpoint, string?> stamp =
+                    (endpoint, error) => WebhookTransport.RecordDelivery(_store, endpoint.Id, error);
+
                 if (_injected != null)
                 {
-                    await _injected.NotifyAsync(endpoints, notification, line => _log.Info(line));
+                    await _injected.NotifyAsync(endpoints, notification, line => _log.Info(line), stamp);
                 }
                 else
                 {
                     using var handler = WebhookTransport.BuildHandler(proxy, _store);
                     var notifier = new WebhookNotifier(handler);
-                    await notifier.NotifyAsync(endpoints, notification, line => _log.Info(line));
+                    await notifier.NotifyAsync(endpoints, notification, line => _log.Info(line), stamp);
                 }
             }
             catch (Exception ex)

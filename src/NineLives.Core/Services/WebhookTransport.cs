@@ -85,6 +85,29 @@ public static class WebhookTransport
         => ResolveUrl(endpoint, store) != null;
 
     /// <summary>
+    /// Records a delivery attempt's outcome against the endpoint (#292). Loaded fresh and
+    /// saved immediately, so the stamp lands on whatever the config has become since the
+    /// delivery started; a failed stamp is not a failed delivery, so it swallows.
+    /// </summary>
+    public static void RecordDelivery(ICredentialStore store, string endpointId, string? error)
+    {
+        try
+        {
+            var config = store.LoadConfig();
+            var target = config.Webhooks.FirstOrDefault(w => w.Id == endpointId);
+            if (target == null) return;
+
+            target.LastDeliveryAt = DateTime.Now;
+            target.LastDeliveryOutcome = error ?? "delivered";
+            store.SaveConfig(config);
+        }
+        catch
+        {
+            // The delivery already happened and is already logged; the stamp is bookkeeping.
+        }
+    }
+
+    /// <summary>
     /// Commits a URL as a secret (#317): into the vault, out of the file. After this the app
     /// never displays it again - replacing it means saving a new one, not reading this one.
     /// </summary>

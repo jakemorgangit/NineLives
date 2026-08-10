@@ -144,7 +144,7 @@ public class CliEndingsTests
 
         public override async Task NotifyAsync(
             IReadOnlyList<WebhookEndpoint> endpoints, RunNotification notification,
-            Action<string>? log = null)
+            Action<string>? log = null, Action<WebhookEndpoint, string?>? outcome = null)
         {
             await Task.Delay(250);
             Delivered = true;
@@ -155,7 +155,7 @@ public class CliEndingsTests
     {
         public override Task NotifyAsync(
             IReadOnlyList<WebhookEndpoint> endpoints, RunNotification notification,
-            Action<string>? log = null)
+            Action<string>? log = null, Action<WebhookEndpoint, string?>? outcome = null)
             => Task.Delay(Timeout.InfiniteTimeSpan);
     }
 }
