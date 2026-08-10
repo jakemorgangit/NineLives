@@ -321,11 +321,17 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make the version ask throw - a server that does not answer at all (#63).</summary>
     public Exception? ThrowOnMajorVersion { get; set; }
 
-    public Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
+    /// <summary>
+    /// Awaited before the version answer - a test gates this to hold a check sweep open and
+    /// prove the run waits for the verdicts (#285).
+    /// </summary>
+    public Func<Task>? BeforeMajorVersion { get; set; }
+
+    public async Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
     {
+        if (BeforeMajorVersion != null) await BeforeMajorVersion();
         if (ThrowOnMajorVersion != null) throw ThrowOnMajorVersion;
-        return Task.FromResult(
-            MajorVersionByServer.TryGetValue(server.ServerName, out var v) ? v : ProductMajorVersion);
+        return MajorVersionByServer.TryGetValue(server.ServerName, out var v) ? v : ProductMajorVersion;
     }
 
     /// <summary>What GetDatabaseOverviewAsync answers (#205).</summary>

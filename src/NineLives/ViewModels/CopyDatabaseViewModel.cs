@@ -363,12 +363,57 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         SetStatus("Scripts generated.");
 
-        // Fire and forget: the scripts are usable immediately, and the answers arrive when the
-        // two instances have answered. A generation that had to wait on them would make the whole
-        // screen feel slower for checks that usually say "fine".
-        _ = CheckSpaceAsync();
-        _ = CheckEncryptionAsync();
-        _ = CheckVersionAsync();
+        // The checks depend on the SERVERS and the SOURCE database - not on the target
+        // name or any other keystroke-speed field. Re-asking two production instances six
+        // round trips per character typed was the disease (#285); racing sweeps whose
+        // leading clears could erase a fresher sweep's warning was its complication. One
+        // serialised sweep per input change, previous sweep cancelled, answers still
+        // arriving without the generation waiting on them.
+        var inputs = string.Join("|",
+            SourceServer?.Id, TargetServer?.Id, SourceDatabase,
+            MediumIsBlob ? Container?.Id : SharedPathRoot);
+        if (inputs != _lastCheckedInputs)
+        {
+            _lastCheckedInputs = inputs;
+            _checksTask = RunGenerationChecksAsync();
+        }
+    }
+
+    /// <summary>The inputs the last check sweep was answering for.</summary>
+    private string? _lastCheckedInputs;
+
+    /// <summary>The in-flight sweep, so the run can refuse to start before the verdicts are in.</summary>
+    private Task _checksTask = Task.CompletedTask;
+
+    private readonly OperationCancellation _checksCancellation = new();
+
+    /// <summary>
+    /// The three generation-time checks as one serialised sweep (#285): warnings cleared once
+    /// up front, verdicts in a fixed order (version - the hardest refusal - first), previous
+    /// sweep cancelled on re-entry so a stale answer can never clear or overwrite a fresh one.
+    /// </summary>
+    private async Task RunGenerationChecksAsync()
+    {
+        var ct = _checksCancellation.Begin();
+        try
+        {
+            VersionWarning = string.Empty;
+            EncryptionWarning = string.Empty;
+            SpaceWarning = string.Empty;
+            VolumeSpace = [];
+
+            await CheckVersionAsync(ct);
+            await CheckEncryptionAsync(ct);
+            await CheckSpaceAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer sweep took over; its answers are the ones that matter.
+        }
+        finally
+        {
+            _checksCancellation.End();
+        }
     }
 
     // ── can the target even accept it (#210's law, on the copy screen) ─────────
@@ -392,16 +437,14 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// STRONGEST terms, because unlike disk space nothing can change between generating and
     /// running that makes this legal.
     /// </summary>
-    private async Task CheckVersionAsync()
+    private async Task CheckVersionAsync(CancellationToken ct)
     {
-        VersionWarning = string.Empty;
-
         if (SourceServer == null || TargetServer == null) return;
 
         try
         {
-            var source = await _sql.GetProductMajorVersionAsync(SourceServer);
-            var target = await _sql.GetProductMajorVersionAsync(TargetServer);
+            var source = await _sql.GetProductMajorVersionAsync(SourceServer, ct);
+            var target = await _sql.GetProductMajorVersionAsync(TargetServer, ct);
 
             if (VersionCompatibility.Check(source, target) == VersionVerdict.Refuse)
             {
@@ -444,16 +487,14 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// between generating and running, and this app is not the authority on somebody else's
     /// security estate. Failing to answer raises nothing - warn on evidence, not on silence.
     /// </summary>
-    private async Task CheckEncryptionAsync()
+    private async Task CheckEncryptionAsync(CancellationToken ct)
     {
-        EncryptionWarning = string.Empty;
-
         if (SourceServer == null || TargetServer == null || string.IsNullOrWhiteSpace(SourceDatabase))
             return;
 
         try
         {
-            var (isEncrypted, certName) = await _sql.GetDatabaseTdeInfoAsync(SourceServer, SourceDatabase!);
+            var (isEncrypted, certName) = await _sql.GetDatabaseTdeInfoAsync(SourceServer, SourceDatabase!, ct);
             if (!isEncrypted) return;
 
             // The certificate itself, by thumbprint, when the source will say which it is - the
@@ -513,18 +554,15 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// Failing to answer is not a warning, same stance as the restore screen: this is a courtesy
     /// check over somebody else's storage.
     /// </summary>
-    private async Task CheckSpaceAsync()
+    private async Task CheckSpaceAsync(CancellationToken ct)
     {
-        VolumeSpace = [];
-        SpaceWarning = string.Empty;
-
         if (SourceServer == null || TargetServer == null || string.IsNullOrWhiteSpace(SourceDatabase))
             return;
 
         try
         {
-            var files = await _sql.GetDatabaseFilesAsync(SourceServer, SourceDatabase!);
-            var free = await _sql.GetVolumeFreeSpaceAsync(TargetServer);
+            var files = await _sql.GetDatabaseFilesAsync(SourceServer, SourceDatabase!, ct);
+            var free = await _sql.GetVolumeFreeSpaceAsync(TargetServer, ct);
             var volumes = RestoreSpaceCheck.Check(files, free);
 
             VolumeSpace = new ObservableCollection<VolumeSpace>(volumes);
@@ -658,6 +696,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         Outcome = CopyOutcome.NotStarted;
         OutcomeText = string.Empty;
 
+        // The warnings the confirmation shows must be the CURRENT answers (#285): a quick
+        // Confirm used to run with the panels still blank while the checks were in flight.
+        await _checksTask;
+
         var ct = _runCancellation.Begin();
 
         // The run executes what was SHOWN, not what is on screen later (#280): these
@@ -711,7 +753,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
                     _store, _sql, _log, Container, end, Append);
                 if (!preflight.CanProceed)
                 {
-                    Outcome = CopyOutcome.NotStarted;
+                    Outcome = CopyOutcome.StoppedBeforeAnythingHappened;
                     _notifier.Notify(new RunNotification(
                         RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
                         preflight.Refusal));

@@ -91,6 +91,13 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- The copy's generation-time checks answer for their inputs, not for keystrokes (#285).
+  Typing in the target-name box used to launch six round trips across BOTH production
+  instances per character, the racing sweeps could clear each other's warnings, and a quick
+  Confirm ran with the panels still blank. One serialised sweep per input change now -
+  version first, previous sweep cancelled on re-entry so a stale answer can never erase a
+  fresh warning - and the run waits for the verdicts before anything executes. A credential
+  refusal before the run also finally uses the outcome the enum always had for it
 - Closing the app on the launch mode-cards no longer erases the remembered screen (#290).
   The cards show at every start, so opening the app and closing it without clicking through
   wiped the last-screen memory and the next launch forgot where its owner works. No choice
