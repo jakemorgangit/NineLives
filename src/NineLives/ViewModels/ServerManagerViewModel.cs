@@ -89,6 +89,13 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerDisplay = string.Empty;
 
+    /// <summary>
+    /// Servers deleted on THIS screen since the last successful save (#276). The save merges
+    /// with the config on disk rather than replacing it, and a merge with no memory of local
+    /// deletions would resurrect every one of them from the fresh copy.
+    /// </summary>
+    private readonly HashSet<string> _pendingDeletes = [];
+
     public ServerManagerViewModel(ICredentialStore credentialStore, ISqlServerService sqlService)
     {
         _credentialStore = credentialStore;
@@ -100,6 +107,25 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         var config = _credentialStore.LoadConfig();
         Servers = new ObservableCollection<ServerConnection>(config.Servers);
+    }
+
+    /// <summary>
+    /// Catches the list up with entries added elsewhere - Settings' import, the CLI's
+    /// add-server - since this screen loaded (#276). Called on navigation, like every other
+    /// screen's refresh. Skipped mid-edit: replacing the list under an open editor would
+    /// reset the selection the editor belongs to.
+    /// </summary>
+    public void RefreshFromConfig()
+    {
+        if (IsEditing || IsBusy) return;
+
+        var config = _credentialStore.LoadConfig();
+        var onDisk = config.Servers.Select(s => s.Id).ToHashSet();
+        if (onDisk.SetEquals(Servers.Select(s => s.Id))) return;
+
+        var selectedId = SelectedServer?.Id;
+        Servers = new ObservableCollection<ServerConnection>(config.Servers);
+        SelectedServer = Servers.FirstOrDefault(s => s.Id == selectedId) ?? Servers.FirstOrDefault();
     }
 
     /// <summary>
@@ -140,8 +166,29 @@ public partial class ServerManagerViewModel : ViewModelBase
         try
         {
             var config = _credentialStore.LoadConfig();
-            config.Servers = [.. Servers];
+
+            // Merge, never replace (#276). This screen's list was loaded when the screen was;
+            // Settings' import or the CLI's add-server may have written entries since, and
+            // assigning [.. Servers] silently deleted every one of them. Entries this screen
+            // knows are taken from this screen, edits included; entries it has never seen are
+            // kept; only entries deleted HERE - the ledger - are dropped.
+            var mine = Servers.Where(s => s.Id != null).ToDictionary(s => s.Id!);
+            var merged = new List<ServerConnection>();
+            foreach (var existing in config.Servers)
+            {
+                if (existing.Id != null && _pendingDeletes.Contains(existing.Id)) continue;
+                merged.Add(existing.Id != null && mine.TryGetValue(existing.Id, out var ours)
+                    ? ours
+                    : existing);
+            }
+
+            foreach (var server in Servers)
+                if (!merged.Any(m => ReferenceEquals(m, server)))
+                    merged.Add(server);
+
+            config.Servers = merged;
             _credentialStore.SaveConfig(config);
+            _pendingDeletes.Clear();
             return true;
         }
         catch (Exception ex)
@@ -357,9 +404,11 @@ public partial class ServerManagerViewModel : ViewModelBase
         var removed = SelectedServer;
         var index = Servers.IndexOf(removed);
         Servers.Remove(removed);
+        if (removed.Id != null) _pendingDeletes.Add(removed.Id);
         if (!SaveServers())
         {
             Servers.Insert(Math.Clamp(index, 0, Servers.Count), removed);
+            if (removed.Id != null) _pendingDeletes.Remove(removed.Id);
             SelectedServer = removed;
             return;
         }
