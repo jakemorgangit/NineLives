@@ -19,6 +19,12 @@
                         Command="{Binding RefreshCommand}"
                         Style="{StaticResource PrimaryButton}"
                         Padding="16,8" Margin="0,0,12,0" />
+                <Button Content="Stop"
+                        Command="{Binding StopSweepCommand}"
+                        Style="{StaticResource SecondaryButton}"
+                        Padding="16,8" Margin="0,0,12,0"
+                        Visibility="{Binding CanCancelSweep, Converter={StaticResource BoolToVis}}"
+                        ToolTip="Stops the sweep. Rows already on screen stay - they are the previous sweep's answer." />
                 <ContentControl Template="{StaticResource BusySpinner}"
                                 Width="16" Height="16" Margin="0,0,8,0"
                                 VerticalAlignment="Center"

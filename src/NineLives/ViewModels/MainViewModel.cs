@@ -155,7 +155,9 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private ExposureViewModel SweepExposureOnFirstVisit()
     {
-        if (Exposure.Rows.Count == 0 && !Exposure.IsSweeping)
+        // Gated on a real has-swept flag (#287): inferring "never swept" from an empty rows
+        // list re-swept the whole estate on every visit whenever the answer WAS empty.
+        if (!Exposure.HasSwept && !Exposure.IsSweeping)
             _ = Exposure.RefreshCommand.ExecuteAsync(null);
 
         return Exposure;
@@ -536,7 +538,8 @@ public partial class MainViewModel : ViewModelBase
     {
         if (Restore.Execution.CancelCommand.CanExecute(null)) { Restore.Execution.CancelCommand.Execute(null); return; }
         if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
-        if (Restore.CancelLoadCommand.CanExecute(null)) Restore.CancelLoadCommand.Execute(null);
+        if (Restore.CancelLoadCommand.CanExecute(null)) { Restore.CancelLoadCommand.Execute(null); return; }
+        if (Exposure.CanCancelSweep) Exposure.StopSweepCommand.Execute(null);
     }
 
     /// <summary>
