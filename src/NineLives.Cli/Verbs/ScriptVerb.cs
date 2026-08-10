@@ -21,7 +21,53 @@ internal static class ScriptVerb
         "[--target-database NAME] [--with-replace] [--norecovery] [--stop-before-mark NAME | --stop-at-mark NAME] [--out FILE]",
         Valued: ["container", "server", "database", "at", "target-database",
                  "stop-before-mark", "stop-at-mark", "out"],
-        Switches: ["with-replace", "norecovery"]);
+        Switches: ["with-replace", "norecovery"],
+        Options:
+        [
+            ("--container NAME", "A blob container configured in the app."),
+            ("--server NAME", "A configured server, read from its msdb history."),
+            ("--database DB", "The database whose chain to script. Required."),
+            ("--at TIME", "The moment to restore to. Omitted, the newest reachable point is " +
+                "scripted. Formats: yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm, yyyy-MM-dd - " +
+                "exact and invariant, nothing culture-shaped."),
+            ("--target-database NAME", "Restore AS this name. Defaults to the source name."),
+            ("--with-replace", "Adds WITH REPLACE. Off by default, always - overwriting is " +
+                "said explicitly here just as it is on the restore verb."),
+            ("--norecovery", "Leave the database restoring (NORECOVERY), ready for more log."),
+            ("--stop-before-mark NAME", "Stop just BEFORE the named marked transaction - the " +
+                "deployment never happened. Marks are planted with BEGIN TRANSACTION ... " +
+                "WITH MARK; the app's restore screen finds them in msdb."),
+            ("--stop-at-mark NAME", "Stop AT the mark, including the marked transaction."),
+            ("--out FILE", "Write the script to a file instead of stdout.")
+        ],
+        Notes:
+        [
+            "Stdout carries ONLY the script - the chain summary and every human word go to " +
+            "stderr - so \"> restore.sql\" and pipes stay clean. The script is built by the " +
+            "same chain calculation, striped-set grouping and generator the app runs, which " +
+            "is why what this emits actually executes.",
+            "The moment is matched by RESTORE's own rules. STOPAT can only ride a log chain " +
+            "that spans past the moment, so --at picks the log chain covering it and stamps " +
+            "STOPAT on every log restore in the chain. A moment between two non-log points " +
+            "is a hole no chain reaches: the verb refuses and names the nearest reachable " +
+            "points either side, because quietly restoring to somewhere nearby is worse.",
+            "A mark and a time are the same mechanism aimed differently, so giving both is " +
+            "refused rather than ranked."
+        ],
+        ExitCodes:
+        [
+            "0   script emitted",
+            "2   no chain covers the moment asked for",
+            "3   the source could not be read at all",
+            "64  usage"
+        ],
+        Examples:
+        [
+            ("9lives script --container backups --database Sales --at \"2026-08-02 19:00\" --out restore.sql",
+                "the validated script for that moment, into a file"),
+            ("9lives script --server SRV01 --database Sales --stop-before-mark deploy_v2",
+                "undo a marked deployment - the sharpest point-in-time tool SQL Server has")
+        ]);
 
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)

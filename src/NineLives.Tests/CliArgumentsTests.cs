@@ -14,7 +14,8 @@ public class CliArgumentsTests
     private static readonly VerbSpec Spec = new(
         "points", "summary", "usage",
         Valued: ["container", "database", "at"],
-        Switches: ["json"]);
+        Switches: ["json"],
+        Options: [], Notes: [], ExitCodes: [], Examples: []);
 
     [Fact]
     public void ValuedOptionsAndSwitchesParse()

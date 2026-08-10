@@ -15,7 +15,44 @@ internal static class ListVerb
         "The databases a source holds backups for, with counts and freshness",
         "9lives list (--container NAME | --server NAME) [--json]",
         Valued: ["container", "server"],
-        Switches: ["json"]);
+        Switches: ["json"],
+        Options:
+        [
+            ("--container NAME",
+                "A blob container configured in the app, by its configured name. The whole " +
+                "container is listed and grouped into backup sets, exactly as the app's " +
+                "browser groups it - striped sets count once, not per file."),
+            ("--server NAME",
+                "A server configured in the app. What ITS msdb recorded backing up - which " +
+                "covers everything that instance wrote, wherever it wrote it."),
+            ("--json",
+                "The same rows as JSON on stdout: database, fulls, diffs, logs, latest. " +
+                "camelCase names, ISO 8601 dates.")
+        ],
+        Notes:
+        [
+            "One line per database: how many fulls, differentials and logs the source holds, " +
+            "and when the newest of any kind was taken. This is the discovery step - the " +
+            "answer to \"what can I even ask about?\" - and the value every other verb's " +
+            "--database option is chosen from.",
+            "Give exactly one source. A container and a server are different catalogues " +
+            "answering the same question, and which one is meant matters: the container " +
+            "knows what is IN it, the server knows what it WROTE."
+        ],
+        ExitCodes:
+        [
+            "0   listed",
+            "2   the source holds no recognisable backups",
+            "3   the source could not be read at all",
+            "64  usage"
+        ],
+        Examples:
+        [
+            ("9lives list --container backups",
+                "every database the container holds, with freshness"),
+            ("9lives list --server SRV01 --json",
+                "what SRV01's msdb recorded, for jq and friends")
+        ]);
 
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)

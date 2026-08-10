@@ -19,13 +19,74 @@ internal static class RestoreVerb
 {
     public static readonly VerbSpec Spec = new(
         "restore",
-        "Generate - and with --execute, run - a restore against a target server",
+        "Generate, and with --execute run, a restore against a target server",
         "9lives restore (--container NAME | --server NAME) --database DB --target SERVER " +
         "[--at \"yyyy-MM-dd HH:mm:ss\"] [--target-database NAME] [--with-replace] [--norecovery] " +
         "[--stop-before-mark NAME | --stop-at-mark NAME] [--execute] [--force]",
         Valued: ["container", "server", "database", "at", "target", "target-database",
                  "stop-before-mark", "stop-at-mark"],
-        Switches: ["execute", "with-replace", "norecovery", "force"]);
+        Switches: ["execute", "with-replace", "norecovery", "force"],
+        Options:
+        [
+            ("--container NAME", "A blob container configured in the app, as the source."),
+            ("--server NAME", "A configured server's msdb history, as the source."),
+            ("--database DB", "The database whose chain to restore. Required."),
+            ("--target SERVER", "The configured server that RUNS the RESTORE. Required, " +
+                "always explicit - a destructive act aims at nothing by default."),
+            ("--at TIME", "The moment to restore to, by the same windowing rules the script " +
+                "verb documents. Omitted, the newest reachable point."),
+            ("--target-database NAME", "Restore AS this name. Defaults to the source name."),
+            ("--with-replace", "Consent to overwrite an existing database. Never inherited " +
+                "from anywhere, never implied by --force - this flag is the only way to " +
+                "mean it."),
+            ("--norecovery", "Leave the database restoring, ready for more log."),
+            ("--stop-before-mark NAME", "Stop just before the named marked transaction."),
+            ("--stop-at-mark NAME", "Stop at the mark, inclusive."),
+            ("--execute", "Actually run it. Without this, the script and every preflight " +
+                "verdict print and nothing is touched."),
+            ("--force", "Override what the EVIDENCE says - version direction, missing TDE " +
+                "certificate, unreadable files - loudly, as warnings. It cannot stand in " +
+                "for --with-replace: evidence is overridable, consent is not.")
+        ],
+        Notes:
+        [
+            "Built out of refusals, in a ladder. First, nothing runs without --execute: the " +
+            "bare invocation prints the script, the plan and every preflight verdict, and " +
+            "its exit code already says whether an --execute would have been allowed - so a " +
+            "pipeline can rehearse its own DR step nightly without touching anything.",
+            "Second, the preflights - the same safety nets the app fires before WITH " +
+            "REPLACE drops anything, asked of the target before the run: does the target " +
+            "database already exist without --with-replace; can the target's service " +
+            "account actually read every disk file; was the backup taken on a NEWER major " +
+            "version than the target (error 3169, the one-directional law of RESTORE); and " +
+            "is the TDE or backup-encryption certificate on the target, found by " +
+            "thumbprint (error 33111 otherwise, named here before the worst morning finds " +
+            "it). No verdict comes from silence: a header that cannot be read refuses " +
+            "nothing, because refusing on a guess blocks legal restores.",
+            "Executed runs leave the receipts the app leaves: an entry in the same History " +
+            "the app's History screen lists - script, console log, outcome, duration - and " +
+            "notifications to the same webhooks. A 3am restore from a runbook step looks " +
+            "exactly like a clicked one afterwards.",
+            "Files restore to the paths recorded in the backup. Relocation flags are not " +
+            "built yet - the rehearse verb relocates automatically, and the app's restore " +
+            "screen has full WITH MOVE control."
+        ],
+        ExitCodes:
+        [
+            "0   restored - or, without --execute, generated with nothing refused",
+            "2   refused by a preflight, or the restore itself failed",
+            "3   the source or target could not be reached at all",
+            "64  usage"
+        ],
+        Examples:
+        [
+            ("9lives restore --container backups --database Sales --target SRV02",
+                "generate only: script plus preflight verdicts, nothing touched"),
+            ("9lives restore --container backups --database Sales --target SRV02 --with-replace --execute",
+                "the real thing, consented to explicitly"),
+            ("9lives restore --server SRV01 --database Sales --target SRV02 --at \"2026-08-02 19:00\" --execute",
+                "a moment mid-log, STOPAT stamped on every log restore")
+        ]);
 
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)
