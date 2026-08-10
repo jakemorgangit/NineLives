@@ -146,15 +146,15 @@ public class ScriptStaysInStepTests
     }
 
     [Fact]
-    public async Task GenerateSaysWhyWhenStandbyHasNoUndoFile()
+    public async Task TheEmptyPaneSaysWhyWhenStandbyHasNoUndoFile()
     {
         var vm = await Loaded();
         vm.Options.RecoveryMode = RecoveryMode.Standby;
 
-        vm.GenerateScriptCommand.Execute(null);
-
-        Assert.True(vm.HasError);
-        Assert.Contains("undo file", vm.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        // The script builds itself live now, so the explanation is a passive hint where the
+        // script would be - an error dialog per keystroke would be noise.
+        Assert.False(vm.HasScript);
+        Assert.Contains("undo file", vm.ScriptBlockedReason, StringComparison.OrdinalIgnoreCase);
     }
 
     // ── STATS ───────────────────────────────────────────────────────────────────

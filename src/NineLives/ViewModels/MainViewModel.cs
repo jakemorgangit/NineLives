@@ -150,6 +150,8 @@ public partial class MainViewModel : ViewModelBase
         Nav.Backup => ShowBackup,
         Nav.CopyDatabase => ShowCopyDatabase,
         Nav.BrowseBackups => ShowBrowseBackups,
+        // The same tier as browsing: read-only insight over the estate's backups.
+        Nav.Exposure => ShowBrowseBackups,
         _ => true
     };
 
@@ -185,6 +187,7 @@ public partial class MainViewModel : ViewModelBase
     public CopyDatabaseViewModel CopyDatabase { get; }
     public RestoreViewModel Restore { get; }
     public HistoryViewModel History { get; }
+    public ExposureViewModel Exposure { get; }
     public SettingsViewModel Settings { get; }
     public AboutViewModel About { get; }
 
@@ -226,16 +229,21 @@ public partial class MainViewModel : ViewModelBase
         // and two instances pointed at the same file would be a way to lose an entry.
         _historyStore = new RestoreHistoryStore();
 
+        // One notifier for every screen that runs things (#242) - reads the endpoint list fresh
+        // per event, so a webhook added in Settings works without a restart.
+        var notifier = new WebhookRunNotifier(_credentialStore, App.Log);
+
         Restore = new RestoreViewModel(
             _blobService, _sqlService, _chainBuilder, _scriptGenerator, _credentialStore,
-            log: null, history: _historyStore);
+            log: null, history: _historyStore, notifier: notifier);
         ModeSelection = new ModeSelectionViewModel(_credentialStore);
         ModeSelection.Chosen += OnModeChosen;
         ModeSelection.Cancelled += OnModeCardsCancelled;
 
-        Backup = new BackupViewModel(_credentialStore, _sqlService);
-        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService);
+        Backup = new BackupViewModel(_credentialStore, _sqlService, notifier: notifier);
+        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService, notifier: notifier);
         History = new HistoryViewModel(_historyStore);
+        Exposure = new ExposureViewModel(_credentialStore, _sqlService, _historyStore);
         Settings = new SettingsViewModel(_credentialStore);
         About = new AboutViewModel();
 
@@ -487,13 +495,6 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Ctrl+G: generate the restore script. Only the Restore screen generates anything.</summary>
-    [RelayCommand]
-    private void GenerateScript()
-    {
-        if (CurrentViewName != Nav.Restore) return;
-        if (Restore.GenerateScriptCommand.CanExecute(null)) Restore.GenerateScriptCommand.Execute(null);
-    }
 
     /// <summary>
     /// Esc: stop whatever is running.
@@ -524,6 +525,7 @@ public partial class MainViewModel : ViewModelBase
         public const string BlobStorage = "Blob Storage";
         public const string SqlServers = "SQL Servers";
         public const string BrowseBackups = "Browse Backups";
+        public const string Exposure = "Exposure";
         public const string Backup = "Back Up";
         public const string Restore = "Restore";
         public const string CopyDatabase = "Copy Database";
@@ -532,7 +534,7 @@ public partial class MainViewModel : ViewModelBase
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Backup, Restore, CopyDatabase, History, Settings, About];
+            [BlobStorage, SqlServers, BrowseBackups, Exposure, Backup, Restore, CopyDatabase, History, Settings, About];
     }
 
     [RelayCommand]
@@ -544,6 +546,7 @@ public partial class MainViewModel : ViewModelBase
             Nav.BlobStorage => BlobConfig,
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,
+            Nav.Exposure => Exposure,
             Nav.Backup => Backup,
             Nav.Restore => Restore,
             Nav.CopyDatabase => CopyDatabase,

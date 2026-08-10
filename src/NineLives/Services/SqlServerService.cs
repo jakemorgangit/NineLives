@@ -247,6 +247,53 @@ public class SqlServerService : ISqlServerService
     /// separately and on the target, because msdb keeps history for backups whose files were
     /// deleted, archived or pruned by a retention job long ago.
     /// </summary>
+    public async Task<List<ExposureRow>> GetBackupExposureAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        var rows = new List<ExposureRow>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 60;
+
+        // LEFT JOIN, because the databases with NO backup rows are the whole point - an INNER
+        // join would hide exactly the rows the dashboard exists to make red. database_id > 4
+        // excludes master/tempdb/model/msdb; snapshots and restoring states still list, because
+        // "it exists and is not backed up" is true of them too and the state column says why.
+        cmd.CommandText = @"
+            SELECT d.name                 AS DatabaseName,
+                   d.recovery_model_desc  AS RecoveryModel,
+                   d.state_desc           AS StateDescription,
+                   MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END) AS LastFull,
+                   MAX(CASE WHEN b.type = 'I' THEN b.backup_finish_date END) AS LastDifferential,
+                   MAX(CASE WHEN b.type = 'L' THEN b.backup_finish_date END) AS LastLog
+            FROM sys.databases AS d
+            LEFT JOIN msdb.dbo.backupset AS b
+                   ON b.database_name = d.name
+            WHERE d.database_id > 4
+              AND d.source_database_id IS NULL
+            GROUP BY d.name, d.recovery_model_desc, d.state_desc
+            ORDER BY d.name";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new ExposureRow
+            {
+                ServerName = server.ServerName,
+                DatabaseName = reader["DatabaseName"]?.ToString() ?? string.Empty,
+                RecoveryModel = reader["RecoveryModel"]?.ToString() ?? string.Empty,
+                StateDescription = reader["StateDescription"]?.ToString() ?? string.Empty,
+                LastFull = GetDateTimeFromReader(reader, "LastFull"),
+                LastDifferential = GetDateTimeFromReader(reader, "LastDifferential"),
+                LastLog = GetDateTimeFromReader(reader, "LastLog")
+            });
+        }
+
+        return rows;
+    }
+
     public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null, CancellationToken ct = default)
     {
@@ -1342,6 +1389,87 @@ public class SqlServerService : ISqlServerService
             reader["OwnerName"] as string);
     }
 
+    public async Task<List<LogMark>> GetLogMarksAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+    {
+        var marks = new List<LogMark>();
+
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        cmd.CommandText = @"
+            SELECT TOP 50 mark_name, description, mark_time
+            FROM msdb.dbo.logmarkhistory
+            WHERE database_name = @database
+            ORDER BY mark_time DESC";
+        cmd.Parameters.AddWithValue("@database", database);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            marks.Add(new LogMark(
+                reader["mark_name"]?.ToString() ?? string.Empty,
+                reader["description"] as string,
+                GetDateTimeFromReader(reader, "mark_time") ?? DateTime.MinValue));
+        }
+
+        return marks;
+    }
+
+    public async Task ExecuteWithPercentPollingAsync(
+        ServerConnection server, string sql, IProgress<double>? percent = null,
+        CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        short spid;
+        await using (var spidCmd = conn.CreateCommand())
+        {
+            spidCmd.CommandText = "SELECT @@SPID";
+            spid = Convert.ToInt16(await spidCmd.ExecuteScalarAsync(ct));
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = 0;
+
+        var run = cmd.ExecuteNonQueryAsync(ct);
+
+        if (percent != null)
+        {
+            try
+            {
+                await using var pollConn = CreateConnection(server);
+                await pollConn.OpenAsync(ct);
+
+                while (!run.IsCompleted)
+                {
+                    await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(2), ct));
+                    if (run.IsCompleted || ct.IsCancellationRequested) break;
+
+                    await using var poll = pollConn.CreateCommand();
+                    poll.CommandText =
+                        "SELECT TOP 1 percent_complete FROM sys.dm_exec_requests " +
+                        "WHERE session_id = @spid";
+                    poll.Parameters.AddWithValue("@spid", spid);
+
+                    var value = await poll.ExecuteScalarAsync(ct);
+                    if (value != null && value != DBNull.Value)
+                        percent.Report(Convert.ToDouble(value));
+                }
+            }
+            catch
+            {
+                // The poll is a courtesy over a second connection; the statement's own outcome
+                // arrives through the run task either way.
+            }
+        }
+
+        await run;
+    }
+
     public async Task<List<OrphanedUser>> FindOrphanedUsersAsync(
         ServerConnection server, string database, CancellationToken ct = default)
     {
@@ -1365,7 +1493,13 @@ public class SqlServerService : ISqlServerService
             LEFT JOIN sys.server_principals AS by_sid
                    ON by_sid.sid = dp.sid
             LEFT JOIN sys.server_principals AS same_named
-                   ON same_named.name = dp.name AND same_named.type = 'S'
+                   -- Both sides forced to one collation: server_principals.name carries the
+                   -- SERVER collation and the restored database's principals carry the SOURCE's,
+                   -- and equality between them throws when they differ - hit in the field on the
+                   -- first cross-collation restore.
+                   ON same_named.name COLLATE Latin1_General_100_CI_AS
+                      = dp.name COLLATE Latin1_General_100_CI_AS
+                  AND same_named.type = 'S'
             WHERE dp.type = 'S'
               AND dp.authentication_type = 1
               AND dp.principal_id > 4

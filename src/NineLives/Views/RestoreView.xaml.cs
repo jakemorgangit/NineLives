@@ -1,4 +1,3 @@
-﻿using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -8,16 +7,8 @@ namespace Blackcat.NineLives.Views;
 
 public partial class RestoreView : UserControl
 {
-    /// <summary>
-    /// How close to the bottom still counts as "following". A couple of lines of slack, so a
-    /// trackpad nudge or scrollbar rounding does not silently stop the console following.
-    /// </summary>
-    private const double FollowThreshold = 40;
-
-    private INotifyCollectionChanged? _observedLines;
     private RestoreViewModel? _viewModel;
     private ExecutionWindow? _executionWindow;
-    private bool _follow = true;
 
     public RestoreView()
     {
@@ -33,44 +24,35 @@ public partial class RestoreView : UserControl
         if (e.NewValue is RestoreViewModel vm)
         {
             _viewModel = vm;
-            _observedLines = vm.Execution.Console.Lines;
-            _observedLines.CollectionChanged += OnConsoleLinesChanged;
             vm.PropertyChanged += OnViewModelPropertyChanged;
         }
     }
 
     private void Detach()
     {
-        if (_observedLines != null)
-            _observedLines.CollectionChanged -= OnConsoleLinesChanged;
         if (_viewModel != null)
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
 
-        _observedLines = null;
         _viewModel = null;
     }
 
     /// <summary>
-    /// Brings the console up as a modal window when a restore starts.
+    /// The run's output lives in the ExecutionWindow, and ONLY there. The inline console this
+    /// view used to keep as a fallback duplicated every line and panel behind the modal - two
+    /// consoles for one run. Reopening is the same window over the same viewmodel, so the full
+    /// record and its actions come back exactly as they were; the History screen keeps the
+    /// permanent copy.
     ///
-    /// Showing a window is the view's job, not the viewmodel's - which is why this watches a
-    /// property rather than the viewmodel calling out to a dialog service. The window is modal
-    /// because a restore is the one operation here that cannot be undone: it should not compete
-    /// with the form behind it, and nobody should be editing the options that produced the script
-    /// currently running.
-    ///
-    /// The inline console stays behind it, so the record is still there once the window is closed.
+    /// Showing a window is the view's job, not the viewmodel's - which is why execution is
+    /// watched through a property rather than the viewmodel calling out to a dialog service. The
+    /// window is modal because a restore is the one operation here that cannot be undone: nobody
+    /// should be editing the options that produced the script currently running.
     /// </summary>
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private void ShowExecutionWindow(RestoreViewModel vm)
     {
-        if (e.PropertyName != nameof(RestoreViewModel.IsExecuting)) return;
-        if (_viewModel is not { IsExecuting: true } vm || _executionWindow != null) return;
+        if (_executionWindow != null) return;
 
         _executionWindow = new ExecutionWindow(vm) { Owner = Window.GetWindow(this) };
-
-        // The inline console hides while the window is up, so the output is only ever in one
-        // place, and comes back afterwards so the record stays reachable from the main view.
-        vm.IsConsoleDetached = true;
 
         // ShowDialog blocks, so it must not run inside the property-changed notification that the
         // restore itself is unwinding through. Posting lets the execution carry on underneath.
@@ -80,28 +62,20 @@ public partial class RestoreView : UserControl
             finally
             {
                 _executionWindow = null;
-                vm.IsConsoleDetached = false;
             }
         }), DispatcherPriority.Background);
     }
 
-    /// <summary>
-    /// Follows the tail as output arrives, but only while the user is already at the bottom.
-    ///
-    /// A console that always jumps to the end is unusable during a long restore: scroll up to read
-    /// the statement that just failed and the next progress message yanks you away again. Scrolling
-    /// back to the bottom resumes following, which is what a terminal does.
-    /// </summary>
-    private void OnConsoleLinesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    private void OnViewLastRunClicked(object sender, RoutedEventArgs e)
     {
-        if (e.Action != NotifyCollectionChangedAction.Add || !_follow) return;
+        if (_viewModel != null) ShowExecutionWindow(_viewModel);
+    }
 
-        // At Background priority, so the new rows have been realised by the time this runs.
-        // Scrolling first would land short of the real end.
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (ConsoleList.Items.Count > 0)
-                ConsoleList.ScrollIntoView(ConsoleList.Items[^1]);
-        }), DispatcherPriority.Background);
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(RestoreViewModel.IsExecuting)) return;
+        if (_viewModel is not { IsExecuting: true } vm) return;
+
+        ShowExecutionWindow(vm);
     }
 }

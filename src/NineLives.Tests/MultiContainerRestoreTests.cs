@@ -186,19 +186,20 @@ public class MultiContainerRestoreTests
     // ── the mode gate ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Pro only. It answers a question somebody has to know to ask - that a chain CAN be split
-    /// across containers - which is the test every other Pro-only feature had to pass.
+    /// Every mode. It used to be Pro-only, until the ruling that modes narrow which SCREENS
+    /// exist, never which restore options do - and a chain split across containers is a fact
+    /// about the backups, not about the person restoring them.
     /// </summary>
     [Theory]
-    [InlineData(AppMode.Basic, false)]
-    [InlineData(AppMode.Standard, false)]
-    [InlineData(AppMode.Pro, true)]
-    public void OnlyTheWidestModeOffersIt(AppMode mode, bool offered)
+    [InlineData(AppMode.Basic)]
+    [InlineData(AppMode.Standard)]
+    [InlineData(AppMode.Pro)]
+    public void EveryModeOffersIt(AppMode mode)
     {
         var vm = Restore(out _);
         vm.Mode = mode;
 
-        Assert.Equal(offered, vm.ShowMultipleContainers);
+        Assert.True(vm.ShowMultipleContainers);
     }
 
     /// <summary>A tick list with nothing in it is worse than no tick list.</summary>

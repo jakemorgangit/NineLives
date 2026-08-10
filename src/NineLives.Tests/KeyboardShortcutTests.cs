@@ -53,7 +53,7 @@ public class KeyboardShortcutTests
         var vm = New();
         vm.NavigateToCommand.Execute(MainViewModel.Nav.History);
 
-        vm.GenerateScriptCommand.Execute(null);
+        // The script builds itself live - nothing to press.
 
         Assert.False(vm.Restore.HasScript);
     }

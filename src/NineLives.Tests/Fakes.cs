@@ -187,6 +187,14 @@ public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
 /// <summary>
 /// A SQL Server that records what it was asked to do. Nothing opens a connection.
 /// </summary>
+/// <summary>Records every notification a screen fires (#242), in order.</summary>
+public sealed class FakeRunNotifier : IRunNotifier
+{
+    public List<RunNotification> Sent { get; } = [];
+
+    public void Notify(RunNotification notification) => Sent.Add(notification);
+}
+
 public sealed class FakeSqlServerService : ISqlServerService
 {
     /// <summary>Every server instance handed to an execute call, in order.</summary>
@@ -491,6 +499,50 @@ public sealed class FakeSqlServerService : ISqlServerService
 
     /// <summary>Paths the fake target refuses, and why. Anything not listed is readable.</summary>
     public Dictionary<string, BackupFileProblem> UnreadablePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Marks per database name (#243).</summary>
+    public Dictionary<string, List<LogMark>> LogMarksByDatabase { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<List<LogMark>> GetLogMarksAsync(
+        ServerConnection server, string database, CancellationToken ct = default)
+        => Task.FromResult(
+            LogMarksByDatabase.TryGetValue(database, out var marks) ? marks.ToList() : []);
+
+    /// <summary>Percent values the polling execute reports before completing (#user CHECKDB feedback).</summary>
+    public List<double> PollPercents { get; set; } = [50];
+
+    public Exception? PollingExecuteThrows { get; set; }
+
+    public List<string> PolledScripts { get; } = [];
+
+    public Task ExecuteWithPercentPollingAsync(
+        ServerConnection server, string sql, IProgress<double>? percent = null,
+        CancellationToken ct = default)
+    {
+        PolledScripts.Add(sql);
+        ct.ThrowIfCancellationRequested();
+        if (PollingExecuteThrows != null) throw PollingExecuteThrows;
+
+        if (percent != null)
+            foreach (var p in PollPercents)
+                ((IProgress<double>)percent).Report(p);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Exposure rows per server name (#239); a server absent from the map throws.</summary>
+    public Dictionary<string, List<ExposureRow>> ExposureByServer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<List<ExposureRow>> GetBackupExposureAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (!ExposureByServer.TryGetValue(server.ServerName, out var rows))
+            throw new InvalidOperationException($"fake: {server.ServerName} is not answering");
+
+        return Task.FromResult(rows.ToList());
+    }
 
     /// <summary>What each ad-hoc file's headers say, keyed by path (#203).</summary>
     public Dictionary<string, List<BackupHistoryEntry>> FileHeaders { get; } =

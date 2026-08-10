@@ -38,6 +38,13 @@ public sealed class RestoreHistoryEntry
     /// <summary>e.g. "1 Full + 2 Log(s)".</summary>
     public string ChainSummary { get; set; } = string.Empty;
 
+    /// <summary>
+    /// "Restore" or "Rehearsal" (#238). A string, not an enum, so records survive both
+    /// directions across versions; entries written before this field existed read as "Restore",
+    /// which is what they were.
+    /// </summary>
+    public string Kind { get; set; } = "Restore";
+
     public RestoreOutcome Outcome { get; set; }
 
     /// <summary>What went wrong, when something did.</summary>

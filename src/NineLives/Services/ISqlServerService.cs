@@ -64,6 +64,22 @@ public interface ISqlServerService
     /// <summary>SERVERPROPERTY('ProductMajorVersion') - 16 is SQL Server 2022 - or null if it did not say (#210).</summary>
     Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default);
 
+    /// <summary>
+    /// The marked transactions msdb knows for a database (#243) - name, description and when.
+    /// Almost no tooling reads logmarkhistory, which is why almost nobody uses marks.
+    /// </summary>
+    Task<List<LogMark>> GetLogMarksAsync(
+        ServerConnection server, string database, CancellationToken ct = default);
+
+    /// <summary>
+    /// Runs one statement while a second connection polls sys.dm_exec_requests for its
+    /// percent_complete - which DBCC CHECKDB and RESTORE both report. Best effort: no
+    /// VIEW SERVER STATE means no percentage, and the statement still runs.
+    /// </summary>
+    Task ExecuteWithPercentPollingAsync(
+        ServerConnection server, string sql, IProgress<double>? percent = null,
+        CancellationToken ct = default);
+
     /// <summary>What the restored database looks like now - compat level, recovery model, owner (#205).</summary>
     Task<DatabaseOverview?> GetDatabaseOverviewAsync(
         ServerConnection server, string database, CancellationToken ct = default);
@@ -144,6 +160,13 @@ public interface ISqlServerService
         Action<string>? messageCallback = null, CancellationToken ct = default);
 
     /// <summary>What this instance recorded backing up, from msdb (#149).</summary>
+    /// <summary>
+    /// Every user database's backup state in one round trip (#239): recovery model, and the last
+    /// full, differential and log as msdb records them. The exposure dashboard's raw material.
+    /// </summary>
+    Task<List<ExposureRow>> GetBackupExposureAsync(
+        ServerConnection server, CancellationToken ct = default);
+
     Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null, CancellationToken ct = default);
 

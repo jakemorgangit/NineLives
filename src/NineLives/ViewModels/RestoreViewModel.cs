@@ -167,16 +167,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     // ── Execution console ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// True while the console is showing in its own window.
-    ///
-    /// The inline console hides itself for the duration, so the output is only ever in one place.
-    /// It comes back when the window closes, so the record of what happened is still reachable
-    /// from the main view afterwards.
-    /// </summary>
-    [ObservableProperty]
-    private bool _isConsoleDetached;
-
     /// <summary>Pushes the cancellation sources' state onto the bound properties.</summary>
     private void RefreshCancelState()
     {
@@ -724,7 +714,8 @@ public partial class RestoreViewModel : ViewModelBase
         ICredentialStore credentialStore,
         OperationLog? log = null,
         IRestoreHistoryStore? history = null,
-        IBackupAuditStore? auditStore = null)
+        IBackupAuditStore? auditStore = null,
+        IRunNotifier? notifier = null)
     {
         _history = history ?? new RestoreHistoryStore();
 
@@ -804,7 +795,7 @@ public partial class RestoreViewModel : ViewModelBase
             }
         };
 
-        Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation);
+        Execution = new RestoreExecutionViewModel(sqlService, _history, _log, _queryCancellation, notifier);
 
         // The run reports through the same status line as the rest of the screen, and its cancel
         // state feeds the one Stop button that covers every server call here.
@@ -858,9 +849,15 @@ public partial class RestoreViewModel : ViewModelBase
         // The STOPAT target feeds the generated script, so any change to it has to reach the
         // script (#115 seam 3). Skipped while SetWindow is rewriting several properties at once -
         // the caller updates once at the end rather than four times through a half-built state.
-        PointInTime.PropertyChanged += (_, _) =>
+        PointInTime.PropertyChanged += (_, e) =>
         {
             if (PointInTime.IsUpdating) return;
+
+            // The other half of the mark/time exclusivity (#243): turning the clock-time target
+            // on clears the mark, exactly as choosing a mark turned the clock off.
+            if (e.PropertyName == nameof(PointInTimeViewModel.Use) && PointInTime.Use)
+                SelectedLogMark = null;
+
             Steps.Options.Invalidate();
             UpdateRestoreSummary();
         };
@@ -1661,42 +1658,12 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Explicit Generate. Same work as the live rebuild, but it says why nothing was produced -
-    /// the live path stays silent because reporting an error on every keystroke would be noise.
+    /// Why the script pane is empty, shown where the script would be (#user). The Generate
+    /// button used to carry these as error dialogs; the script builds itself live now, so the
+    /// explanation lives passively where the eye already is.
     /// </summary>
-    [RelayCommand]
-    private void GenerateScript()
-    {
-        if (RestoreChain == null)
-        {
-            SetError("No valid restore chain. Load backups and select a restore point first.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(TargetDatabaseName))
-        {
-            SetError("Please enter a target database name.");
-            return;
-        }
-
-        // Refuse to silently fall back to a full-chain restore when the user asked to stop at a
-        // time we could not use - that would replay exactly the transactions they meant to skip.
-        if (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
-        {
-            SetError($"Point-in-time target is not valid. {PointInTime.Message}");
-            return;
-        }
-
-        if (!Options.HasStandbyFileIfNeeded)
-        {
-            SetError("STANDBY needs an undo file path. Without one the script would end in " +
-                     "STANDBY = '', which fails after the database has already been overwritten.");
-            return;
-        }
-
-        RegenerateScript();
-        if (HasScript) SetStatus("Script generated successfully.");
-    }
+    [ObservableProperty]
+    private string _scriptBlockedReason = string.Empty;
 
     /// <summary>
     /// The WITH MOVE clauses the restore would use, or an empty list when it is not moving files.
@@ -1821,10 +1788,29 @@ public partial class RestoreViewModel : ViewModelBase
         // Leave the script alone mid-restore - it is the record of what is actually running.
         if (IsExecuting) return;
 
-        if (RestoreChain == null
-            || string.IsNullOrWhiteSpace(TargetDatabaseName)
-            || (PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null)
-            || !Options.HasStandbyFileIfNeeded)
+        // When nothing can be produced, say which input is missing - quietly, as a hint where
+        // the script would be, because this now happens live rather than on a button press and
+        // an error dialog per keystroke would be noise.
+        var chain = RestoreChain;
+        var blocked =
+            chain == null
+                ? "Select a restore point above and the script appears here."
+            : SelectedLogMark != null && chain.LogSets.Count == 0
+                ? "The marked transaction lives in a log backup, and this chain has none - " +
+                  "restoring it would silently replay everything the mark was meant to stop. " +
+                  "Pick a restore point with log backups, or clear the mark."
+            : string.IsNullOrWhiteSpace(TargetDatabaseName)
+                ? "Enter a target database name and the script appears here."
+            : PointInTime.Use && PointInTime.CanUse && PointInTime.Effective == null
+                ? $"The point-in-time target is not valid yet. {PointInTime.Message}"
+            : !Options.HasStandbyFileIfNeeded
+                ? "STANDBY needs an undo file path - without one the script would end in " +
+                  "STANDBY = '', which fails after the database has already been overwritten."
+            : null;
+
+        ScriptBlockedReason = blocked ?? string.Empty;
+
+        if (blocked != null)
         {
             GeneratedScript = string.Empty;
             HasScript = false;
@@ -1835,8 +1821,10 @@ public partial class RestoreViewModel : ViewModelBase
         // ended up, and where the files land - each worked out somewhere that knows about the
         // chain or the server.
         var options = Options.Build(TargetDatabaseName, PointInTime.Effective, BuildFileMoves());
+        options.StopAtMark = SelectedLogMark?.Name;
+        options.StopBeforeMark = StopBeforeMark;
 
-        GeneratedScript = _scriptGenerator.Generate(RestoreChain, options);
+        GeneratedScript = _scriptGenerator.Generate(chain!, options);
         HasScript = true;
     }
 
@@ -1854,6 +1842,50 @@ public partial class RestoreViewModel : ViewModelBase
     /// The job is created disabled and unscheduled, so what is handed over is reviewable and inert
     /// until somebody deliberately starts it.
     /// </summary>
+    /// <summary>
+    /// Writes the printed folder for the worst day (#240): the chain, the prerequisites in
+    /// order, the exact script, what to do when it fails and what finishes the job - one
+    /// self-contained Markdown file, readable on a laptop with no SQL tools installed.
+    /// </summary>
+    [RelayCommand]
+    private void ExportRunbook()
+    {
+        if (!HasScript || RestoreChain == null) return;
+
+        try
+        {
+            var runbook = RunbookBuilder.Build(new RunbookInputs
+            {
+                Chain = RestoreChain,
+                Script = GeneratedScript,
+                TargetDatabase = TargetDatabaseName,
+                ServerName = ConnectedServer?.ServerName,
+                ContainerName = SelectedContainer?.Name,
+                SourceDatabase = Inventory.SelectedDatabaseName,
+                RestorePoint = Timeline.SelectedPoint?.Timestamp,
+                FileMoves = FetchedFileMoves.ToList()
+            });
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "Export restore runbook",
+                FileName = $"runbook-{TargetDatabaseName}-{DateTime.Now:yyyyMMdd}.md",
+                Filter = "Markdown|*.md|All files|*.*",
+                DefaultExt = ".md"
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            System.IO.File.WriteAllText(dialog.FileName, runbook);
+            SetStatus($"Runbook written to {dialog.FileName}. Regenerate it after any change to " +
+                      "the chain or options - a stale runbook is a wrong one that looks right.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"The runbook could not be written: {ex.Message}");
+        }
+    }
+
     [RelayCommand]
     private void CopyAsAgentJob()
     {
@@ -1979,6 +2011,17 @@ public partial class RestoreViewModel : ViewModelBase
             sb.AppendLine($"First LSN: {header.FirstLsn?.ToString() ?? "(null)"}");
             sb.AppendLine($"Last LSN: {header.LastLsn?.ToString() ?? "(null)"}");
             sb.AppendLine($"Database backup LSN: {header.DatabaseBackupLsn?.ToString() ?? "(null)"}");
+
+            if (header.SoftwareVersionMajor is int major)
+                sb.AppendLine($"Taken on: {VersionCompatibility.Describe(major)}");
+
+            // What protects it (#222 part 4): the certificate question, answered where the header
+            // is on screen instead of only failing later. Absence is stated too - "not encrypted"
+            // is information, not the lack of it.
+            var protection = EncryptionGuidance.DescribeProtection(
+                header.TdeThumbprint, header.EncryptorThumbprint);
+            sb.AppendLine($"Protection: {(protection.Length == 0 ? "Not encrypted." : protection)}");
+
             BackupMetadataSummary = sb.ToString();
             SetStatus("Header read. See the metadata below.");
         }
@@ -2124,6 +2167,204 @@ public partial class RestoreViewModel : ViewModelBase
                 $"WITH REPLACE={Options.WithReplace}, recovery={Options.RecoveryMode}, " +
                 $"stopAt={PointInTime.Effective?.ToString("s") ?? "none"}"),
             appendLog => PreflightAsync(server, appendLog));
+    }
+
+    // ── marked transactions (#243) ──────────────────────────────────────────────
+
+    /// <summary>The marks msdb knows for the selected database, newest first.</summary>
+    [ObservableProperty]
+    private System.Collections.ObjectModel.ObservableCollection<LogMark> _logMarks = [];
+
+    /// <summary>
+    /// The mark to stop at. Choosing one turns the time-based target OFF - a mark and a clock
+    /// time are the same mechanism aimed differently, and two targets on one restore is a script
+    /// that stops where the READER did not decide.
+    /// </summary>
+    [ObservableProperty]
+    private LogMark? _selectedLogMark;
+
+    partial void OnSelectedLogMarkChanged(LogMark? value)
+    {
+        if (value != null && PointInTime.Use) PointInTime.Use = false;
+        UpdateRestoreSummary();
+    }
+
+    /// <summary>STOPBEFOREMARK by default: "undo the deployment" is what the mark was planted for.</summary>
+    [ObservableProperty]
+    private bool _stopBeforeMark = true;
+
+    partial void OnStopBeforeMarkChanged(bool value) => UpdateRestoreSummary();
+
+    /// <summary>
+    /// Reads logmarkhistory for the selected database (#243). On demand, because most databases
+    /// have no marks and the combo should not cost a round trip to prove it.
+    /// </summary>
+    [RelayCommand]
+    private async Task LoadLogMarksAsync()
+    {
+        var server = ConnectedServer;
+        var database = Inventory.SelectedDatabaseName;
+
+        if (server == null || string.IsNullOrWhiteSpace(database))
+        {
+            SetError("Connect to a server and choose a database first - the marks live in its msdb.");
+            return;
+        }
+
+        try
+        {
+            var marks = await _sqlService.GetLogMarksAsync(server, database!);
+            LogMarks = new System.Collections.ObjectModel.ObservableCollection<LogMark>(marks);
+
+            SetStatus(marks.Count == 0
+                ? $"No marked transactions recorded for {database}. Marks are planted with " +
+                  "BEGIN TRANSACTION ... WITH MARK before risky work."
+                : $"{marks.Count} marked transaction(s) found for {database}.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not read the marks: {ex.Message}");
+        }
+    }
+
+    // ── retention (#241) ────────────────────────────────────────────────────────
+
+    /// <summary>The window a rule would keep, in days. 30 is the commonest policy default.</summary>
+    [ObservableProperty]
+    private int _retentionKeepDays = 30;
+
+    [ObservableProperty]
+    private string _retentionSummary = string.Empty;
+
+    /// <summary>The sets a rule must NOT delete despite their age, each with its reason.</summary>
+    [ObservableProperty]
+    private System.Collections.ObjectModel.ObservableCollection<string> _retentionWarnings = [];
+
+    public bool CanAdviseRetention => Inventory.AllSets.Count > 0;
+
+    /// <summary>
+    /// What a keep-N-days rule would do to the loaded backups (#241): what goes, what must stay
+    /// despite its age because kept restores depend on it, and what is already broken.
+    ///
+    /// Report-only, deliberately: the app that exists to make restores safe should not also be
+    /// the app that deletes backups. Deleting stays a human act, done elsewhere, with this
+    /// report in hand.
+    /// </summary>
+    [RelayCommand]
+    private void AdviseRetention()
+    {
+        if (Inventory.AllSets.Count == 0)
+        {
+            RetentionSummary = "Load backups first - the advisor judges what is on screen.";
+            return;
+        }
+
+        var findings = RetentionAdvisor.Advise(Inventory.AllSets, RetentionKeepDays, DateTime.Now);
+
+        RetentionSummary = RetentionAdvisor.Summarise(findings, RetentionKeepDays);
+
+        RetentionWarnings = new System.Collections.ObjectModel.ObservableCollection<string>(
+            findings
+                .Where(f => f.Verdict is RetentionVerdict.KeepDespiteAge or RetentionVerdict.Broken)
+                .Select(f => $"{f.Set.DatabaseName} {f.Set.Type} {f.Set.Timestamp:yyyy-MM-dd HH:mm} - " +
+                             (f.Verdict == RetentionVerdict.Broken ? "ALREADY BROKEN: " : "MUST KEEP: ") +
+                             f.Reason));
+
+        _log.Info($"[retention] {RetentionSummary}");
+    }
+
+    // ── rehearsal (#238) ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Everything a rehearsal needs to exist: a chain, a connection, and the mode that shows the
+    /// checking machinery. The rest is safety by construction inside the run itself.
+    /// </summary>
+    public bool CanRehearse =>
+        IsConnectedToServer && RestoreChain != null && !IsExecuting &&
+        AppModeCapabilities.CanVerifyAndAudit(Mode);
+
+    /// <summary>
+    /// Restores the chosen chain to a scratch name, proves it with CHECKDB, and drops it (#238) -
+    /// the only tested backup is a restored backup, and the History entry is the receipt.
+    ///
+    /// The real database is never touchable from here: the target name is generated and refused
+    /// if it exists, WITH REPLACE is never emitted, and every file MOVEs to scratch-named files
+    /// in the instance's default directories. A failure at any step stops the batch chain, so
+    /// the guarded DROP never runs and the scratch copy stands as the evidence.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRehearse))]
+    private async Task RehearseAsync()
+    {
+        var server = ConnectedServer;
+        var chain = RestoreChain;
+        if (server == null || chain == null || !CanRehearse) return;
+
+        var sourceName = Inventory.SelectedDatabaseName ?? chain.FullSet.DatabaseName ?? "database";
+        var scratch = RehearsalPlanner.ScratchName(sourceName, DateTime.Now);
+
+        IsBusy = true;
+        try
+        {
+            // Astronomically unlikely with a timestamped name - checked anyway, because the whole
+            // design promise is "cannot touch anything that exists".
+            var state = await _sqlService.GetDatabaseRecoveryStateAsync(server, scratch);
+            if (state.Exists)
+            {
+                SetError($"[{scratch}] already exists on {server.ServerName} - rehearsal refused. " +
+                         "Try again in a minute, or drop the leftover scratch copy first.");
+                return;
+            }
+
+            SetStatus($"Preparing the rehearsal of {sourceName}...");
+
+            // The real file list, so every logical file gets a scratch MOVE - device-aware, so
+            // this works for blob, shared-path and ad-hoc chains alike (#203).
+            var devices = chain.FullSet.Files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+            var files = await _sqlService.RestoreFileListOnlyAsync(server, devices);
+            if (files.Count == 0)
+            {
+                SetError("FILELISTONLY returned nothing - the rehearsal cannot relocate files it " +
+                         "cannot list.");
+                return;
+            }
+
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(server);
+            var moves = RehearsalPlanner.ScratchMoves(files, scratch, dataPath, logPath);
+
+            var restoreScript = _scriptGenerator.Generate(chain, new RestoreOptions
+            {
+                TargetDatabaseName = scratch,
+                WithReplace = false,
+                RecoveryMode = RecoveryMode.Recovery,
+                FileMoves = moves,
+                StopAt = PointInTime.Effective
+            });
+
+            var script = RehearsalPlanner.BuildScript(restoreScript, scratch);
+
+            await Execution.RunAsync(
+                new RestoreRun(
+                    server,
+                    script,
+                    scratch,
+                    sourceName,
+                    SelectedContainer?.Name,
+                    $"REHEARSAL - {chain.Summary}",
+                    Timeline.SelectedPoint?.Timestamp,
+                    "rehearsal: restore + CHECKDB + drop",
+                    RunKind.Rehearsal),
+                appendLog => PreflightAsync(server, appendLog));
+        }
+        catch (Exception ex)
+        {
+            SetError($"The rehearsal could not be prepared: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     /// <summary>

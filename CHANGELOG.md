@@ -8,6 +8,78 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.5.0] - 2026-08-10
+
+### Added
+
+- **Export a restore runbook** - one self-contained Markdown document per restore point: the
+  chain file by file, the prerequisites in the order the worst day needs them (credential,
+  TDE/encryption certificates by thumbprint, disk space), the exact script, what to do when it
+  stops part-way, and what finishes the job. Readable with no SQL tools installed, printable for
+  the change-board pack, committable to the DR repo (#240)
+- **The Exposure dashboard: how much data would be lost, right now.** Every user database on
+  every configured server, judged from its own msdb - the derived loss window ("everything after
+  14:32 is gone - up to 47m of work"), traffic-lit worst-first. The silent failures are the
+  loudest: never backed up, FULL recovery with no log backups ever, chains that stopped days
+  ago - and a server that will not answer is itself an alarm row, because unknown is not the
+  same as fine. Rehearsal receipts join in as a "Proven" column: arithmetic says what could
+  restore, only a rehearsal says it does (#239)
+- **Restore rehearsal: prove a backup restores, with a receipt.** One button restores the chosen
+  chain to a scratch database, proves the data with DBCC CHECKDB, and drops the scratch copy -
+  the History entry records what was proven, when, and how long it took. Safety by construction:
+  a generated name refused if it exists, never WITH REPLACE, every file relocated to
+  scratch-named files, and the guarded DROP runs last so any failure retains the scratch copy as
+  evidence. Rehearsals announce themselves through the run notifications (#238)
+- **Restore to a marked transaction (STOPATMARK/STOPBEFOREMARK)** - the sharper point-in-time
+  tool: plant a mark with BEGIN TRANSACTION ... WITH MARK before risky work, and afterwards the
+  restore target is the transaction itself, found from msdb's own logmarkhistory, not a clock
+  time reconstructed from chat messages. Stops just BEFORE the mark by default (the deployment
+  never happened); the mark and the clock time are mutually exclusive on screen, and a mark with
+  no log chain refuses with the reason (#243)
+- **The retention referee: what would an age-based deletion rule actually do?** Report-only,
+  over the loaded backups: what a keep-N-days rule keeps, what it can safely delete (with the
+  bytes reclaimed), what must survive its own age because kept restores depend on it - the base
+  full outside the window, the newest differential under it, and the bridge logs that carry the
+  chain to the window's edge - and what is already broken. Before a lifecycle rule finds out via
+  error 3136 (#241)
+- **Run notifications to Teams, Slack, or any JSON endpoint** - a message when a backup, restore
+  or copy starts, when it finishes, and whenever there is a problem, including each database's
+  failure in a multi-database backup AT the moment it happens. Teams gets a MessageCard (works
+  with both incoming-webhook connectors and Power Automate flows), Slack gets Block Kit, and the
+  generic format is plain JSON fields. Configured in Settings with a per-endpoint test button;
+  webhook URLs never leave the machine in a configuration export (#242)
+
+- The backup metadata inspector now states which SQL Server version took the backup and what
+  protects it - TDE, backup encryption, or "Not encrypted", because absence is information too
+  (#222)
+
+- **The finishing panel's actions show progress and speak their outcome.** DBCC CHECKDB (and any
+  long panel action) drives a progress bar from the server's own percent_complete, and the result
+  stays on the panel - "CHECKDB completed and found nothing wrong" - instead of scrolling away in
+  the console. Failures and cancellations stay visible the same way
+- The orphaned-user scan crashed with a collation conflict when the restored database's collation
+  differed from the server's - both sides of the login-name comparison are now forced to one
+  collation. Found in the field on the first cross-collation restore
+
+### Changed
+
+
+
+- **The Generate Script button is gone** - the script has built itself live on every option
+  change for a while, which made the button a ritual with no effect. When the pane is empty it
+  now says why, passively, where the script would be ("Enter a target database name and the
+  script appears here"), instead of a dialog per keystroke. Ctrl+G retires with it
+- **Every restore option is available in every mode.** Point-in-time, relocating files (WITH
+  MOVE), the advanced WITH options and additional containers no longer hide behind Standard or
+  Pro: the modes narrow which screens exist, never which restore options do. WITH MOVE is needed
+  most on restores to a different server - the Basic scenario itself - and hiding it made Basic
+  restores fail with directory errors the wider modes would not have hit
+
+- **One console, not two.** The restore screen no longer keeps an inline copy of the run's
+  output behind the execution window - every line and panel was rendered twice. The window is
+  the console; a "View the last run's output" button reopens it over the same record, and the
+  History screen keeps the permanent copy
+
 ## [1.4.1] - 2026-08-09
 
 ### Fixed

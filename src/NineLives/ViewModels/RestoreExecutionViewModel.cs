@@ -16,6 +16,13 @@ namespace Blackcat.NineLives.ViewModels;
 /// the screen behind it stays live, and reading the target database name at the end of a run that
 /// started against a different one is the class of bug this whole seam exists to make impossible.
 /// </summary>
+/// <summary>What a run IS - a real restore, or a rehearsal of one (#238).</summary>
+public enum RunKind
+{
+    Restore = 0,
+    Rehearsal = 1
+}
+
 public sealed record RestoreRun(
     ServerConnection Server,
     string Script,
@@ -24,7 +31,8 @@ public sealed record RestoreRun(
     string? ContainerName,
     string ChainSummary,
     DateTime? RestorePointTimestamp,
-    string OptionsForLog);
+    string OptionsForLog,
+    RunKind Kind = RunKind.Restore);
 
 /// <summary>
 /// Running a restore: arming, the countdown, execution, cancellation, what to do when it fails,
@@ -39,6 +47,7 @@ public sealed record RestoreRun(
 /// </summary>
 public partial class RestoreExecutionViewModel : ViewModelBase
 {
+    private readonly IRunNotifier _notifier;
     private readonly ISqlServerService _sql;
     private readonly IRestoreHistoryStore _history;
     private readonly OperationLog _log;
@@ -57,8 +66,10 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         ISqlServerService sql,
         IRestoreHistoryStore history,
         OperationLog log,
-        OperationCancellation queryCancellation)
+        OperationCancellation queryCancellation,
+        IRunNotifier? notifier = null)
     {
+        _notifier = notifier ?? NullRunNotifier.Instance;
         _sql = sql;
         _history = history;
         _log = log;
@@ -226,6 +237,12 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             AppendLog("Beginning restore execution...\n");
 
+            // Announced AFTER the preflights: a run the preflight refused never started, and
+            // "started" messages for runs that went nowhere teach people to ignore the channel.
+            _notifier.Notify(new RunNotification(
+                RunPhase.Started, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName, run.ChainSummary));
+
             await _sql.ExecuteWithProgressAsync(
                 run.Server,
                 run.Script,
@@ -262,10 +279,22 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             AppendLog("\nRestore completed successfully!");
             SetStatus("Restore execution completed successfully.");
 
+            _notifier.Notify(new RunNotification(
+                RunPhase.Succeeded, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName,
+                run.Kind == RunKind.Rehearsal
+                    ? "Restored, CHECKDB passed, scratch copy dropped. The backup is proven."
+                    : run.ChainSummary,
+                DateTime.Now - startedAt));
+
             // The restore is not the end of the job (#205): nobody has verified the data yet, and
             // on a different server every SQL-auth user is orphaned. Reported while the outcome is
             // on screen, in the same shape as the recovery panel - read, then run.
-            await ReportPostRestoreAsync(run.Server, run.TargetDatabase);
+            //
+            // Not for a rehearsal (#238): its CHECKDB already ran inside the script, and the
+            // database the panel would offer statements against was deliberately dropped.
+            if (run.Kind != RunKind.Rehearsal)
+                await ReportPostRestoreAsync(run.Server, run.TargetDatabase);
         }
         catch (OperationCanceledException)
         {
@@ -285,6 +314,12 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             SetError("Restore cancelled. The target database has been left mid-restore - see below.");
 
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName,
+                "Cancelled part-way through the chain - the target is left mid-restore.",
+                DateTime.Now - startedAt));
+
             await ReportRecoveryStateAsync(run.Server, run.TargetDatabase);
         }
         catch (Exception ex)
@@ -294,6 +329,11 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             failure = ex.Message;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
+
+            _notifier.Notify(new RunNotification(
+                RunPhase.Problem, run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+                run.TargetDatabase, run.Server.ServerName,
+                ex.Message, DateTime.Now - startedAt));
 
             // The restore has stopped part-way and the target is almost certainly not usable. Find
             // out exactly how, and say so, while the connection is still open (#14).
@@ -342,6 +382,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SourceDatabase = run.SourceDatabase,
             RestorePointTimestamp = run.RestorePointTimestamp,
             ChainSummary = run.ChainSummary,
+            Kind = run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
             Outcome = outcome,
             ErrorMessage = failure,
             Script = run.Script,
@@ -521,6 +562,26 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     private ServerConnection? _lastServer;
     private string _lastTarget = string.Empty;
 
+    /// <summary>Overall percent of the running panel action, from dm_exec_requests. -1 = unknown.</summary>
+    [ObservableProperty]
+    private double _actionPercent = -1;
+
+    [ObservableProperty]
+    private bool _isRunningAction;
+
+    /// <summary>True until the first percent arrives - the bar runs indeterminate rather than lying at 0.</summary>
+    public bool ActionPercentUnknown => ActionPercent < 0;
+
+    partial void OnActionPercentChanged(double value) => OnPropertyChanged(nameof(ActionPercentUnknown));
+
+    /// <summary>
+    /// What the last panel action concluded, on the panel itself - the console scrolls, this
+    /// stays. "CHECKDB found nothing wrong" is the sentence the whole rehearsal of clicking Run
+    /// exists to produce, and it should not have to be dug out of 60 lines of output.
+    /// </summary>
+    [ObservableProperty]
+    private string _actionOutcome = string.Empty;
+
     /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
     [RelayCommand]
     private async Task RunRecoveryActionAsync(RecoveryAction? action)
@@ -534,11 +595,34 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         var ct = _queryCancellation.Begin();
         RaiseCancelStateChanged();
 
+        IsRunningAction = true;
+        ActionPercent = -1;
+        ActionOutcome = string.Empty;
+        TaskbarState = System.Windows.Shell.TaskbarItemProgressState.Normal;
+        TaskbarValue = 0;
+
         try
         {
             AppendLog($"\nRunning: {action.Sql}");
-            await _sql.ExecuteRecoveryActionAsync(_lastServer, action.Sql, ct);
+
+            // percent_complete covers DBCC CHECKDB and RESTORE alike - the two long things this
+            // panel runs - so the bar moves for exactly the actions long enough to need one.
+            var progress = new Progress<double>(p =>
+            {
+                ActionPercent = p;
+                TaskbarValue = p / 100.0;
+            });
+
+            await _sql.ExecuteWithPercentPollingAsync(_lastServer, action.Sql, progress, ct);
             AppendLog("Completed.");
+
+            // On the panel, not only in the console: the console scrolls, this stays - and
+            // "CHECKDB found nothing wrong" is the sentence the whole click exists to produce.
+            ActionOutcome = action.Sql.Contains("DBCC CHECKDB", StringComparison.OrdinalIgnoreCase)
+                ? $"CHECKDB completed at {DateTime.Now:HH:mm:ss} and found nothing wrong - the " +
+                  "restore is proven, not just finished."
+                : $"Completed at {DateTime.Now:HH:mm:ss}: {action.Title}.";
+
             await ReportRecoveryStateAsync(_lastServer, _lastTarget);
 
             if (!HasRecoveryActions)
@@ -549,15 +633,21 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // SQL Server rolls back the statement that was in flight, so the database is where it
             // was before this step - which is still whatever the failed restore left behind.
             AppendLog("\nCancelled. The database is in the same state as before this step.");
+            ActionOutcome = $"Cancelled at {DateTime.Now:HH:mm:ss} - the database is unchanged by this step.";
             SetStatus("Recovery step cancelled.");
         }
         catch (Exception ex)
         {
             AppendLog($"\nERROR: {ex.Message}");
+            ActionOutcome = $"FAILED at {DateTime.Now:HH:mm:ss}: {ex.Message}";
             SetError($"Recovery step failed: {ex.Message}");
         }
         finally
         {
+            IsRunningAction = false;
+            ActionPercent = -1;
+            TaskbarState = System.Windows.Shell.TaskbarItemProgressState.None;
+            TaskbarValue = 0;
             _queryCancellation.End();
             RaiseCancelStateChanged();
         }
