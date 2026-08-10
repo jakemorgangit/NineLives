@@ -101,6 +101,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The handoff tells the truth** (#288). Clicking "Open in Restore" while a restore is
+  RUNNING is refused with an explanation instead of wiping the run's chain and timeline off
+  the screen - the handoff may not do what the regenerate button already refuses. What
+  arrives is exactly what the browser showed: extra containers ticked on an earlier visit
+  are unticked, so the chain cannot assemble from backups nobody looked at. And the instance
+  filter matches by identity the way every other server comparison does - a case or naming
+  difference between msdb's name and a path-inferred one no longer silently drops the
+  filter, and a filter that genuinely cannot apply is SAID on the status line rather than
+  quietly answering a different question
 - **The exposure sweep answers to the user** (#287). It can be STOPPED - a Stop button while
   it runs, and Esc reaches it - where a dozen servers with several unreachable used to mean
   minutes of timeouts with no exit; stopping keeps the previous sweep's rows, and is never
