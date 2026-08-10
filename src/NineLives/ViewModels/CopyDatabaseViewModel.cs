@@ -32,7 +32,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     private readonly ISqlServerService _sql;
     private readonly BackupScriptGenerator _backupGenerator = new();
     private readonly RestoreScriptGenerator _restoreGenerator = new();
-    private readonly OperationCancellation _cancellation = new();
+    // One instance per operation (#281): the List button's Begin() used to cancel a running
+    // copy, and the copy's End() then disposed the listing's token. Stop belongs to the run.
+    private readonly OperationCancellation _listCancellation = new();
+    private readonly OperationCancellation _runCancellation = new();
     private readonly OperationLog _log;
 
     public CopyDatabaseViewModel(
@@ -129,7 +132,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
+    /// <summary>The list is not fetchable mid-run: it can wait; the copy cannot re-run (#281).</summary>
+    public bool CanLoadSourceDatabases => !IsRunning;
+
+    [RelayCommand(CanExecute = nameof(CanLoadSourceDatabases))]
     private async Task LoadSourceDatabasesAsync()
     {
         if (SourceServer == null)
@@ -138,7 +144,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             return;
         }
 
-        var ct = _cancellation.Begin();
+        var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
@@ -163,7 +169,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _listCancellation.End();
             IsBusy = false;
         }
     }
@@ -616,6 +622,8 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ButtonText));
         RunCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanLoadSourceDatabases));
+        LoadSourceDatabasesCommand.NotifyCanExecuteChanged();
     }
 
     public bool CanRun => HasScripts && !IsRunning && !IsRefused;
@@ -638,7 +646,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         Outcome = CopyOutcome.NotStarted;
         OutcomeText = string.Empty;
 
-        var ct = _cancellation.Begin();
+        var ct = _runCancellation.Begin();
 
         // The run executes what was SHOWN, not what is on screen later (#280): these
         // properties are live, the view stays editable while the halves run, and Generate
@@ -654,7 +662,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _runCancellation.End();
             IsRunning = false;
             OutcomeText = CopyOutcomeText.Describe(Outcome, run.Destinations.FirstOrDefault());
 
@@ -802,9 +810,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     [RelayCommand]
     private void Cancel()
     {
-        if (!_cancellation.CanCancel) return;
+        if (!_runCancellation.CanCancel) return;
 
-        _cancellation.Cancel();
+        _runCancellation.Cancel();
         SetStatus("Stopping...");
     }
 

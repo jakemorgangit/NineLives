@@ -24,7 +24,13 @@ public partial class BackupViewModel : ViewModelBase
     private readonly ICredentialStore _store;
     private readonly ISqlServerService _sql;
     private readonly BackupScriptGenerator _generator = new();
-    private readonly OperationCancellation _cancellation = new();
+    // One instance PER OPERATION (#281), the rule RestoreExecutionViewModel already keeps:
+    // with a single shared instance, the List button's Begin() silently cancelled a running
+    // backup, and the backup's End() then disposed the listing's token. The Stop button
+    // belongs to the run; the list and the verify each own their overlap story.
+    private readonly OperationCancellation _listCancellation = new();
+    private readonly OperationCancellation _runCancellation = new();
+    private readonly OperationCancellation _verifyCancellation = new();
     private readonly OperationLog _log;
 
     public BackupViewModel(
@@ -141,8 +147,11 @@ public partial class BackupViewModel : ViewModelBase
         foreach (var pick in DatabasePicks) pick.IsPicked = false;
     }
 
+    /// <summary>The list is not fetchable mid-run: it can wait; the backup cannot re-run (#281).</summary>
+    public bool CanLoadDatabases => !IsRunning;
+
     /// <summary>Asks the chosen instance what it has, rather than making somebody type a name.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanLoadDatabases))]
     private async Task LoadDatabasesAsync()
     {
         if (Server == null)
@@ -151,7 +160,7 @@ public partial class BackupViewModel : ViewModelBase
             return;
         }
 
-        var ct = _cancellation.Begin();
+        var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
@@ -192,7 +201,7 @@ public partial class BackupViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _listCancellation.End();
             IsBusy = false;
         }
     }
@@ -469,6 +478,8 @@ public partial class BackupViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ButtonText));
         ExecuteCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanLoadDatabases));
+        LoadDatabasesCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>SQL Server's own words as it goes, in the order it said them.</summary>
@@ -492,7 +503,7 @@ public partial class BackupViewModel : ViewModelBase
         ClearStatus();
         Console.Clear();
 
-        var ct = _cancellation.Begin();
+        var ct = _runCancellation.Begin();
         var started = DateTime.Now;
 
         // Database-at-a-time, deliberately (#208): a failure on the sixth database names the
@@ -612,7 +623,7 @@ public partial class BackupViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _runCancellation.End();
             IsRunning = false;
         }
     }
@@ -620,9 +631,9 @@ public partial class BackupViewModel : ViewModelBase
     [RelayCommand]
     private void Cancel()
     {
-        if (!_cancellation.CanCancel) return;
+        if (!_runCancellation.CanCancel) return;
 
-        _cancellation.Cancel();
+        _runCancellation.Cancel();
         SetStatus("Stopping...");
     }
 
@@ -683,7 +694,7 @@ public partial class BackupViewModel : ViewModelBase
     {
         if (Server == null || _lastWrittenDevices.Count == 0) return;
 
-        var ct = _cancellation.Begin();
+        var ct = _verifyCancellation.Begin();
         IsVerifying = true;
         Append($"Verifying {_lastWrittenDevices.Count} file(s) with RESTORE VERIFYONLY...");
 
@@ -713,7 +724,7 @@ public partial class BackupViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _verifyCancellation.End();
             IsVerifying = false;
         }
     }

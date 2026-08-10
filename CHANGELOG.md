@@ -91,6 +91,13 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- Every long operation owns its cancellation (#281). Three screens shared one token across
+  operations that can overlap, so the List databases button silently cancelled a running
+  backup or copy, and a finished operation disposed the survivor's token - the container-wide
+  audit could die with "Cannot access a disposed object" while its Stop button vanished. One
+  instance per operation now (the rule the restore execution always kept), the list buttons
+  are dead while a run is in progress, and starting an inventory operation cancels the others
+  explicitly rather than through a shared disposal
 - The copy runs the scripts it showed, not the ones on screen later (#280). The view stayed
   editable while the halves ran, and a keystroke in the target-name box mid-backup
   regenerated the restore half with fresh timestamped destinations - so the copy then
