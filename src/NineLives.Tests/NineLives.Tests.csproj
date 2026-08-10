@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\NineLives\NineLives.csproj" />
     <ProjectReference Include="..\NineLives.Core\NineLives.Core.csproj" />
+    <ProjectReference Include="..\NineLives.Cli\NineLives.Cli.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The console front end (#63): the same engine the GUI uses - the same chain calculation,
+         the same striped-set grouping, the same script generation - driven from a terminal, so
+         it can sit inside a pipeline, a runbook step, or a scheduled job. Read-only verbs only;
+         anything that executes against an instance arrives later, behind explicit flags. -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- "9lives exposure" reads the way the tagline does. NineLives.exe was unavailable anyway:
+         Windows filenames are case-insensitive, so it would collide with the GUI beside it. -->
+    <AssemblyName>9lives</AssemblyName>
+    <RootNamespace>Blackcat.NineLives.Cli</RootNamespace>
+    <Version>1.5.0</Version>
+    <Product>Nine Lives</Product>
+    <Authors>Jake Morgan</Authors>
+    <Company>Blackcat Data Solutions Ltd</Company>
+    <Copyright>Copyright (c) 2026 Jake Morgan</Copyright>
+    <Description>Nine Lives CLI - the restore engine from a terminal. Every database deserves nine lives.</Description>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NineLives.Core\NineLives.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same arrangement as the app project: the tests reach the verbs directly. -->
+    <InternalsVisibleTo Include="NineLives.Tests" />
+  </ItemGroup>
+
+</Project>

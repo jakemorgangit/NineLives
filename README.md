@@ -79,6 +79,22 @@ Two things it checks that are easy to get wrong by hand:
 
 Backups are written to the layout the container is configured with, so what Nine Lives writes is what Nine Lives can then find.
 
+## The CLI: 9lives.exe
+
+The same engine from a terminal - for the pipeline, the runbook step, the scheduled task. `9lives.exe` ships beside the app and reads the configuration the app maintains: its containers, its servers, its credentials. Configure once in the GUI, script against it here.
+
+```
+9lives exposure                          the estate, judged, in one exit code
+9lives list --container backups
+9lives points --container backups --database Sales
+9lives script --container backups --database Sales --at "2026-08-02 19:00" --out restore.sql
+9lives validate --server SRV01 --json
+```
+
+Five read-only verbs. `list` says what a source holds; `points` is the timeline as text or JSON; `script` emits the validated restore T-SQL for a moment - the same chain calculation, striped-set grouping and STOPAT/marked-transaction handling the GUI runs, which is why the script it emits actually works; `validate` checks every chain is intact and answers in the exit code; `exposure` sweeps every configured server and exits with the worst level it found, so a scheduled task turns quiet log-backup silence into a red pipeline.
+
+Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-by-chain, `3` could not answer, `64` usage. `--json` on the read verbs makes the output composable with jq and friends. Nothing in the CLI executes against an instance - execution verbs arrive later, behind their own explicit flags.
+
 ## Features
 
 ### Copying and Auditing
