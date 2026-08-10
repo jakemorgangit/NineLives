@@ -554,6 +554,17 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public async Task AcceptHandoffAsync(BrowseHandoff handoff)
     {
+        // This screen already refuses to regenerate the script mid-restore because it is the
+        // record of what is actually running - the handoff cannot be allowed to do what the
+        // regenerate button may not (#288). Clicking a red dashboard row must not wipe the
+        // chain and timeline out from under a 40-minute restore.
+        if (IsExecuting)
+        {
+            SetError("A restore is running on this screen. Wait for it to finish (or stop it) " +
+                     "and hand over again - jumping sources now would wipe the record of the run.");
+            return;
+        }
+
         SelectedMedium = handoff.Medium == BackupMedium.SharedPath
             ? BackupMedium.SharedPath
             : BackupMedium.AzureBlob;
@@ -567,6 +578,12 @@ public partial class RestoreViewModel : ViewModelBase
         }
         else if (handoff.Container != null)
         {
+            // What arrives is what the browser showed. Extra containers ticked on an earlier
+            // visit would make the load see MORE than was looked at - a chain assembling from
+            // backups the user never saw (#288).
+            foreach (var choice in AdditionalContainers)
+                choice.IsSelected = false;
+
             SelectedContainer = Containers.FirstOrDefault(c => c.Id == handoff.Container.Id)
                                 ?? handoff.Container;
         }
@@ -575,14 +592,36 @@ public partial class RestoreViewModel : ViewModelBase
 
         // The filters land only when the load found them - a database the load did not see would
         // put the working set into a state the screen cannot have reached by hand.
-        if (handoff.ServerFilter != null && Inventory.DiscoveredServers.Contains(handoff.ServerFilter))
-            Inventory.SelectedServerName = handoff.ServerFilter;
+        string? droppedFilter = null;
+        if (handoff.ServerFilter != null)
+        {
+            // The way every other server comparison works (#288): identity, not ordinal. The
+            // dashboard hands over the name msdb records while a blob listing infers from
+            // paths - a case difference must not silently drop the instance filter.
+            var match = Inventory.DiscoveredServers.FirstOrDefault(d =>
+            {
+                var (server, instance) = ServerIdentity.Split(d);
+                return ServerIdentity.Matches(server, instance, handoff.ServerFilter);
+            });
+
+            if (match != null)
+                Inventory.SelectedServerName = match;
+            else
+                droppedFilter = handoff.ServerFilter;
+        }
 
         if (handoff.Database != null &&
             Inventory.DiscoveredDatabases.Contains(handoff.Database, StringComparer.OrdinalIgnoreCase))
             Inventory.SelectedDatabaseName =
                 Inventory.DiscoveredDatabases.First(d =>
                     string.Equals(d, handoff.Database, StringComparison.OrdinalIgnoreCase));
+
+        // Said last, so nothing the filters trigger can clear it: applying only the database
+        // filter is a DIFFERENT question than the one clicked, and silence would present its
+        // answer as the clicked one's.
+        if (droppedFilter != null)
+            SetStatus($"The instance filter '{droppedFilter}' is not among this source's " +
+                      "instances, so every instance's backups are shown.");
     }
 
     /// <summary>The saved connections, for choosing whose backup history to read.</summary>
