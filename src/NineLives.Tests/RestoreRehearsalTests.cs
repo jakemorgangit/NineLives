@@ -171,8 +171,10 @@ public class RestoreRehearsalTests
         Assert.Contains("DBCC CHECKDB", script);
         Assert.Contains("DROP DATABASE", script);
 
-        // The receipt and the announcement both say what this was.
-        Assert.Contains(notifier.Sent, n => n.Operation == "Rehearsal" && n.Phase == RunPhase.Succeeded);
+        // The receipt and the announcement both say what this was - and the announcement names
+        // the database being PROVEN, not the scratch copy it was proven on.
+        var done = notifier.Sent.Single(n => n.Operation == "Rehearsal" && n.Phase == RunPhase.Succeeded);
+        Assert.Equal("MyDb", done.Subject);
     }
 
     /// <summary>The whole design promise: a name that exists refuses, before anything runs.</summary>

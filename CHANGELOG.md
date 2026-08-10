@@ -12,6 +12,10 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- Rehearsal notifications now name the database being PROVEN rather than the scratch copy it
+  was proven on - "Rehearsal MyDb", not "Rehearsal MyDb_rehearsal_20260810_0930"
+- The Exposure dashboard sweeps itself on first visit - arriving at an empty screen that needs a
+  button press first is the screen failing its own question. Refresh stays deliberate after that
 - The copy screen now checks the version direction at script generation - its restore half runs
   outside the restore preflights, so a 2025 source aimed at a 2022 target used to fail with
   error 3169 only AFTER the backup half had run. The warning says plainly that the copy cannot
