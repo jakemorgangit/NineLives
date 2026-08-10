@@ -118,6 +118,31 @@
             <StackPanel>
                 <TextBlock Text="THE TARGET DATABASE NEEDS ATTENTION"
                            Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                <!-- The running action's own progress (percent_complete) and its outcome - on the
+                     panel, because the console scrolls and this should stay. -->
+                <StackPanel Visibility="{Binding Execution.IsRunningAction, Converter={StaticResource BoolToVis}}"
+                            Margin="0,0,0,8">
+                    <ProgressBar Height="8" Maximum="100"
+                                 Value="{Binding Execution.ActionPercent, Mode=OneWay}"
+                                 IsIndeterminate="{Binding Execution.ActionPercentUnknown}"
+                                 Style="{StaticResource DarkProgressBar}" />
+                </StackPanel>
+                <TextBlock Text="{Binding Execution.ActionOutcome}"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Execution.ActionOutcome}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <TextBlock Text="{Binding Execution.RecoveryStateMessage}"
                            Style="{StaticResource BodyText}"
                            TextWrapping="Wrap" Margin="0,0,0,10" />
@@ -170,6 +195,31 @@
             <StackPanel>
                 <TextBlock Text="FINISHING THE JOB"
                            Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+                <!-- The running action's own progress (percent_complete) and its outcome - on the
+                     panel, because the console scrolls and this should stay. -->
+                <StackPanel Visibility="{Binding Execution.IsRunningAction, Converter={StaticResource BoolToVis}}"
+                            Margin="0,0,0,8">
+                    <ProgressBar Height="8" Maximum="100"
+                                 Value="{Binding Execution.ActionPercent, Mode=OneWay}"
+                                 IsIndeterminate="{Binding Execution.ActionPercentUnknown}"
+                                 Style="{StaticResource DarkProgressBar}" />
+                </StackPanel>
+                <TextBlock Text="{Binding Execution.ActionOutcome}"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Execution.ActionOutcome}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <TextBlock Text="{Binding Execution.PostRestoreMessage}"
                            Style="{StaticResource BodyText}"
                            TextWrapping="Wrap" Margin="0,0,0,10" />

@@ -562,6 +562,26 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     private ServerConnection? _lastServer;
     private string _lastTarget = string.Empty;
 
+    /// <summary>Overall percent of the running panel action, from dm_exec_requests. -1 = unknown.</summary>
+    [ObservableProperty]
+    private double _actionPercent = -1;
+
+    [ObservableProperty]
+    private bool _isRunningAction;
+
+    /// <summary>True until the first percent arrives - the bar runs indeterminate rather than lying at 0.</summary>
+    public bool ActionPercentUnknown => ActionPercent < 0;
+
+    partial void OnActionPercentChanged(double value) => OnPropertyChanged(nameof(ActionPercentUnknown));
+
+    /// <summary>
+    /// What the last panel action concluded, on the panel itself - the console scrolls, this
+    /// stays. "CHECKDB found nothing wrong" is the sentence the whole rehearsal of clicking Run
+    /// exists to produce, and it should not have to be dug out of 60 lines of output.
+    /// </summary>
+    [ObservableProperty]
+    private string _actionOutcome = string.Empty;
+
     /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
     [RelayCommand]
     private async Task RunRecoveryActionAsync(RecoveryAction? action)
@@ -575,11 +595,34 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         var ct = _queryCancellation.Begin();
         RaiseCancelStateChanged();
 
+        IsRunningAction = true;
+        ActionPercent = -1;
+        ActionOutcome = string.Empty;
+        TaskbarState = System.Windows.Shell.TaskbarItemProgressState.Normal;
+        TaskbarValue = 0;
+
         try
         {
             AppendLog($"\nRunning: {action.Sql}");
-            await _sql.ExecuteRecoveryActionAsync(_lastServer, action.Sql, ct);
+
+            // percent_complete covers DBCC CHECKDB and RESTORE alike - the two long things this
+            // panel runs - so the bar moves for exactly the actions long enough to need one.
+            var progress = new Progress<double>(p =>
+            {
+                ActionPercent = p;
+                TaskbarValue = p / 100.0;
+            });
+
+            await _sql.ExecuteWithPercentPollingAsync(_lastServer, action.Sql, progress, ct);
             AppendLog("Completed.");
+
+            // On the panel, not only in the console: the console scrolls, this stays - and
+            // "CHECKDB found nothing wrong" is the sentence the whole click exists to produce.
+            ActionOutcome = action.Sql.Contains("DBCC CHECKDB", StringComparison.OrdinalIgnoreCase)
+                ? $"CHECKDB completed at {DateTime.Now:HH:mm:ss} and found nothing wrong - the " +
+                  "restore is proven, not just finished."
+                : $"Completed at {DateTime.Now:HH:mm:ss}: {action.Title}.";
+
             await ReportRecoveryStateAsync(_lastServer, _lastTarget);
 
             if (!HasRecoveryActions)
@@ -590,15 +633,21 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // SQL Server rolls back the statement that was in flight, so the database is where it
             // was before this step - which is still whatever the failed restore left behind.
             AppendLog("\nCancelled. The database is in the same state as before this step.");
+            ActionOutcome = $"Cancelled at {DateTime.Now:HH:mm:ss} - the database is unchanged by this step.";
             SetStatus("Recovery step cancelled.");
         }
         catch (Exception ex)
         {
             AppendLog($"\nERROR: {ex.Message}");
+            ActionOutcome = $"FAILED at {DateTime.Now:HH:mm:ss}: {ex.Message}";
             SetError($"Recovery step failed: {ex.Message}");
         }
         finally
         {
+            IsRunningAction = false;
+            ActionPercent = -1;
+            TaskbarState = System.Windows.Shell.TaskbarItemProgressState.None;
+            TaskbarValue = 0;
             _queryCancellation.End();
             RaiseCancelStateChanged();
         }

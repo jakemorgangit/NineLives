@@ -64,6 +64,15 @@ public interface ISqlServerService
     /// <summary>SERVERPROPERTY('ProductMajorVersion') - 16 is SQL Server 2022 - or null if it did not say (#210).</summary>
     Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default);
 
+    /// <summary>
+    /// Runs one statement while a second connection polls sys.dm_exec_requests for its
+    /// percent_complete - which DBCC CHECKDB and RESTORE both report. Best effort: no
+    /// VIEW SERVER STATE means no percentage, and the statement still runs.
+    /// </summary>
+    Task ExecuteWithPercentPollingAsync(
+        ServerConnection server, string sql, IProgress<double>? percent = null,
+        CancellationToken ct = default);
+
     /// <summary>What the restored database looks like now - compat level, recovery model, owner (#205).</summary>
     Task<DatabaseOverview?> GetDatabaseOverviewAsync(
         ServerConnection server, string database, CancellationToken ct = default);
