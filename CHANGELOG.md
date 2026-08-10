@@ -12,6 +12,11 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The exposure dashboard's rows act, not just alarm** - "Open in Restore" on every reachable
+  row jumps to the restore screen with that server's backup history loaded and the database
+  selected, one click from seeing to acting. From there, Rehearse proves it. A red row's
+  distance to being acted on should be one click, or the dashboard is a wall of guilt rather
+  than a to-do list
 - **Scheduled rehearsals: the proof renews itself.** The rehearsal wrapped as a disabled,
   unscheduled Agent job - add a weekly schedule and every run restores the chain to a stable
   scratch name, proves it with CHECKDB, and drops it, receipts accumulating in the job history.

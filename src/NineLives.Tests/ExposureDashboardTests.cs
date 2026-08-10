@@ -174,6 +174,44 @@ public class ExposureDashboardTests
         Assert.Equal(new DateTime(2026, 8, 9, 21, 30, 0), vm.Rows.Single().LastProven);
     }
 
+    /// <summary>
+    /// From seeing to acting in one click (#202's pattern): the row hands its server and database
+    /// to the restore screen through the server's own msdb - exactly where the numbers came from.
+    /// </summary>
+    [Fact]
+    public async Task ARowHandsItsServerAndDatabaseToTheRestoreScreen()
+    {
+        var (vm, sql, _) = New("SRV01");
+        sql.ExposureByServer["SRV01"] =
+            [Row(db: "Payroll", full: DateTime.Now.AddHours(-10))];
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        BrowseHandoff? handoff = null;
+        vm.RestoreRequested += h => handoff = h;
+
+        vm.RestoreFromRowCommand.Execute(vm.Rows.Single());
+
+        Assert.NotNull(handoff);
+        Assert.Equal(BackupMedium.SharedPath, handoff!.Medium);
+        Assert.Equal("SRV01", handoff.SourceServer?.ServerName);
+        Assert.Equal("Payroll", handoff.Database);
+    }
+
+    /// <summary>An unreachable row has nowhere to hand over to - the click does nothing.</summary>
+    [Fact]
+    public async Task AnUnreachableRowDoesNotHandOff()
+    {
+        var (vm, _, _) = New("SRV01", "SRV02");
+        var fired = false;
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.RestoreRequested += _ => fired = true;
+
+        vm.RestoreFromRowCommand.Execute(
+            vm.Rows.First(r => r.StateDescription == "UNREACHABLE"));
+
+        Assert.False(fired);
+    }
+
     [Fact]
     public async Task NoServersSaysSoInsteadOfShowingAnEmptyAllClear()
     {

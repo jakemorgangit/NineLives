@@ -45,6 +45,29 @@ public partial class ExposureViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSweeping;
 
+    /// <summary>The connections behind the rows, by server name - the handoff needs the object.</summary>
+    private Dictionary<string, ServerConnection> _serversByName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Raised when somebody wants to act on a row. The shell wires it (#202's pattern).</summary>
+    public event Action<BrowseHandoff>? RestoreRequested;
+
+    /// <summary>
+    /// From seeing to acting in one click: the row's server and database, handed to the restore
+    /// screen through the source that MUST know these backups - the server's own msdb, which is
+    /// exactly where the row's numbers came from. A red row's distance to being acted on should
+    /// be one click, or the dashboard is a wall of guilt rather than a to-do list.
+    /// </summary>
+    [RelayCommand]
+    private void RestoreFromRow(ExposureRow? row)
+    {
+        if (row == null || row.StateDescription == "UNREACHABLE") return;
+        if (!_serversByName.TryGetValue(row.ServerName, out var server)) return;
+
+        RestoreRequested?.Invoke(new BrowseHandoff(
+            BackupMedium.SharedPath, null, server, row.ServerName, row.DatabaseName));
+    }
+
     /// <summary>
     /// Asks every configured server, in parallel, and shows the worst first.
     ///
@@ -80,6 +103,9 @@ public partial class ExposureViewModel : ViewModelBase
             }
 
             var now = DateTime.Now;
+            _serversByName = servers
+                .GroupBy(s => s.ServerName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
             var sweeps = servers.Select(async server =>
             {
