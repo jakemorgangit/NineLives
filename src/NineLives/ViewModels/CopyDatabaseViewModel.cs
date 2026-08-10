@@ -333,6 +333,58 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         // screen feel slower for checks that usually say "fine".
         _ = CheckSpaceAsync();
         _ = CheckEncryptionAsync();
+        _ = CheckVersionAsync();
+    }
+
+    // ── can the target even accept it (#210's law, on the copy screen) ─────────
+
+    [ObservableProperty]
+    private string _versionWarning = string.Empty;
+
+    public bool HasVersionWarning => VersionWarning.Length > 0;
+
+    partial void OnVersionWarningChanged(string value) => OnPropertyChanged(nameof(HasVersionWarning));
+
+    /// <summary>
+    /// The one-directional law of RESTORE, asked at generation time: a backup taken on a newer
+    /// major version can never be restored onto an older one - error 3169, no exceptions. The
+    /// restore screen has refused this since #210; the copy screen ran its restore half OUTSIDE
+    /// those preflights, so the refusal arrived from the server after the backup half had
+    /// already run. Both versions are one SERVERPROPERTY away, and the copy knows both servers
+    /// before anything starts.
+    ///
+    /// A warning rather than a block, like the screen's other checks - but a warning in the
+    /// STRONGEST terms, because unlike disk space nothing can change between generating and
+    /// running that makes this legal.
+    /// </summary>
+    private async Task CheckVersionAsync()
+    {
+        VersionWarning = string.Empty;
+
+        if (SourceServer == null || TargetServer == null) return;
+
+        try
+        {
+            var source = await _sql.GetProductMajorVersionAsync(SourceServer);
+            var target = await _sql.GetProductMajorVersionAsync(TargetServer);
+
+            if (VersionCompatibility.Check(source, target) == VersionVerdict.Refuse)
+            {
+                VersionWarning =
+                    $"This copy cannot work: {SourceServer.ServerName} is " +
+                    $"{VersionCompatibility.Describe(source!.Value)} and {TargetServer.ServerName} " +
+                    $"is {VersionCompatibility.Describe(target!.Value)}, and SQL Server can never " +
+                    "restore a newer version's backup onto an older server - error 3169, with no " +
+                    "exceptions. The backup half would run and the restore half would fail. Copy " +
+                    "the other way, or onto a newer target.";
+
+                _log.Warn($"[version] copy: {VersionWarning}");
+            }
+        }
+        catch
+        {
+            // An instance that will not say its version has not said the copy is illegal.
+        }
     }
 
     // ── will the target be able to READ it (#222) ───────────────────────────────
