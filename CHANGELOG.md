@@ -51,6 +51,10 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Changed
 
+- **The Generate Script button is gone** - the script has built itself live on every option
+  change for a while, which made the button a ritual with no effect. When the pane is empty it
+  now says why, passively, where the script would be ("Enter a target database name and the
+  script appears here"), instead of a dialog per keystroke. Ctrl+G retires with it
 - **Every restore option is available in every mode.** Point-in-time, relocating files (WITH
   MOVE), the advanced WITH options and additional containers no longer hide behind Standard or
   Pro: the modes narrow which screens exist, never which restore options do. WITH MOVE is needed

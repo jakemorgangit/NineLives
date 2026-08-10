@@ -41,7 +41,6 @@
         <KeyBinding Modifiers="Ctrl" Key="D8" Command="{Binding NavigateToCommand}" CommandParameter="Settings" />
         <KeyBinding Modifiers="Ctrl" Key="D9" Command="{Binding NavigateToCommand}" CommandParameter="About" />
         <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
-        <KeyBinding Modifiers="Ctrl" Key="G" Command="{Binding GenerateScriptCommand}" />
         <KeyBinding Key="Escape" Command="{Binding CancelCurrentCommand}" />
     </Window.InputBindings>
 
