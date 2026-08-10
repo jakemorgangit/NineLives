@@ -105,9 +105,10 @@ public class RestoreStepTests
         var steps = new RestoreStepsViewModel();
 
         Assert.StartsWith("1.", steps.Source.Title);
-        Assert.StartsWith("2.", steps.Point.Title);
-        Assert.StartsWith("3.", steps.Options.Title);
-        Assert.StartsWith("4.", steps.Execute.Title);
+        Assert.StartsWith("2.", steps.Target.Title);
+        Assert.StartsWith("3.", steps.Point.Title);
+        Assert.StartsWith("4.", steps.Options.Title);
+        Assert.StartsWith("5.", steps.Execute.Title);
     }
 
     // ── the accordion ───────────────────────────────────────────────────────────
@@ -122,15 +123,17 @@ public class RestoreStepTests
     {
         var steps = new RestoreStepsViewModel();
         steps.Report(steps.Source, true, "a source");
+        steps.Report(steps.Target, true, "SRV01");
         steps.Point.CanConfirm = true;
         steps.Point.ConfirmCommand.Execute(null);
 
-        // The hand-over has already opened step 3, so reopen step 2 - going BACK is the case
+        // The hand-over has already opened step 4, so reopen step 3 - going BACK is the case
         // worth pinning anyway, and it must still close whatever was open.
         steps.Point.ToggleCommand.Execute(null);
 
         Assert.True(steps.Point.IsExpanded);
         Assert.False(steps.Source.IsExpanded);
+        Assert.False(steps.Target.IsExpanded);
         Assert.False(steps.Options.IsExpanded);
         Assert.False(steps.Execute.IsExpanded);
     }
@@ -156,6 +159,11 @@ public class RestoreStepTests
         steps.Report(steps.Source, isComplete: true, summary: "backups, MyDb on SRV01");
 
         Assert.False(steps.Source.IsExpanded);
+        Assert.True(steps.Target.IsExpanded);
+
+        steps.Report(steps.Target, isComplete: true, summary: "SRV01");
+
+        Assert.False(steps.Target.IsExpanded);
         Assert.True(steps.Point.IsExpanded);
     }
 
@@ -166,17 +174,21 @@ public class RestoreStepTests
     {
         var steps = Confirmed();
 
-        // Choosing a different database: step 1 goes incomplete, which withdraws everything after
-        // it, and answering it again puts the user back at the restore point rather than at the
-        // end of a sequence whose answers have just been thrown away.
+        // Choosing a different database: step 1 goes incomplete, which withdraws everything
+        // after it, and answering it again puts the user back at the next unanswered step rather
+        // than at the end of a sequence whose answers have just been thrown away. The container
+        // re-offers the TARGET first (#318); the screen re-reports the answer still in its combo,
+        // which RestoreTargetStepTests pins - so a user with a target lands back on the point.
         steps.Report(steps.Source, isComplete: false, summary: string.Empty);
+        Assert.False(steps.Target.IsVisible);
         Assert.False(steps.Point.IsVisible);
 
         steps.Report(steps.Source, isComplete: true, summary: "backups, OtherDb on SRV01");
 
-        Assert.True(steps.Point.IsVisible);
-        Assert.True(steps.Point.IsExpanded);
-        Assert.False(steps.Point.IsComplete);
+        Assert.True(steps.Target.IsVisible);
+        Assert.True(steps.Target.IsExpanded);
+        Assert.False(steps.Target.IsComplete);
+        Assert.False(steps.Point.IsVisible);
     }
 
     /// <summary>
@@ -204,6 +216,7 @@ public class RestoreStepTests
     {
         var steps = new RestoreStepsViewModel();
         steps.Report(steps.Source, true, "backups, MyDb on SRV01");
+        steps.Report(steps.Target, true, "SRV01");
 
         steps.Point.CanConfirm = true;
         steps.Point.ConfirmCommand.Execute(null);
@@ -232,6 +245,7 @@ public class RestoreStepTests
     {
         var steps = new RestoreStepsViewModel();
         steps.Report(steps.Source, true, "backups, MyDb on SRV01");
+        steps.Report(steps.Target, true, "SRV01");
         steps.Point.CanConfirm = true;
         steps.Point.ConfirmCommand.Execute(null);
         steps.Options.CanConfirm = true;
@@ -250,6 +264,7 @@ public class RestoreStepTests
         var steps = new RestoreStepsViewModel();
 
         Assert.True(steps.Source.IsVisible);
+        Assert.False(steps.Target.IsVisible);
         Assert.False(steps.Point.IsVisible);
         Assert.False(steps.Options.IsVisible);
         Assert.False(steps.Execute.IsVisible);
@@ -261,6 +276,10 @@ public class RestoreStepTests
         var steps = new RestoreStepsViewModel();
 
         steps.Report(steps.Source, true, "backups, MyDb on SRV01");
+        Assert.True(steps.Target.IsVisible);
+        Assert.False(steps.Point.IsVisible);
+
+        steps.Report(steps.Target, true, "SRV01");
         Assert.True(steps.Point.IsVisible);
         Assert.False(steps.Options.IsVisible);
 
@@ -286,6 +305,7 @@ public class RestoreStepTests
     {
         var steps = new RestoreStepsViewModel();
         steps.Report(steps.Source, true, "a source");
+        steps.Report(steps.Target, true, "SRV01");
 
         steps.Point.Describe("2026-01-10 22:00, Full + 2 logs");
         steps.Point.CanConfirm = true;
@@ -300,6 +320,7 @@ public class RestoreStepTests
     {
         var steps = new RestoreStepsViewModel();
         steps.Report(steps.Source, true, "a source");
+        steps.Report(steps.Target, true, "SRV01");
 
         steps.Point.ConfirmCommand.Execute(null);
 
@@ -316,6 +337,7 @@ public class RestoreStepTests
     {
         var steps = new RestoreStepsViewModel();
         steps.Report(steps.Source, true, "a source");
+        steps.Report(steps.Target, true, "SRV01");
 
         steps.Point.CanConfirm = true;
         Assert.True(steps.Point.IsAwaitingConfirmation);

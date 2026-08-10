@@ -81,6 +81,16 @@ more detail on the user-facing changes; this file is the short history.
   config.json, and never displayed again. Replacing one means saving a new one. Deliveries
   hydrate the URL at send time on clones; existing configs keep working from their in-file
   URL until the row is next saved, which migrates it
+- **The restore workflow asks WHERE, as a step** (#318): step 2 is SELECT TARGET, offering
+  the saved server list right in the flow. Connecting on the SQL Servers screen first shows
+  the step already answered - and still changeable - instead of asking again; with nothing
+  connected, the answer no longer waits to surface as an execute-time error. Changing the
+  source keeps the target: it is an independent decision, and it survives backtracking
+- **The database list waits for an instance** (#319): with several instances in the loaded
+  backups, the DATABASE dropdown stays empty and disabled until the instance is chosen -
+  two servers both backing up a database called Sales are the everyday DR pair, and a mixed
+  list meant guessing whose history the timeline would show. One instance answers its own
+  filter automatically; the database choice itself always stays with the user
 
 ### Changed
 

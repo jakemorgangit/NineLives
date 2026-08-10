@@ -148,9 +148,17 @@ public partial class RestoreStep(string title, bool needsConfirmation = false) :
 public sealed class RestoreStepsViewModel
 {
     public RestoreStep Source { get; } = new("1. SELECT SOURCE");
-    public RestoreStep Point { get; } = new("2. SELECT RESTORE POINT", needsConfirmation: true);
-    public RestoreStep Options { get; } = new("3. RESTORE OPTIONS", needsConfirmation: true);
-    public RestoreStep Execute { get; } = new("4. GENERATE & EXECUTE");
+
+    /// <summary>
+    /// WHERE the restore runs (#318). The workflow's second real question - it used to be
+    /// answered on a different screen entirely (whatever the SQL Servers screen last
+    /// connected to), met for the first time as an error at execute time.
+    /// </summary>
+    public RestoreStep Target { get; } = new("2. SELECT TARGET");
+
+    public RestoreStep Point { get; } = new("3. SELECT RESTORE POINT", needsConfirmation: true);
+    public RestoreStep Options { get; } = new("4. RESTORE OPTIONS", needsConfirmation: true);
+    public RestoreStep Execute { get; } = new("5. GENERATE & EXECUTE");
 
     public IReadOnlyList<RestoreStep> All { get; }
 
@@ -159,13 +167,14 @@ public sealed class RestoreStepsViewModel
 
     public RestoreStepsViewModel()
     {
-        All = [Source, Point, Options, Execute];
+        All = [Source, Target, Point, Options, Execute];
 
         // One open, and it is the only one there is anything to do in yet. RefreshVisibility only
         // acts on a CHANGE, so the steps that start hidden have to start closed too - otherwise
         // they arrive already expanded the moment they become visible.
         Source.IsVisible = true;
         Source.IsExpanded = true;
+        Target.IsExpanded = false;
         Point.IsExpanded = false;
         Options.IsExpanded = false;
         Execute.IsExpanded = false;
