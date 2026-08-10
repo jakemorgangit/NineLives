@@ -44,6 +44,12 @@ internal static class HelpWriter
         output.WriteLine("  9lives script --container backups --database Sales --at \"2026-08-02 19:00\" --out restore.sql");
         output.WriteLine("  9lives rehearse --container backups --database Sales --target SRV02 --execute");
         output.WriteLine("  9lives restore --container backups --database Sales --target SRV02 --with-replace --execute");
+        output.WriteLine();
+        output.WriteLine("Provisioning a fresh machine to a point in time - three lines, each");
+        output.WriteLine("validated, chained on exit codes; the only variable is the moment:");
+        output.WriteLine("  9lives add-server --name target --address localhost --user svc_restore --password %SQL_PW%");
+        output.WriteLine("  9lives add-container --name backups --url https://acct.blob.core.windows.net/sqlbackups --sas %SAS%");
+        output.WriteLine("  9lives restore --container backups --database Sales --target target --at \"%POINT_IN_TIME%\" --execute");
     }
 
     public static void WriteVerb(VerbSpec verb, TextWriter output)

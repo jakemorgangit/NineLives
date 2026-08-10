@@ -87,6 +87,8 @@ internal static class Program
         {
             return spec.Name switch
             {
+                "add-server" => await AddServerVerb.RunAsync(args, services, Console.Out, Console.Error),
+                "add-container" => await AddContainerVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "list" => await ListVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "points" => await PointsVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "script" => await ScriptVerb.RunAsync(args, services, Console.Out, Console.Error),

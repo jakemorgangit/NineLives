@@ -11,6 +11,7 @@ internal static class VerbCatalogue
 {
     public static readonly VerbSpec[] All =
     [
+        AddServerVerb.Spec, AddContainerVerb.Spec,
         ListVerb.Spec, PointsVerb.Spec, ScriptVerb.Spec, ValidateVerb.Spec, ExposureVerb.Spec,
         RestoreVerb.Spec, RehearseVerb.Spec
     ];

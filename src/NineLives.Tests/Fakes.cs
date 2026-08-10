@@ -98,10 +98,13 @@ public sealed class FakeBlobStorageService : IBlobStorageService
     /// </summary>
     public BlobContainerConfig? LastConfig { get; private set; }
 
+    /// <summary>What VerifyConnectionAsync answers - false plays a SAS that cannot reach the container.</summary>
+    public bool VerifyAnswer { get; set; } = true;
+
     public Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
         LastConfig = config;
-        return Task.FromResult(true);
+        return Task.FromResult(VerifyAnswer);
     }
 
     /// <summary>What DescribeSignedInIdentityAsync should answer.</summary>
@@ -301,9 +304,15 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Dictionary<string, int?> MajorVersionByServer { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Set to make the version ask throw - a server that does not answer at all (#63).</summary>
+    public Exception? ThrowOnMajorVersion { get; set; }
+
     public Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(
+    {
+        if (ThrowOnMajorVersion != null) throw ThrowOnMajorVersion;
+        return Task.FromResult(
             MajorVersionByServer.TryGetValue(server.ServerName, out var v) ? v : ProductMajorVersion);
+    }
 
     /// <summary>What GetDatabaseOverviewAsync answers (#205).</summary>
     public DatabaseOverview? DatabaseOverview { get; set; } = new(150, "FULL", "sa");
