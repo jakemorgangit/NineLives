@@ -200,9 +200,15 @@ public partial class BackupViewModel : ViewModelBase
     partial void OnServerChanged(ServerConnection? value)
     {
         // The database list belonged to the previous instance. Leaving it up invites somebody to
-        // back up a name that exists on both and mean the other one.
+        // back up a name that exists on both and mean the other one - and the multi-select
+        // ticks and certificate list are the same hazard with the same fix (#278): stale ticks
+        // satisfied CanGenerate, so the regenerated statements named the OLD server's databases
+        // with destinations claiming the new one, encrypted by a certificate it does not hold.
         Databases = [];
         SelectedDatabase = null;
+        DatabasePicks = [];
+        EncryptionCertificates = [];
+        SelectedEncryptionCertificate = null;
         Invalidate();
     }
 
@@ -354,7 +360,22 @@ public partial class BackupViewModel : ViewModelBase
         // Disarm: an armed button that survives an option change is armed for something else.
         IsArmed = false;
 
-        if (HasScript) Generate();
+        if (!HasScript) return;
+
+        // Regenerate - or, when the inputs no longer support generating, CLEAR. Leaving the
+        // old script standing kept the Run button live: generate for a database on one server,
+        // switch the server box, and two presses executed the old statements against the new
+        // instance (#278). An empty screen is the truthful one here.
+        if (CanGenerate) Generate();
+        else ClearGenerated();
+    }
+
+    /// <summary>Removes every trace of the last generation, so nothing stale can run.</summary>
+    private void ClearGenerated()
+    {
+        _generated = [];
+        GeneratedScript = string.Empty;
+        Destinations = [];
     }
 
     /// <summary>

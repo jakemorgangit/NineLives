@@ -85,6 +85,12 @@ more detail on the user-facing changes; this file is the short history.
   the screen loaded - the worst case being import, then Connect, and every imported server
   gone. Both screens also catch up with outside additions on navigation, and only deletions
   made on the screen itself delete (#276)
+- A generated script no longer survives the change that invalidated it (#278). On the backup
+  and copy screens, an input change that makes regeneration impossible now CLEARS the script,
+  the destinations and the run button instead of leaving the old statements displayed and
+  runnable - switching servers after generating used to leave a script for one instance
+  executable against another, with the previous server's multi-select ticks and certificate
+  list still standing
 - Imports no longer destroy and no longer lie (#277): the webhook list refreshes immediately
   after an import, so the next row edit cannot erase what was just imported; a matching
   container keeps the SAS pasted into its local URL (the same protection webhook URLs always

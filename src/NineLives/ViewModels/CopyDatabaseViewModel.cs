@@ -282,7 +282,24 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         // An armed run that survives a change is armed for something else.
         IsArmed = false;
 
-        if (HasScripts) Generate();
+        if (!HasScripts) return;
+
+        // Regenerate - or, when the inputs no longer support generating, CLEAR (#278).
+        // Blanking the target name left the previous scripts standing and CanRun true: the
+        // Refusal getter answers nothing for incomplete input, so the screen showed runnable
+        // statements naming a target nobody was asking for any more.
+        if (CanGenerate) Generate();
+        else ClearGenerated();
+    }
+
+    /// <summary>Removes every trace of the last generation, so nothing stale can run.</summary>
+    private void ClearGenerated()
+    {
+        BackupScript = string.Empty;
+        RestoreScript = string.Empty;
+        Destinations = [];
+        OnPropertyChanged(nameof(CanRun));
+        RunCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>
