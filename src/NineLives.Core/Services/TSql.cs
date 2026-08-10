@@ -43,6 +43,32 @@ public static class TSql
     public static string UnquoteName(string? name) => Unwrap(name);
 
     /// <summary>
+    /// Quotes an identifier that came FROM the server exactly as it is (#294).
+    /// <see cref="QuoteName"/>'s bracket unwrapping is right for TYPED names - somebody typing
+    /// [My Db] means My Db - but a database genuinely named [Archive] (sys.databases says so)
+    /// must round-trip as [[Archive]]], not silently become a different database.
+    /// </summary>
+    public static string QuoteNameExact(string? name) =>
+        $"[{(name ?? string.Empty).Replace("]", "]]")}]";
+
+    /// <summary>
+    /// A value about to be interpolated into a <c>--</c> comment (#294). sysname permits
+    /// control characters and line breaks, and a name containing a newline would terminate
+    /// the comment and hand the rest of the line to the server as executable text - breaking
+    /// the read-the-script-before-it-runs property every screen rests on. Control characters
+    /// become spaces: the comment describes; the statements below quote properly.
+    /// </summary>
+    public static string CommentText(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+
+        var sb = new System.Text.StringBuilder(value.Length);
+        foreach (var c in value)
+            sb.Append(char.IsControl(c) ? ' ' : c);
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Rejects identifiers that cannot be safely quoted. Bracket doubling handles <c>]</c>, but
     /// control characters and line breaks have no business in a credential or database name and
     /// would let a value smuggle statement structure past a human reading the generated script.

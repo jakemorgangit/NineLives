@@ -101,6 +101,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Names cannot smuggle statements past the person reading the script** (#294). sysname
+  permits control characters and line breaks, and the restore target is free text - a name
+  containing a newline used to terminate the generated script's header comment and hand the
+  remainder to the server as executable text. Header comments now flatten control
+  characters; everywhere else the name already travels as data. And names that came FROM
+  the server - the backup's database, the encryption certificate, an orphaned user - are
+  quoted exactly: a database genuinely named [Archive] stays [Archive] instead of
+  round-tripping through the typed-name unwrapping into a different database
 - **Three truths on the backup screen** (#293). The Agent-job handover names a backup job
   "NineLives backup ..." instead of introducing itself as a restore, and multi-select names
   all of it - "NineLives backup 3 databases" rather than an empty database in the

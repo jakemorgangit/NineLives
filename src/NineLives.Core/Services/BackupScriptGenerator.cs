@@ -34,7 +34,7 @@ public class BackupScriptGenerator
         sb.AppendLine("-- ============================================================");
         sb.AppendLine("-- Nine Lives - Generated Backup Script (Blackcat Data Solutions)");
         sb.AppendLine($"-- Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine($"-- Database:  {options.DatabaseName}");
+        sb.AppendLine($"-- Database:  {TSql.CommentText(options.DatabaseName)}");
         sb.AppendLine($"-- Writing:   {options.Destinations.Count} file(s)");
         sb.AppendLine("-- ============================================================");
 
@@ -55,7 +55,8 @@ public class BackupScriptGenerator
 
     private static void AppendBackup(StringBuilder sb, BackupOptions options)
     {
-        sb.AppendLine($"BACKUP DATABASE {TSql.QuoteName(options.DatabaseName)}");
+        // Exact, not unwrapped (#294): this name came from the server's own database list.
+        sb.AppendLine($"BACKUP DATABASE {TSql.QuoteNameExact(options.DatabaseName)}");
         sb.AppendLine($"    TO {DeviceClause(options)}");
         sb.AppendLine($"    WITH {string.Join(", ", WithOptions(options))};");
         sb.AppendLine("GO");
@@ -92,7 +93,7 @@ public class BackupScriptGenerator
 
         if (!string.IsNullOrWhiteSpace(options.EncryptionCertificate))
             with.Add("ENCRYPTION (ALGORITHM = AES_256, " +
-                     $"SERVER CERTIFICATE = {TSql.QuoteName(options.EncryptionCertificate)})");
+                     $"SERVER CERTIFICATE = {TSql.QuoteNameExact(options.EncryptionCertificate)})");
 
         // FORMAT implies INIT, and naming both is noise at best. FORMAT also discards whatever the
         // media set already held, so it is never inferred - only ever asked for.

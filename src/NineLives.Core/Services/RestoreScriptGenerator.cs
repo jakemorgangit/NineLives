@@ -46,8 +46,8 @@ public class RestoreScriptGenerator
         sb.AppendLine("-- ============================================================");
         sb.AppendLine("-- Nine Lives - Generated Restore Script (Blackcat Data Solutions)");
         sb.AppendLine($"-- Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine($"-- Target Database: {options.TargetDatabaseName}");
-        sb.AppendLine($"-- Restore Chain: {chain.Summary}");
+        sb.AppendLine($"-- Target Database: {TSql.CommentText(options.TargetDatabaseName)}");
+        sb.AppendLine($"-- Restore Chain: {TSql.CommentText(chain.Summary)}");
         if (options.StopAt.HasValue)
             sb.AppendLine($"-- Point-in-Time: {options.StopAt.Value:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine("-- ============================================================");
