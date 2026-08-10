@@ -93,7 +93,9 @@ The same engine from a terminal - for the pipeline, the runbook step, the schedu
 
 Five read-only verbs. `list` says what a source holds; `points` is the timeline as text or JSON; `script` emits the validated restore T-SQL for a moment - the same chain calculation, striped-set grouping and STOPAT/marked-transaction handling the GUI runs, which is why the script it emits actually works; `validate` checks every chain is intact and answers in the exit code; `exposure` sweeps every configured server and exits with the worst level it found, so a scheduled task turns quiet log-backup silence into a red pipeline.
 
-Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-by-chain, `3` could not answer, `64` usage. `--json` on the read verbs makes the output composable with jq and friends. Nothing in the CLI executes against an instance - execution verbs arrive later, behind their own explicit flags.
+Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-by-chain, `3` could not answer, `64` usage. `--json` on the read verbs makes the output composable with jq and friends.
+
+Two verbs execute, and they are built out of refusals: `restore` and `rehearse` run nothing without `--execute`; overwriting an existing database is said with `--with-replace`, its own flag that `--force` cannot substitute for; and the same preflights the app fires - file readability, version direction (error 3169), the TDE certificate (error 33111) - refuse before anything is dropped, `--force` being the deliberate override for evidence only. Executed runs land in the app's History and notify the same webhooks, so `9lives rehearse --execute` on a schedule is nightly proof with receipts - no SQL Agent required.
 
 ## Features
 

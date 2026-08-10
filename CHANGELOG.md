@@ -45,8 +45,18 @@ more detail on the user-facing changes; this file is the short history.
   the exit code is the answer), and `exposure` (the dashboard's sweep with the worst level as
   the exit code, so a scheduled task turns quiet log-backup silence into a red pipeline).
   Distinct exit codes for warn, broken, could-not-answer and usage, because a pipeline
-  branches on numbers, not prose. Nothing executes against an instance - execution verbs
-  arrive later behind their own explicit flags
+  branches on numbers, not prose
+- **The CLI executes - carefully.** `9lives restore` and `9lives rehearse` run against a
+  target server, behind the safety defaults the CLI was designed around: nothing runs without
+  `--execute`; overwriting an existing database is said with `--with-replace`, its own flag
+  that `--force` cannot substitute for; and the same preflights the app fires - can the target
+  read the files, does the version direction work (error 3169), is the TDE certificate there
+  (error 33111) - refuse before anything is dropped, with `--force` as the deliberate,
+  evidence-only override. A generate-only invocation still runs the preflights and carries
+  their verdict in its exit code, so a pipeline can rehearse its own DR step for free.
+  Executed runs land in the same History the app lists and notify the same webhooks -
+  `9lives rehearse --execute` on a schedule is nightly proof with receipts, no SQL Agent
+  required
 
 ### Changed
 

@@ -27,7 +27,8 @@ public class CliReadVerbTests
         { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" });
 
         var sql = new FakeSqlServerService { BackupHistory = history.ToList() };
-        return (new CliServices(store, sql, new FakeBlobStorageService()), sql);
+        return (new CliServices(store, sql, new FakeBlobStorageService(),
+            new FakeRestoreHistoryStore(), new FakeRunNotifier()), sql);
     }
 
     private static BackupHistoryEntry Full(decimal checkpoint, DateTime at) => new()

@@ -13,7 +13,8 @@ internal static class Program
 {
     private static readonly VerbSpec[] Verbs =
     [
-        ListVerb.Spec, PointsVerb.Spec, ScriptVerb.Spec, ValidateVerb.Spec, ExposureVerb.Spec
+        ListVerb.Spec, PointsVerb.Spec, ScriptVerb.Spec, ValidateVerb.Spec, ExposureVerb.Spec,
+        RestoreVerb.Spec, RehearseVerb.Spec
     ];
 
     private static async Task<int> Main(string[] rawArgs)
@@ -52,10 +53,12 @@ internal static class Program
         }
 
         // The same store, the same services, the same configuration the desktop app maintains:
-        // configure once there, script against it here.
+        // configure once there, script against it here. History and webhooks too - an executed
+        // run lands in the app's History screen and the same Teams channel hears about it.
         var store = new CredentialStore();
         var services = new CliServices(
-            store, new SqlServerService(store), new BlobStorageService(store));
+            store, new SqlServerService(store), new BlobStorageService(store),
+            new RestoreHistoryStore(), new WebhookRunNotifier(store, new OperationLog()));
 
         try
         {
@@ -66,6 +69,8 @@ internal static class Program
                 "script" => await ScriptVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "validate" => await ValidateVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "exposure" => await ExposureVerb.RunAsync(args, services, Console.Out, Console.Error),
+                "restore" => await RestoreVerb.RunAsync(args, services, Console.Out, Console.Error),
+                "rehearse" => await RehearseVerb.RunAsync(args, services, Console.Out, Console.Error),
                 _ => ExitCodes.Usage
             };
         }
@@ -82,8 +87,8 @@ internal static class Program
     {
         output.WriteLine("Nine Lives CLI - the restore engine from a terminal.");
         output.WriteLine("Reads the configuration the Nine Lives app maintains: its containers,");
-        output.WriteLine("its servers, its credentials. Read-only: nothing here executes against");
-        output.WriteLine("an instance.");
+        output.WriteLine("its servers, its credentials. Nothing executes without --execute, and");
+        output.WriteLine("overwriting a database is said with --with-replace, deliberately.");
         output.WriteLine();
         output.WriteLine("Verbs:");
         foreach (var verb in Verbs)
@@ -102,5 +107,7 @@ internal static class Program
         output.WriteLine("  9lives points --container backups --database Sales");
         output.WriteLine("  9lives script --container backups --database Sales --at \"2026-08-02 19:00\" --out restore.sql");
         output.WriteLine("  9lives validate --server SRV01 --json");
+        output.WriteLine("  9lives rehearse --container backups --database Sales --target SRV02 --execute");
+        output.WriteLine("  9lives restore --container backups --database Sales --target SRV02 --with-replace --execute");
     }
 }

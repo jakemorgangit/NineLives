@@ -8,13 +8,21 @@ namespace Blackcat.NineLives.Cli;
 /// implementations the GUI composes - which is the entire point (#63): configure containers,
 /// servers and credentials once in the app, then script against that exact configuration here.
 /// Bundled so tests hand verbs fakes the same way the app's tests do.
+///
+/// History and notifications are the SAME stores and endpoints as the app's: a restore run
+/// from a pipeline lands in the History screen, a rehearsal's receipt feeds the exposure
+/// dashboard's Proven column, and the Teams channel hears about both. One estate, two front
+/// ends.
 /// </summary>
 internal sealed class CliServices(
-    ICredentialStore store, ISqlServerService sql, IBlobStorageService blobs)
+    ICredentialStore store, ISqlServerService sql, IBlobStorageService blobs,
+    IRestoreHistoryStore history, IRunNotifier notifier)
 {
     public ICredentialStore Store { get; } = store;
     public ISqlServerService Sql { get; } = sql;
     public IBlobStorageService Blobs { get; } = blobs;
+    public IRestoreHistoryStore History { get; } = history;
+    public IRunNotifier Notifier { get; } = notifier;
 
     public AppConfig Config => _config ??= Store.LoadConfig();
     private AppConfig? _config;
