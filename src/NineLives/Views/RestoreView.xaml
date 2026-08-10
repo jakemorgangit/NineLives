@@ -1074,6 +1074,13 @@
                                 Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}"
                                 ToolTip="Restores this chain to a scratch database (MyDb_rehearsal_...), runs DBCC CHECKDB to prove the data, then drops the scratch copy. The real database is never touched: fresh name, no REPLACE, files relocated to the default directories. Takes as long as a real restore plus CHECKDB." />
 
+                        <Button Content="Rehearsal as Agent job"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CopyRehearsalAsAgentJobCommand}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}"
+                                ToolTip="The same rehearsal wrapped as a disabled, unscheduled SQL Server Agent job - add a weekly schedule and the proof renews itself, receipts accumulating in the job history. Uses a stable scratch name that clears its own leftover each run." />
+
                                                 <!-- A different question from Check chain: that one reads headers and
                              checks the LSNs line up, this one reads each backup end to end and
                              checks it is intact. A truncated blob passes the first and fails this.

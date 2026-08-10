@@ -2368,6 +2368,70 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// The rehearsal as a disabled, unscheduled Agent job (#259): the proof renews itself weekly
+    /// once somebody adds a schedule, receipts accumulating in the job history. Same prep as the
+    /// clicked rehearsal, but the scratch name is STABLE with a guarded pre-drop of its own
+    /// leftover - a timestamped name would collide with itself on the job's second run.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRehearse))]
+    private async Task CopyRehearsalAsAgentJobAsync()
+    {
+        var server = ConnectedServer;
+        var chain = RestoreChain;
+        if (server == null || chain == null || !CanRehearse) return;
+
+        var sourceName = Inventory.SelectedDatabaseName ?? chain.FullSet.DatabaseName ?? "database";
+        var scratch = RehearsalPlanner.ScheduledScratchName(sourceName);
+
+        IsBusy = true;
+        try
+        {
+            var devices = chain.FullSet.Files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+            var files = await _sqlService.RestoreFileListOnlyAsync(server, devices);
+            if (files.Count == 0)
+            {
+                SetError("FILELISTONLY returned nothing - the rehearsal cannot relocate files it " +
+                         "cannot list.");
+                return;
+            }
+
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(server);
+            var moves = RehearsalPlanner.ScratchMoves(files, scratch, dataPath, logPath);
+
+            var restoreScript = _scriptGenerator.Generate(chain, new RestoreOptions
+            {
+                TargetDatabaseName = scratch,
+                WithReplace = false,
+                RecoveryMode = RecoveryMode.Recovery,
+                FileMoves = moves
+            });
+
+            var script = RehearsalPlanner.BuildScheduledScript(restoreScript, scratch);
+
+            var job = SqlAgentJobScript.Wrap(
+                script,
+                $"NineLives rehearsal - {sourceName}",
+                $"Weekly proof that {sourceName} restores: scratch restore, DBCC CHECKDB, drop. " +
+                "A failed run retains the scratch copy as evidence until the next run clears it.");
+
+            TryCopyToClipboard(job,
+                "Rehearsal job copied to clipboard. Created disabled and unscheduled - add the " +
+                "weekly schedule and enable it deliberately. Each run's outcome lands in the " +
+                "job history; a failure retains the scratch copy as evidence.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"The rehearsal job could not be prepared: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
     /// The last thing checked before a restore runs, and it differs by medium.
     ///
     /// Blob needs the server-side credential to be usable. A shared path needs no credential at all
