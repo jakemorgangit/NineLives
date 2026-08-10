@@ -56,10 +56,12 @@ public static class PostRestoreAdvice
     /// The fix for an orphaned user with a same-named login: remap the SID. This is the modern
     /// form of sp_change_users_login, which is deprecated and SQL-auth only.
     /// </summary>
+    // The user names came FROM the restored database (#294) - quoted exactly, or a user
+    // genuinely named [admin] would be re-attached as a different principal.
     public static RecoveryAction FixOrphan(string database, OrphanedUser user) => new(
         $"Re-attach user {user.Name} to the login of the same name",
         $"USE {TSql.QuoteName(database)}; " +
-        $"ALTER USER {TSql.QuoteName(user.Name)} WITH LOGIN = {TSql.QuoteName(user.Name)}",
+        $"ALTER USER {TSql.QuoteNameExact(user.Name)} WITH LOGIN = {TSql.QuoteNameExact(user.Name)}",
         "Points the database user at this server's login by rewriting its SID. The user keeps " +
         "every permission it had inside the database.");
 
@@ -70,9 +72,9 @@ public static class PostRestoreAdvice
     public static RecoveryAction ExplainUnmappableOrphan(string database, OrphanedUser user) => new(
         $"User {user.Name} has no matching login on this server",
         $"-- After creating the login:\n" +
-        $"-- CREATE LOGIN {TSql.QuoteName(user.Name)} WITH PASSWORD = '...';\n" +
+        $"-- CREATE LOGIN {TSql.CommentText(TSql.QuoteNameExact(user.Name))} WITH PASSWORD = '...';\n" +
         $"USE {TSql.QuoteName(database)}; " +
-        $"ALTER USER {TSql.QuoteName(user.Name)} WITH LOGIN = {TSql.QuoteName(user.Name)}",
+        $"ALTER USER {TSql.QuoteNameExact(user.Name)} WITH LOGIN = {TSql.QuoteNameExact(user.Name)}",
         "This server has no login of that name, so there is nothing to re-attach the user to. " +
         "Create the login first - with a password set by whoever owns that account, not invented " +
         "here - then the ALTER USER line maps the user onto it.",
