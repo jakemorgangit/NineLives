@@ -12,6 +12,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The Exposure dashboard: how much data would be lost, right now.** Every user database on
+  every configured server, judged from its own msdb - the derived loss window ("everything after
+  14:32 is gone - up to 47m of work"), traffic-lit worst-first. The silent failures are the
+  loudest: never backed up, FULL recovery with no log backups ever, chains that stopped days
+  ago - and a server that will not answer is itself an alarm row, because unknown is not the
+  same as fine. Rehearsal receipts join in as a "Proven" column: arithmetic says what could
+  restore, only a rehearsal says it does (#239)
 - **Restore rehearsal: prove a backup restores, with a receipt.** One button restores the chosen
   chain to a scratch database, proves the data with DBCC CHECKDB, and drops the scratch copy -
   the History entry records what was proven, when, and how long it took. Safety by construction:
