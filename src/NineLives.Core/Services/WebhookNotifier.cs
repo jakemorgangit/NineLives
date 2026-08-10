@@ -208,13 +208,18 @@ public class WebhookNotifier
     /// a measurable moment, and the only honest slow delivery in a test is a substituted one.
     /// </summary>
     public virtual async Task NotifyAsync(
-        IReadOnlyList<WebhookEndpoint> endpoints, RunNotification notification, Action<string>? log = null)
+        IReadOnlyList<WebhookEndpoint> endpoints, RunNotification notification,
+        Action<string>? log = null, Action<WebhookEndpoint, string?>? outcome = null)
     {
         foreach (var endpoint in endpoints)
         {
             if (!endpoint.IsUsable || !Wants(endpoint, notification.Phase)) continue;
 
             var error = await PostAsync(endpoint.Url, BuildPayload(endpoint.Format, notification));
+
+            // Per-endpoint, not per-batch (#292): the caller stamps each endpoint's last
+            // delivery, which is what makes a silently broken webhook visible in Settings.
+            outcome?.Invoke(endpoint, error);
 
             log?.Invoke(error == null
                 ? $"[notify] {endpoint.Name}: {notification.Phase} {notification.Operation} {notification.Subject}"

@@ -169,6 +169,16 @@
                                                             Style="{StaticResource SecondaryButton}"
                                                             Padding="10,5" Margin="6,0,0,0" />
                                                 </Grid>
+                                                <TextBlock Text="{Binding UrlFeedback}"
+                                                           Foreground="{StaticResource ErrorBrush}"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"
+                                                           Visibility="{Binding UrlFeedback, Converter={StaticResource StringToVis}}" />
+                                                <TextBlock Text="{Binding LastDeliveryDisplay}"
+                                                           Style="{StaticResource SecondaryText}"
+                                                           FontSize="11"
+                                                           Margin="0,4,0,0" />
                                             </StackPanel>
                                             <Button Grid.Column="3" Content="Test"
                                                     Command="{Binding TestCommand}"

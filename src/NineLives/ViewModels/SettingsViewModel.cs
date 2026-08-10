@@ -136,9 +136,25 @@ public partial class SettingsViewModel : ViewModelBase
         using var handler = WebhookTransport.BuildHandler(
             _credentialStore.LoadConfig().WebhookProxy, _credentialStore);
         var error = await new WebhookNotifier(handler).SendTestAsync(hydrated);
-        WebhookTestResult = error == null
-            ? $"Test sent to {row.Name} - check the channel."
-            : $"{row.Name}: {error}";
+        WebhookTransport.RecordDelivery(_credentialStore, row.Model.Id, error);
+        row.NoteDelivery(error);
+        WebhookTestResult = DescribeTestOutcome(row.Name, error, row.Model);
+    }
+
+    /// <summary>
+    /// The sentence the test button produces (#292). The natural way to pause an endpoint is
+    /// unticking all three moments - there is no Enabled flag - and a plain "test sent" then
+    /// promised a channel that would stay silent forever.
+    /// </summary>
+    internal static string DescribeTestOutcome(string name, string? error, WebhookEndpoint model)
+    {
+        if (error != null) return $"{name}: {error}";
+
+        var listens = model.NotifyStarted || model.NotifyFinished || model.NotifyProblems;
+        return listens
+            ? $"Test sent to {name} - check the channel."
+            : $"Test sent to {name} - but it is subscribed to nothing (Started, Finished and " +
+              "Problems are all off), so it will never fire during a run.";
     }
 
     // ── moving machines (#213) ──────────────────────────────────────────────────

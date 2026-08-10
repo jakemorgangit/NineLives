@@ -7,6 +7,7 @@
          was added to it. Views that still declare their own simply shadow this with an identical
          instance, so both work. -->
     <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+    <converters:StringToVisibilityConverter x:Key="StringToVis" />
     <converters:NullToVisibilityConverter x:Key="NullToVis" />
     <converters:ContrastingTextConverter x:Key="ContrastingText" />
 

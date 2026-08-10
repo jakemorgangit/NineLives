@@ -101,6 +101,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The webhook settings tell the truth** (#292). The Test button on an endpoint with all
+  three moments unticked - the natural way to pause one - now says it is subscribed to
+  nothing and will never fire during a run, instead of promising a channel that stays
+  silent forever. A URL typo is refused at Save with the reason on the row - it used to be
+  accepted and then fail on every run, with the failures visible only in the operation log.
+  And every delivery attempt, test or real, stamps the endpoint with when and how it went:
+  "Last delivery 2026-08-10 21:14: FAILED - 404" on the row is the difference between a
+  webhook that works and one that broke weeks ago and looked identical
 - **The connected server survives its own lifecycle honestly** (#291). Deleting it is
   recognised by identity, not by a caption captured at connect time - renaming the connected
   server and then deleting it used to leave the status bar claiming "Connected to X" while

@@ -41,6 +41,25 @@ public partial class WebhookEndpointViewModel : ObservableObject
 
     public WebhookEndpoint Model { get; }
 
+    /// <summary>
+    /// The last delivery attempt, on the row (#292). Failures land only in the operation log
+    /// by design, so without this a webhook broken for weeks looked identical to one that
+    /// works.
+    /// </summary>
+    public string LastDeliveryDisplay => Model.LastDeliveryAt is not { } at
+        ? "No deliveries yet"
+        : Model.LastDeliveryOutcome == "delivered"
+            ? $"Last delivery {at:yyyy-MM-dd HH:mm}: delivered"
+            : $"Last delivery {at:yyyy-MM-dd HH:mm}: FAILED - {Model.LastDeliveryOutcome}";
+
+    /// <summary>A delivery just happened on this screen - the row updates without a reload.</summary>
+    public void NoteDelivery(string? error)
+    {
+        Model.LastDeliveryAt = DateTime.Now;
+        Model.LastDeliveryOutcome = error ?? "delivered";
+        OnPropertyChanged(nameof(LastDeliveryDisplay));
+    }
+
     public IReadOnlyList<WebhookFormat> Formats { get; } =
         [WebhookFormat.Teams, WebhookFormat.Slack, WebhookFormat.Generic];
 
@@ -67,15 +86,31 @@ public partial class WebhookEndpointViewModel : ObservableObject
 
     public bool CanSaveUrl => !string.IsNullOrWhiteSpace(UrlInput);
 
+    /// <summary>Why the last URL save was refused - empty when it was not (#292).</summary>
+    [ObservableProperty]
+    private string _urlFeedback = string.Empty;
+
     /// <summary>
     /// The explicit commit (#317): into the vault, out of the file, off the screen. Also the
     /// migration path for URLs that predate the vault - saving a replacement moves the
     /// endpoint onto the new arrangement.
+    ///
+    /// Validated first (#292): a typo used to be accepted, saved, and then fail on every
+    /// run - with the failures landing only in the operation log.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanSaveUrl))]
     private void SaveUrl()
     {
-        WebhookTransport.SaveUrl(Model, _store, UrlInput);
+        var candidate = UrlInput.Trim();
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps)
+        {
+            UrlFeedback = "Not saved: a webhook URL is an absolute https:// address.";
+            return;
+        }
+
+        UrlFeedback = string.Empty;
+        WebhookTransport.SaveUrl(Model, _store, candidate);
         UrlInput = string.Empty;
         HasStoredUrl = true;
         _save();
