@@ -454,7 +454,7 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowAuditPanel));
         OnPropertyChanged(nameof(ShowCredentialPanel));
         OnPropertyChanged(nameof(ShowAgentJob));
-        OnPropertyChanged(nameof(ShowAdvancedOptions));
+        OnPropertyChanged(nameof(ShowAdvancedOptions));
         OnPropertyChanged(nameof(ShowMultipleContainers));
 
         // A medium that is no longer offered must not stay selected underneath a hidden control -
@@ -2198,16 +2198,25 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>
     /// Reads logmarkhistory for the selected database (#243). On demand, because most databases
     /// have no marks and the combo should not cost a round trip to prove it.
+    ///
+    /// Asked on the SOURCE instance when the medium has one (#268): logmarkhistory is written
+    /// where the marked transactions RAN, so on a shared-path restore to a different target, the
+    /// target's msdb has never heard of them - asking it reports "no marks" when the truth is
+    /// "wrong catalogue". Blob has no source instance, so the connected server answers there;
+    /// it also covers ad-hoc's file-that-outlived-its-server case as best effort. The marks
+    /// themselves ride inside the log backups either way - this is discovery, not correctness.
     /// </summary>
     [RelayCommand]
     private async Task LoadLogMarksAsync()
     {
-        var server = ConnectedServer;
+        var server = (MediumIsBlob ? null : SourceServer) ?? ConnectedServer;
         var database = Inventory.SelectedDatabaseName;
 
         if (server == null || string.IsNullOrWhiteSpace(database))
         {
-            SetError("Connect to a server and choose a database first - the marks live in its msdb.");
+            SetError(MediumIsBlob
+                ? "Connect to a server and choose a database first - the marks live in its msdb."
+                : "Choose the source server and a database first - the marks were recorded in its msdb.");
             return;
         }
 

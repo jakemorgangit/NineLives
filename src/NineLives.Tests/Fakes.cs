@@ -509,10 +509,16 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Dictionary<string, List<LogMark>> LogMarksByDatabase { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Which instances were asked for marks, in order - the catalogue choice IS the bug surface (#268).</summary>
+    public List<string> LogMarkServersAsked { get; } = [];
+
     public Task<List<LogMark>> GetLogMarksAsync(
         ServerConnection server, string database, CancellationToken ct = default)
-        => Task.FromResult(
+    {
+        LogMarkServersAsked.Add(server.ServerName);
+        return Task.FromResult(
             LogMarksByDatabase.TryGetValue(database, out var marks) ? marks.ToList() : []);
+    }
 
     /// <summary>Percent values the polling execute reports before completing (#user CHECKDB feedback).</summary>
     public List<double> PollPercents { get; set; } = [50];
