@@ -35,6 +35,13 @@ more detail on the user-facing changes; this file is the short history.
   belongs to the rehearsal alone; a failed run still retains its scratch copy as evidence until
   the next run has been seen (#259)
 
+### Changed
+
+- The engine - every service and model - now lives in NineLives.Core, a library with no UI
+  framework behind it. Nothing a user can see is different; this is the load-bearing wall for
+  the command-line front end (#63), where the same chain calculation, the same preflights and
+  the same script generation must run without a window ever existing
+
 ### Fixed
 
 - Find marks now asks the SOURCE instance's msdb on shared-path and ad-hoc restores - marked

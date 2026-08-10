@@ -40,8 +40,10 @@ public class SqlServerService : ISqlServerService
         {
             // Before the connection string names a method, make sure the provider servicing it has
             // a window to parent its prompt to - otherwise the sign-in fails with
-            // "a window handle must be configured" rather than showing anything.
-            EntraAuthentication.Register(EntraAuthentication.ActiveWindowHandle);
+            // "a window handle must be configured" rather than showing anything. Late-bound
+            // through PromptParent so the front end's resolver is read per sign-in, whichever
+            // front end this engine is running under (#63).
+            EntraAuthentication.Register(static () => EntraAuthentication.PromptParent());
 
             builder.Authentication = server.AuthMode switch
             {

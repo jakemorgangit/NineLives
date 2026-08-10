@@ -29,11 +29,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Identity" Version="1.21.0" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <!-- The engine - Services/ and Models/ - lives in NineLives.Core (#63), so a console
+         front end can share it without WPF behind it. Azure and SqlClient ride in through
+         that reference; the toolkit stays here because the viewmodels are made of it. -->
+    <ProjectReference Include="..\NineLives.Core\NineLives.Core.csproj" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
-    <PackageReference Include="Microsoft.Data.SqlClient.Extensions.Azure" Version="7.0.2" />
   </ItemGroup>
 
   <ItemGroup>

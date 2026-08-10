@@ -2,12 +2,8 @@ using System.Windows;
 
 namespace Blackcat.NineLives.Services;
 
-public enum AppTheme
-{
-    Dark,
-    Light,
-    HighContrast
-}
+// AppTheme itself lives in NineLives.Core - the config persists it, so the value is engine
+// state; only APPLYING it to windows belongs here (#63).
 
 /// <summary>
 /// Swaps the colour palette at runtime.
