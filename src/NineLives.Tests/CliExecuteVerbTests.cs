@@ -315,4 +315,82 @@ public class CliExecuteVerbTests
         Assert.Contains("retained", errors);
         Assert.Equal("Rehearsal", Assert.Single(history.Entries).Kind);
     }
+
+    // ── the restore must physically fit (#297) ──────────────────────────────────
+
+    private static FileMoveOption DataFile(string path, long size) => new()
+    {
+        LogicalName = "MyDb",
+        PhysicalName = path,
+        NewPhysicalName = path,
+        Type = "D",
+        SizeBytes = size
+    };
+
+    [Fact]
+    public async Task ARestoreThatCannotFitIsRefusedWithTheShortfallNamed()
+    {
+        var (services, sql, history, _) = Stage(Full(100, T0));
+        sql.FileList = [DataFile(@"D:\Data\MyDb.mdf", 100L * 1024 * 1024 * 1024)];
+        sql.VolumeFreeSpace = new() { [@"D:\"] = 10L * 1024 * 1024 * 1024 };
+
+        var (exit, _, errors) = await Run(
+            RestoreVerb.RunAsync, RestoreVerb.Spec, RestoreArgs("--execute"), services);
+
+        Assert.Equal(2, exit);
+        Assert.Contains("short by", errors);
+        Assert.Empty(sql.ExecutedScripts);
+        Assert.Empty(history.Entries);
+    }
+
+    /// <summary>Space is evidence, not consent - --force may override it, loudly.</summary>
+    [Fact]
+    public async Task ForceDowngradesTheSpaceRefusalToAWarningAndProceeds()
+    {
+        var (services, sql, history, _) = Stage(Full(100, T0));
+        sql.FileList = [DataFile(@"D:\Data\MyDb.mdf", 100L * 1024 * 1024 * 1024)];
+        sql.VolumeFreeSpace = new() { [@"D:\"] = 10L * 1024 * 1024 * 1024 };
+
+        var (exit, _, errors) = await Run(
+            RestoreVerb.RunAsync, RestoreVerb.Spec, RestoreArgs("--execute", "--force"), services);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("--force: proceeding anyway", errors);
+        Assert.NotEmpty(sql.ExecutedScripts);
+        Assert.Single(history.Entries);
+    }
+
+    /// <summary>
+    /// dm_os_volume_stats only reports volumes that host database files, so an absent volume
+    /// usually means the drive does not exist there - a different fix than freeing space.
+    /// </summary>
+    [Fact]
+    public async Task AMissingVolumeIsRefusedAsAbsentNotAsFull()
+    {
+        var (services, sql, _, _) = Stage(Full(100, T0));
+        sql.FileList = [DataFile(@"D:\Data\MyDb.mdf", 1024)];
+        sql.VolumeFreeSpace = new() { [@"C:\"] = 500L * 1024 * 1024 * 1024 };
+
+        var (exit, _, errors) = await Run(
+            RestoreVerb.RunAsync, RestoreVerb.Spec, RestoreArgs("--execute"), services);
+
+        Assert.Equal(2, exit);
+        Assert.Contains(@"no D:\ volume", errors);
+        Assert.Empty(sql.ExecutedScripts);
+    }
+
+    /// <summary>Not being able to check is not the same as not fitting.</summary>
+    [Fact]
+    public async Task AnUnanswerableSpaceQuestionRefusesNothing()
+    {
+        var (services, sql, history, _) = Stage(Full(100, T0));
+        sql.FileList = [DataFile(@"D:\Data\MyDb.mdf", 100L * 1024 * 1024 * 1024)];
+        sql.VolumeCheckThrows = new InvalidOperationException("VIEW SERVER STATE denied");
+
+        var (exit, _, _) = await Run(
+            RestoreVerb.RunAsync, RestoreVerb.Spec, RestoreArgs("--execute"), services);
+
+        Assert.Equal(0, exit);
+        Assert.Single(history.Entries);
+    }
 }

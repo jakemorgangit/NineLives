@@ -67,6 +67,27 @@ internal static class Preflights
             .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
             .ToList();
 
+        // 5. Will it physically fit (#297)? The GUI checks before WITH REPLACE drops
+        // anything, and this front end is the one most often aimed at a freshly provisioned
+        // VM with small disks. FILELISTONLY says how big each file lands, the target says
+        // what each volume has, RestoreSpaceCheck judges - including the volume that does
+        // not exist on the target at all. Best effort both ways: not being able to check is
+        // not the same as not fitting.
+        try
+        {
+            var files = await services.Sql.RestoreFileListOnlyAsync(target, devices);
+            if (files.Count > 0)
+            {
+                var free = await services.Sql.GetVolumeFreeSpaceAsync(target);
+                foreach (var volume in RestoreSpaceCheck.Check(files, free).Where(v => !v.Fits))
+                    Verdict(volume.Describe);
+            }
+        }
+        catch
+        {
+            // No verdict from silence.
+        }
+
         BackupFileInfo? header;
         try
         {
