@@ -227,6 +227,18 @@ public partial class CopyDatabaseViewModel : ViewModelBase
                 return $"That would restore {SourceDatabase} over itself on {SourceServer.ServerName}. " +
                        "Give the copy a different name, or choose a different server to restore onto.";
 
+            // Same instance, new name: the copy's restore carries no MOVE clauses (the paths
+            // the source recorded are what a DIFFERENT server needs), so on the same instance
+            // the files land on top of the live source's and the restore fails with Msg 1834 -
+            // after the backup half has already run. Refusing beats failing late (#282); the
+            // restore screen has full WITH MOVE control for exactly this shape.
+            if (sameInstance)
+                return $"A copy onto the same instance would restore {TargetDatabaseName}'s files " +
+                       $"onto {SourceDatabase}'s own paths - SQL Server refuses that (Msg 1834) " +
+                       "after the backup half has already run. Copy onto a different server, or " +
+                       "take the backup and restore it on the Restore screen, where the files " +
+                       "can be relocated (WITH MOVE).";
+
             return string.Empty;
         }
     }

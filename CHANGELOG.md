@@ -91,6 +91,12 @@ more detail on the user-facing changes; this file is the short history.
   the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
   Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
   script can tell an operator's interruption from a failure
+- A copy onto the same instance is refused up front, with the way out named (#282). The
+  copy's restore carries no MOVE clauses - right for a different server, fatal on the same
+  one, where the files land on the live source's own paths and SQL Server fails with
+  Msg 1834 AFTER the backup half has run. The refusal points at the Restore screen's full
+  WITH MOVE control; automatic relocation for this shape rides with the generation-time
+  check rework (#285)
 - "All user databases" means it now (#279): the database list the backup screen ticks and
   the copy screen offers is filtered to online user databases - no more tempdb (which cannot
   be backed up at all), no master offered for copying, no RESTORING or OFFLINE databases
