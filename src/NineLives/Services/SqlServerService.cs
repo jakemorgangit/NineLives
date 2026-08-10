@@ -1389,6 +1389,59 @@ public class SqlServerService : ISqlServerService
             reader["OwnerName"] as string);
     }
 
+    public async Task ExecuteWithPercentPollingAsync(
+        ServerConnection server, string sql, IProgress<double>? percent = null,
+        CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        short spid;
+        await using (var spidCmd = conn.CreateCommand())
+        {
+            spidCmd.CommandText = "SELECT @@SPID";
+            spid = Convert.ToInt16(await spidCmd.ExecuteScalarAsync(ct));
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = 0;
+
+        var run = cmd.ExecuteNonQueryAsync(ct);
+
+        if (percent != null)
+        {
+            try
+            {
+                await using var pollConn = CreateConnection(server);
+                await pollConn.OpenAsync(ct);
+
+                while (!run.IsCompleted)
+                {
+                    await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(2), ct));
+                    if (run.IsCompleted || ct.IsCancellationRequested) break;
+
+                    await using var poll = pollConn.CreateCommand();
+                    poll.CommandText =
+                        "SELECT TOP 1 percent_complete FROM sys.dm_exec_requests " +
+                        "WHERE session_id = @spid";
+                    poll.Parameters.AddWithValue("@spid", spid);
+
+                    var value = await poll.ExecuteScalarAsync(ct);
+                    if (value != null && value != DBNull.Value)
+                        percent.Report(Convert.ToDouble(value));
+                }
+            }
+            catch
+            {
+                // The poll is a courtesy over a second connection; the statement's own outcome
+                // arrives through the run task either way.
+            }
+        }
+
+        await run;
+    }
+
     public async Task<List<OrphanedUser>> FindOrphanedUsersAsync(
         ServerConnection server, string database, CancellationToken ct = default)
     {
@@ -1412,7 +1465,13 @@ public class SqlServerService : ISqlServerService
             LEFT JOIN sys.server_principals AS by_sid
                    ON by_sid.sid = dp.sid
             LEFT JOIN sys.server_principals AS same_named
-                   ON same_named.name = dp.name AND same_named.type = 'S'
+                   -- Both sides forced to one collation: server_principals.name carries the
+                   -- SERVER collation and the restored database's principals carry the SOURCE's,
+                   -- and equality between them throws when they differ - hit in the field on the
+                   -- first cross-collation restore.
+                   ON same_named.name COLLATE Latin1_General_100_CI_AS
+                      = dp.name COLLATE Latin1_General_100_CI_AS
+                  AND same_named.type = 'S'
             WHERE dp.type = 'S'
               AND dp.authentication_type = 1
               AND dp.principal_id > 4

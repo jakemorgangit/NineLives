@@ -41,6 +41,14 @@ more detail on the user-facing changes; this file is the short history.
   protects it - TDE, backup encryption, or "Not encrypted", because absence is information too
   (#222)
 
+- **The finishing panel's actions show progress and speak their outcome.** DBCC CHECKDB (and any
+  long panel action) drives a progress bar from the server's own percent_complete, and the result
+  stays on the panel - "CHECKDB completed and found nothing wrong" - instead of scrolling away in
+  the console. Failures and cancellations stay visible the same way
+- The orphaned-user scan crashed with a collation conflict when the restored database's collation
+  differed from the server's - both sides of the login-name comparison are now forced to one
+  collation. Found in the field on the first cross-collation restore
+
 ### Changed
 
 - **One console, not two.** The restore screen no longer keeps an inline copy of the run's
