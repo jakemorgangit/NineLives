@@ -162,9 +162,13 @@ public class SqlAgentJobScriptTests
     [Fact]
     public void TheSuggestedNameSaysWhatAndWhen()
     {
-        var name = SqlAgentJobScript.SuggestName("MyDb_Test", new DateTime(2026, 8, 7, 22, 30, 0));
+        var name = SqlAgentJobScript.SuggestName("restore", "MyDb_Test", new DateTime(2026, 8, 7, 22, 30, 0));
 
         Assert.Equal("NineLives restore MyDb_Test 2026-08-07 2230", name);
+
+        // The verb is the caller's (#293): a backup job used to introduce itself as a restore.
+        Assert.Equal("NineLives backup 3 databases 2026-08-07 2230",
+            SqlAgentJobScript.SuggestName("backup", "3 databases", new DateTime(2026, 8, 7, 22, 30, 0)));
     }
 
     /// <summary>The script says how to run it, enable it and remove it - it is handed to somebody else.</summary>

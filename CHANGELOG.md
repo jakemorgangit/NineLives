@@ -101,6 +101,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Three truths on the backup screen** (#293). The Agent-job handover names a backup job
+  "NineLives backup ..." instead of introducing itself as a restore, and multi-select names
+  all of it - "NineLives backup 3 databases" rather than an empty database in the
+  description. Verify now proves the run that happened: WITH CHECKSUM exactly when the
+  statements said it, captured with the run, so ticking the box after a no-checksum backup
+  no longer fails a perfectly fine backup (and unticking no longer silently degrades the
+  verify). And stripes is clamped to SQL Server's own 1-64 device range, so a typo of 640
+  cannot become a statement the server rejects after the arm-and-confirm
 - **The webhook settings tell the truth** (#292). The Test button on an endpoint with all
   three moments unticked - the natural way to pause one - now says it is subscribed to
   nothing and will never fire during a run, instead of promising a channel that stays

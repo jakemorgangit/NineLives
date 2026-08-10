@@ -111,8 +111,8 @@ public static class SqlAgentJobScript
     /// Timestamped because these accumulate. Two refreshes of the same test database a week apart
     /// are two different jobs, and a name collision would otherwise refuse the second one.
     /// </summary>
-    public static string SuggestName(string? targetDatabase, DateTime at) =>
-        $"NineLives restore {targetDatabase ?? "database"} {at:yyyy-MM-dd HHmm}";
+    public static string SuggestName(string verb, string? targetDatabase, DateTime at) =>
+        $"NineLives {verb} {targetDatabase ?? "database"} {at:yyyy-MM-dd HHmm}";
 
     /// <summary>
     /// The script split on GO, because an Agent step cannot contain one.
