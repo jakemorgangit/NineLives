@@ -199,15 +199,21 @@ public class IdentifyUnclassifiedTests
         var sql = new FakeSqlServerService { Header = Header() };
         var seen = new List<int>();
 
+        // A synchronous IProgress, not Progress<T>: Progress POSTS its reports through the
+        // synchronisation context, and a test that waits an arbitrary delay for them to land
+        // fails exactly when the machine is busiest. The identifier's contract - one report
+        // per file, cumulative - is what this pins, not the marshalling.
         await new BackupHeaderIdentifier(sql).IdentifyAsync(
             Server(),
             [Unplaceable("a.bak"), Unplaceable("b.bak"), Unplaceable("c.bak")],
-            new Progress<int>(seen.Add));
+            new InlineProgress(seen));
 
-        // Progress<T> marshals through the synchronisation context, so what matters is that it
-        // reaches the last count rather than exactly how the intermediate ones interleave.
-        await Task.Delay(50);
-        Assert.Contains(3, seen);
+        Assert.Equal([1, 2, 3], seen);
+    }
+
+    private sealed class InlineProgress(List<int> seen) : IProgress<int>
+    {
+        public void Report(int value) => seen.Add(value);
     }
 
     private static ServerConnection Server() =>
