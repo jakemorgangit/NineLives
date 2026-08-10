@@ -51,6 +51,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Changed
 
+- **The retention referee: what would an age-based deletion rule actually do?** Report-only,
+  over the loaded backups: what a keep-N-days rule keeps, what it can safely delete (with the
+  bytes reclaimed), what must survive its own age because kept restores depend on it - the base
+  full outside the window, the newest differential under it, and the bridge logs that carry the
+  chain to the window's edge - and what is already broken. Before a lifecycle rule finds out via
+  error 3136 (#241)
 - **The Generate Script button is gone** - the script has built itself live on every option
   change for a while, which made the button a ritual with no effect. When the pane is empty it
   now says why, passively, where the script would be ("Enter a target database name and the
