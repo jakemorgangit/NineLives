@@ -329,6 +329,10 @@ public partial class MainViewModel : ViewModelBase
             // choice about what the sidebar contains would be answering it twice - and there is no
             // way past it, because leaving would mean an app that has not been told how much of
             // itself to show.
+            //
+            // That last sentence was a claim about intent rather than about the code until #369:
+            // Ctrl+0..9 are bound on the window and stayed live behind the cards, so there were
+            // ten ways past. NavigateTo now refuses while IsChoosingMode.
             IsChoosingMode = true;
             CurrentView = ModeSelection;
         }
@@ -598,6 +602,19 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void NavigateTo(string viewName)
     {
+        // The mode cards are a gate, not a screen (#369). Ctrl+0..9 are bound on the Window and
+        // stay live behind them, so a keystroke landed on Blob Storage with the sidebar collapsed
+        // to zero width, no mode chosen, no navigation and no way back to the cards - an app that
+        // had to be restarted, and one that would not even record which screen it was on. Both
+        // internal callers clear the flag before navigating, so this refuses only the keyboard.
+        if (IsChoosingMode) return;
+
+        // A mode that hides a screen hides it from the keyboard too (#369). Basic mode's sidebar
+        // offers neither Back Up nor Browse Backups, and Ctrl+4 and Ctrl+3 reached both. Home
+        // rather than nothing, the same fallback OnModeChanged uses, so the key still does
+        // something explicable.
+        if (!IsViewAvailable(viewName)) viewName = Nav.Home;
+
         CurrentViewName = viewName;
         CurrentView = viewName switch
         {

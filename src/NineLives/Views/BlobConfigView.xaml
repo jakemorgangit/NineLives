@@ -286,12 +286,26 @@
                                             Command="{Binding DeleteCommand}" />
                                 </StackPanel>
 
-                                <!-- Test Result -->
-                                <Border Background="{DynamicResource InputBackgroundBrush}"
-                                        CornerRadius="4"
+                                <!-- Test Result. Reached-but-empty is neither outcome (#368):
+                                     the credential is proven and the thing being looked for is
+                                     not there, so it is styled as the finding it is. -->
+                                <Border CornerRadius="4"
                                         Padding="12,8"
                                         Margin="0,16,0,0"
+                                        BorderThickness="1"
                                         Visibility="{Binding TestResult, Converter={StaticResource NullToVis}}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="Transparent" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding TestFoundNothing}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource WarningPanelBorderBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
                                     <TextBlock Text="{Binding TestResult}"
                                                Style="{StaticResource BodyText}"
                                                TextWrapping="Wrap" />
@@ -828,12 +842,25 @@
                                            Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
-                            <!-- Test Result in Edit Mode -->
-                            <Border Background="{DynamicResource InputBackgroundBrush}"
-                                    CornerRadius="4"
+                            <!-- Test Result in Edit Mode. Same warning state as above (#368) -
+                                 this is the form somebody is on while getting the path right. -->
+                            <Border CornerRadius="4"
                                     Padding="12,8"
                                     Margin="0,16,0,0"
+                                    BorderThickness="1"
                                     Visibility="{Binding TestResult, Converter={StaticResource NullToVis}}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TestFoundNothing}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource WarningPanelBorderBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <TextBlock Text="{Binding TestResult}"
                                            Style="{StaticResource BodyText}"
                                            TextWrapping="Wrap" />
