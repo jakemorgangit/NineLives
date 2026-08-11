@@ -57,7 +57,8 @@ internal static class ScriptVerb
         ExitCodes:
         [
             "0   script emitted",
-            "2   no chain covers the moment asked for",
+            "2   no chain covers the moment asked for, or the source holds no backups for " +
+            "this database",
             "3   the source could not be read at all",
             "64  usage"
         ],
@@ -108,11 +109,14 @@ internal static class ScriptVerb
             }
         }
 
-        var (sets, sourceContainer, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, sourceContainer, error, loadExit) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
-            return ExitCodes.Usage;
+            // The loader says which kind of failure this was (#370): a malformed
+            // invocation exits 64, a source that holds nothing for this database
+            // exits 2 - the finding, not a usage error.
+            return loadExit;
         }
 
         var points = new BackupChainBuilder().ComputeRestorePoints(sets);

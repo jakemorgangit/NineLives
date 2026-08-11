@@ -48,7 +48,8 @@ internal static class ValidateVerb
         ExitCodes:
         [
             "0   every chain intact",
-            "2   something is broken - the stderr lines say what and why",
+            "2   something is broken - the stderr lines say what and why - or the source " +
+            "holds no backups at all for this database, which is the same alarm",
             "3   the source could not be read at all",
             "64  usage"
         ],
@@ -63,11 +64,14 @@ internal static class ValidateVerb
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)
     {
-        var (sets, _, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, _, error, loadExit) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
-            return ExitCodes.Usage;
+            // The loader says which kind of failure this was (#370): a malformed
+            // invocation exits 64, a source that holds nothing for this database
+            // exits 2 - the finding, not a usage error.
+            return loadExit;
         }
 
         var builder = new BackupChainBuilder();

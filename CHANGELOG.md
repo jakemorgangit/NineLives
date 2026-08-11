@@ -180,6 +180,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The CLI's exit codes stopped contradicting themselves** (#370). Two ways they lied to
+  a pipeline. Adding `--json` to `list` changed the VERDICT: the JSON branch returned 0
+  on a source holding nothing, while the same command without it returned 2 and the spec
+  documented 2 - so putting `--json` on a monitoring check turned a container that had
+  silently stopped receiving backups into a pass, and the pipeline piped an empty array
+  into jq and did nothing. An output format must never change the answer.
+
+  And a finding wore a usage error's clothes: "this source has no backups for a database
+  called Sales" came back as 64, indistinguishable from a malformed command line, so a
+  pipeline branching on the documented contract logged and aborted rather than paging -
+  when that is precisely the alarm `validate` is watched for. The loader now says which
+  kind of failure it had, and a genuinely malformed invocation still exits 64.
+
 - **A rehearsal blocked by its own host says so, instead of blaming the backup** (#359).
   `rehearse` ran no preflights at all - no space check, no version direction, no TDE
   certificate, no S3 capability - so a scratch volume too small, a certificate missing

@@ -42,7 +42,8 @@ internal static class PointsVerb
         ExitCodes:
         [
             "0   points listed",
-            "2   nothing in the source forms a valid chain for this database",
+            "2   nothing in the source forms a valid chain for this database, including the " +
+            "case where it holds no backups for it at all",
             "3   the source could not be read at all",
             "64  usage"
         ],
@@ -63,11 +64,14 @@ internal static class PointsVerb
             return ExitCodes.Usage;
         }
 
-        var (sets, _, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, _, error, loadExit) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
-            return ExitCodes.Usage;
+            // The loader says which kind of failure this was (#370): a malformed
+            // invocation exits 64, a source that holds nothing for this database
+            // exits 2 - the finding, not a usage error.
+            return loadExit;
         }
 
         var points = new BackupChainBuilder().ComputeRestorePoints(sets);
