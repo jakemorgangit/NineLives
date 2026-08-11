@@ -253,6 +253,18 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// </summary>
     public bool WillOverwriteTheTarget => WithReplace && !string.IsNullOrWhiteSpace(TargetDatabaseName);
 
+    /// <summary>
+    /// What the overwrite actually costs, in the words that matter at the moment of reading it.
+    ///
+    /// Named rather than generic: "this will overwrite the target" is a sentence people's eyes
+    /// slide off, and the whole risk of this screen is doing it to the wrong database.
+    /// </summary>
+    public string OverwriteWarning =>
+        $"'{TargetDatabaseName}' on {TargetServer?.ServerName ?? "the target server"} will be " +
+        "replaced by the copy. Whatever is in it now is gone when the restore starts - not when " +
+        "it finishes - so there is no point after which changing your mind helps. Untick " +
+        "\"Overwrite the target\" to restore under a name that is not in use instead.";
+
     /// <summary>True when the source's own differential schedule is about to be disturbed.</summary>
     public bool WillResetTheDifferentialBase => !CopyOnly;
 
@@ -294,6 +306,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsRefused));
         OnPropertyChanged(nameof(CanGenerate));
         OnPropertyChanged(nameof(WillOverwriteTheTarget));
+        OnPropertyChanged(nameof(OverwriteWarning));
         OnPropertyChanged(nameof(WillResetTheDifferentialBase));
         GenerateCommand.NotifyCanExecuteChanged();
 

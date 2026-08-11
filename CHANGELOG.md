@@ -12,6 +12,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Copy Database says which database it is about to overwrite** (#370). It defaults to
+  overwriting, which is usually the point - a test environment being refreshed - but the
+  only thing saying so was a ticked checkbox. The property that would have said it out
+  loud has existed since the screen was written, with a comment calling this the part
+  that destroys something, and it was bound to nothing. It now names the database and the
+  server, because the risk on this screen is doing it to the wrong one.
+
+- **Esc reaches the two other screens that write, and F5 reaches Exposure** (#370). The
+  stop key stopped a restore and ignored a running backup or copy - both of which are
+  writing while they run - so it worked in one of the three places something is being
+  written. F5 refreshed Restore, Browse and History but not the one screen whose whole
+  content is a snapshot of an estate that moves underneath it.
+
 - **Three things that destroyed something without saying so** (#370). Shortening the log
   retention deleted files immediately and silently - on the same screen that calls them a
   restore's own record, needed later by a change ticket. It now says how many would go and
