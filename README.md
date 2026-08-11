@@ -185,7 +185,7 @@ Two verbs execute, and they are built out of refusals: `restore` and `rehearse` 
 ### Blob Storage Configuration
 ![Screenshot - Blob Configuration](docs/screenshots/blob-config.png)
 
-*Configure Azure Blob Storage containers with SAS tokens. Drag-and-drop path pattern builder for custom folder structures.*
+*Configure the containers holding your backups - an Azure Blob container with a SAS token or an Entra sign-in, or an S3-compatible bucket with an access key pair. Drag-and-drop path pattern builder for custom folder structures.*
 
 ### Browse Backups
 ![Screenshot - Browse Backups](docs/screenshots/browse-backups.png)
