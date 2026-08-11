@@ -261,6 +261,33 @@ public class RestoreHistoryTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A writer that never gets the lock writes NOTHING.
+    ///
+    /// It used to write anyway, deliberately - the reasoning being that losing this one entry
+    /// for certain was worse than a small chance of the race. Both halves were wrong. An
+    /// unlocked read-modify-write does not risk THIS entry; it drops whatever the holder wrote
+    /// between the read and the write, so the trade was one certain loss against several
+    /// possible ones. And the chance was not small: CI lost four of fifty on a loaded runner.
+    /// </summary>
+    [Fact]
+    public void AWriterThatCannotTakeTheLockDestroysNothing()
+    {
+        Store().Append(Entry("First"));
+
+        var lockPath = Path.Combine(_dir, "restore-history.json.lock");
+        using var holder = new FileStream(
+            lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        // A writer whose patience runs out while the lock is still held.
+        new RestoreHistoryStore(_dir, lockTimeoutMs: 150).Append(Entry("Second"));
+
+        // It did not land - and, the point, it took nothing with it.
+        var all = Store().Load();
+        Assert.Single(all);
+        Assert.Equal("First", all[0].TargetDatabase);
+    }
+
     /// <summary>A writer waits for the holder instead of clobbering - and then lands.</summary>
     [Fact]
     public async Task AWriterQueuesBehindTheLockHolderAndStillLands()

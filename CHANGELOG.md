@@ -180,6 +180,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A restore receipt can no longer destroy the receipt beside it** (#371). When two
+  writers went for the history file at once - a scheduled `9lives rehearse` while the app
+  is open, which is what #298 added the cross-process lock for - a writer that could not
+  take the lock within its retry budget went ahead and wrote anyway. That is a
+  read-modify-write with no exclusion: it does not risk the entry being written, it
+  silently drops whatever the other writer added in between. CI caught it losing four
+  receipts out of fifty on a loaded runner. A writer that cannot take the lock now writes
+  nothing, and the backoff starts short and jitters so it very rarely comes to that.
+
 - **A bucket has an endpoint, not a storage account** (#345). The container details pane
   read the first label of the host name into a row labelled STORAGE ACCOUNT - correct for
   Azure, and "s3" for every AWS bucket. Both the label and the value now follow the
