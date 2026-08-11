@@ -47,6 +47,24 @@
                 </StackPanel>
             </Border>
 
+            <!-- What this does to the TARGET (#370). WillOverwriteTheTarget has existed since
+                 this screen was written, with a comment saying this is the part that destroys
+                 something and should be stated rather than buried in a checkbox - and it was
+                 bound nowhere, so the checkbox is exactly where it stayed. -->
+            <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                    Background="{DynamicResource DangerBackgroundBrush}"
+                    BorderBrush="{DynamicResource ErrorBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding WillOverwriteTheTarget, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="THIS WILL OVERWRITE THE TARGET DATABASE"
+                               Style="{StaticResource LabelText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap" LineHeight="22"
+                               Text="{Binding OverwriteWarning}" />
+                </StackPanel>
+            </Border>
+
             <!-- 1. From -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>

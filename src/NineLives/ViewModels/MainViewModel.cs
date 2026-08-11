@@ -536,6 +536,11 @@ public partial class MainViewModel : ViewModelBase
             case Nav.History:
                 History.Refresh();
                 break;
+            case Nav.Exposure:
+                // The one screen whose whole content is a snapshot of something that changes
+                // underneath it, and F5 did nothing here (#370).
+                if (Exposure.RefreshCommand.CanExecute(null)) Exposure.RefreshCommand.Execute(null);
+                break;
         }
     }
 
@@ -552,6 +557,13 @@ public partial class MainViewModel : ViewModelBase
     private void CancelCurrent()
     {
         if (Restore.Execution.CancelCommand.CanExecute(null)) { Restore.Execution.CancelCommand.Execute(null); return; }
+
+        // The other two screens that RUN something long, and that Esc did not reach (#370). A
+        // backup and a copy are both writing while they run, which puts them above the reads
+        // below rather than below them - the ordering here is cost of letting it continue.
+        if (Backup.IsRunning) { Backup.CancelCommand.Execute(null); return; }
+        if (CopyDatabase.IsRunning) { CopyDatabase.CancelCommand.Execute(null); return; }
+
         if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
         if (Restore.CancelLoadCommand.CanExecute(null)) { Restore.CancelLoadCommand.Execute(null); return; }
         if (Exposure.CanCancelSweep) Exposure.StopSweepCommand.Execute(null);
