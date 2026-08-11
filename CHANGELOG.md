@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to Nine Lives are recorded here.
 
@@ -11,6 +11,22 @@ more detail on the user-facing changes; this file is the short history.
 ## [Unreleased]
 
 ### Fixed
+
+- **The saved-containers list no longer turns white while the Add Container form is open.**
+  It is disabled mid-edit deliberately - the form writes to whichever container is selected, so
+  clicking another one while editing used to save this container's details over that one - but
+  nobody had looked at what "disabled" makes a ListBox look like. WPF's default template swaps
+  its background to a system colour the moment that happens, and a template trigger beats the
+  background set on the control, so the panel went white in every theme while the rows kept
+  drawing their names in white. Reported from the high-contrast theme, where it is unmissable.
+  It now dims instead of recolouring, and a test pins that disabling it must never change its
+  colour.
+
+- **The About screen links to the documentation, the issue tracker and the releases** (#370).
+  The only hyperlink anywhere in the app was blackcat.wales, so a user stuck on a screen had no
+  route to any of it from inside the tool. Its description also called this a restore-only,
+  cloud-only utility - in an app with a Back Up screen, a Copy Database screen and a shared-path
+  medium.
 
 - **Save output on the execution console writes what its tooltip promises** (#370). It offered
   "a header naming the server, the target database and the outcome" and wrote the raw console:
