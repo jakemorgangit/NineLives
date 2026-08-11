@@ -180,6 +180,21 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A failure in the early restore steps is actually shown** (#355). The screen's only
+  error banner sat inside step 5, which is not on screen until step 4 has been confirmed -
+  so everything that can go wrong before that had no banner at all. An expired container,
+  a chain that will not build, a header that will not read: each reached only the status
+  line, in grey, at the foot of a two-thousand-line page, indistinguishable from "Script
+  copied to clipboard", and with no way to dismiss it. The banner is now docked above the
+  scroll beside the summary of what the restore will do.
+
+- **Editing a container can no longer save over a different one** (#354). The list stayed
+  clickable while the edit form was open, and Save writes to whichever container is
+  SELECTED - so starting an edit, clicking another container to check something, then
+  saving wrote the first one's name, URL, credential and tags over the second. Silently,
+  leaving the original untouched and two containers sharing a name. The list is now
+  disabled while an edit is open.
+
 - **A chain can no longer take one server's full and another's logs** (#362). Restore
   points were computed by partitioning the sets on backup TYPE alone. Set grouping goes to
   real trouble to keep two servers' same-named databases apart - a container holding Sales
