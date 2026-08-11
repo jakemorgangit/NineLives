@@ -10,6 +10,35 @@ public class BackupChainBuilder
     /// </summary>
     public List<RestorePoint> ComputeRestorePoints(List<BackupSet> allSets)
     {
+        // A chain belongs to ONE database on ONE instance, and this used to partition the sets
+        // by Type alone (#362).
+        //
+        // Grouping goes to real trouble to keep two servers' same-named databases apart - a
+        // container holding Sales from SRV01 and SRV02 is the everyday DR pair - and then the
+        // pairing below discarded the distinction and matched a full from one with the logs of
+        // the other. The app never saw it because the inventory screen filters to one instance
+        // before it gets here; the CLI has no such filter, and a container source cannot even
+        // narrow to a server, so `9lives script --container backups --database Sales` produced
+        // exactly that mixture. Nothing downstream catches it either: the identity check
+        // compares database NAMES, and both are Sales.
+        //
+        // Chains are therefore built per identity and the results concatenated. Nothing is
+        // dropped and nothing is refused: each server's points are offered, each internally
+        // consistent. The single-identity case - which is every path through the app - takes
+        // exactly the route it always did.
+        var identities = allSets
+            .GroupBy(s => (Database: s.DatabaseName ?? string.Empty,
+                           Server: s.ServerDisplay ?? string.Empty))
+            .ToList();
+
+        if (identities.Count > 1)
+            return [.. identities.SelectMany(g => ComputeRestorePointsForOneIdentity([.. g]))];
+
+        return ComputeRestorePointsForOneIdentity(allSets);
+    }
+
+    private List<RestorePoint> ComputeRestorePointsForOneIdentity(List<BackupSet> allSets)
+    {
         var fulls = allSets.Where(s => s.Type == BackupType.Full).OrderBy(s => s.Timestamp).ToList();
         var diffs = allSets.Where(s => s.Type == BackupType.Differential).OrderBy(s => s.Timestamp).ToList();
         var logs = allSets.Where(s => s.Type == BackupType.TransactionLog).OrderBy(s => s.Timestamp).ToList();
