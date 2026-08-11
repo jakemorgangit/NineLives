@@ -247,7 +247,8 @@ public class CliExecuteVerbTests
     private static string[] RehearseArgs(params string[] extra) =>
         [.. new[] { "--server", "SRV01", "--database", "MyDb", "--target", "SRV02" }, .. extra];
 
-    private static void GiveFileList(FakeSqlServerService sql) =>
+    private static void GiveFileList(FakeSqlServerService sql)
+    {
         sql.FileList =
         [
             new FileMoveOption
@@ -258,6 +259,13 @@ public class CliExecuteVerbTests
                 SizeBytes = 1024
             }
         ];
+
+        // The volume has to report its free space now that rehearse runs the space preflight
+        // (#359). An unreported volume is deliberately a refusal rather than a pass - not
+        // knowing is not the same as fitting - so a target that says nothing about C: is a
+        // target this rehearsal will not run on.
+        sql.VolumeFreeSpace = new Dictionary<string, long> { [@"D:\"] = 500L * 1024 * 1024 * 1024 };
+    }
 
     [Fact]
     public async Task ARehearsalProvesRestoresChecksAndDrops()
@@ -369,6 +377,7 @@ public class CliExecuteVerbTests
     {
         var (services, sql, _, _) = Stage(Full(100, T0));
         sql.FileList = [DataFile(@"D:\Data\MyDb.mdf", 1024)];
+        // The target reports C: and says nothing about the D: these files land on.
         sql.VolumeFreeSpace = new() { [@"C:\"] = 500L * 1024 * 1024 * 1024 };
 
         var (exit, _, errors) = await Run(

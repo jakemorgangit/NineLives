@@ -105,6 +105,50 @@ public class CliRestoreCredentialTests
         Assert.Contains(ContainerUrl, sql.CredentialWrites);
     }
 
+    // ── rehearse runs the same preflights (#359) ────────────────────────────────
+
+    /// <summary>
+    /// A rehearsal blocked by the HOST says so, rather than reporting the backup unproven.
+    ///
+    /// A missing TDE certificate on the rehearsal target used to surface as NOT PROVEN, exit
+    /// 2, with a retained scratch copy - which reads as "this backup is bad". It is not; this
+    /// target cannot restore it. At three in the morning those want opposite responses.
+    /// </summary>
+    [Fact]
+    public async Task ARehearsalRefusedByItsTargetIsBlockedNotDisproven()
+    {
+        var (services, sql, _) = Stage();
+
+        // The certificate the backup needs is not on the target.
+        sql.Header = new BackupFileInfo
+        {
+            DatabaseName = "MyDb",
+            Type = BackupType.Full,
+            BackupTypeCode = 1,
+            TdeThumbprint = [1, 2, 3, 4]
+        };
+        // CertificatesByThumbprint stays empty, so the target holds no such certificate.
+
+        // FILELISTONLY has to answer, or the rehearsal stops before the preflights - which is
+        // its own early return, not the refusal this test is about.
+        sql.FileList =
+        [
+            new FileMoveOption { LogicalName = "MyDb", PhysicalName = @"D:\data\MyDb.mdf", Type = "D" },
+            new FileMoveOption { LogicalName = "MyDb_log", PhysicalName = @"L:\logs\MyDb.ldf", Type = "L" }
+        ];
+
+        var (exit, errors) = await Run(RehearseVerb.RunAsync, RehearseVerb.Spec,
+            ["--container", "backups", "--database", "MyDb", "--target", "SRV02", "--execute"],
+            services);
+
+        Assert.Equal(ExitCodes.CouldNotAnswer, exit);
+        Assert.Contains("REFUSED", errors);
+        Assert.Contains("neither proven nor disproven", errors);
+
+        // And nothing ran: a blocked rehearsal is not a failed one.
+        Assert.Empty(sql.ExecutedScripts);
+    }
+
     /// <summary>
     /// A source that is an instance's own history has no container to take a credential from,
     /// and must not be refused for it - those backups are read FROM DISK.

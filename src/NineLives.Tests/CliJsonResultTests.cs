@@ -128,6 +128,9 @@ public class CliJsonResultTests
     {
         var (services, sql, history) = Stage();
         sql.FileList = [ScratchableFile()];
+        // rehearse now runs the space preflight (#359), and an unreported volume is a
+        // refusal by design, so the target has to say what it has free.
+        sql.VolumeFreeSpace = new() { [@"D:\"] = 500L * 1024 * 1024 * 1024 };
 
         var (exit, output, _) = await Run(RehearseVerb.RunAsync, RehearseVerb.Spec,
             ["--server", "SRV01", "--database", "MyDb", "--target", "SRV02",
@@ -146,6 +149,9 @@ public class CliJsonResultTests
     {
         var (services, sql, _) = Stage();
         sql.FileList = [ScratchableFile()];
+        // rehearse now runs the space preflight (#359), and an unreported volume is a
+        // refusal by design, so the target has to say what it has free.
+        sql.VolumeFreeSpace = new() { [@"D:\"] = 500L * 1024 * 1024 * 1024 };
         sql.FailOnExecuteNumber = 1;
 
         var (exit, output, _) = await Run(RehearseVerb.RunAsync, RehearseVerb.Spec,
