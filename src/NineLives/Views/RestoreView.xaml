@@ -42,6 +42,15 @@
             </StackPanel>
         </Border>
 
+        <!-- Docked, not buried (#355).
+             This lived inside step 5, which only becomes visible once step 4 is confirmed - so
+             every failure before that point had no banner at all. Loading an expired container,
+             a chain that will not build, a header that will not read: each set an error that
+             appeared only as grey status text at the foot of a two-thousand-line page,
+             indistinguishable from "Script copied to clipboard". Up here it is above the scroll,
+             beside the summary of what the restore will do, and it can actually be dismissed. -->
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource ErrorBanner}" />
+
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
             <!-- Header -->
@@ -2083,8 +2092,6 @@
                             <Run Text=" Connect to a SQL Server instance (SQL Servers tab) to enable script execution." />
                         </TextBlock>
                     </Border>
-
-                    <ContentControl Style="{StaticResource ErrorBanner}" />
 
                     <!-- The generated script. Stays visible during and after execution: it used to
                          be hidden the moment Execute was pressed, so the script and the console

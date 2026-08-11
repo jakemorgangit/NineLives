@@ -13,6 +13,7 @@
         <converters:BlobAuthModeToDisplayConverter x:Key="BlobAuthModeDisplay" />
         <converters:BlobAuthModeIsSasConverter x:Key="BlobAuthModeIsSas" />
         <converters:StringToVisibilityConverter x:Key="StringToVis" />
+        <converters:InverseBoolConverter x:Key="InverseBool" />
     </UserControl.Resources>
 
     <Grid>
@@ -54,7 +55,12 @@
                                 HorizontalAlignment="Stretch" />
                     </StackPanel>
 
+                    <!-- Not selectable mid-edit (#354). The form writes to whichever container
+                         is SELECTED when Save runs, so clicking another one while editing saved
+                         this container's name, URL, credential and tags over that one - silently,
+                         with the original left untouched and two containers left sharing a name. -->
                     <ListBox ItemsSource="{Binding Containers}"
+                             IsEnabled="{Binding IsEditing, Converter={StaticResource InverseBool}}"
                              SelectedItem="{Binding SelectedContainer}"
                              Background="Transparent"
                              BorderThickness="0"
