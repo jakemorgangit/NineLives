@@ -10,6 +10,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Three things that destroyed something without saying so** (#370). Shortening the log
+  retention deleted files immediately and silently - on the same screen that calls them a
+  restore's own record, needed later by a change ticket. It now says how many would go and
+  asks, and only when something actually would. Removing a webhook took the URL with it on
+  one click; the URL is a secret the app never displays back, and most carry their own
+  token, so that was the only copy - it now asks, like the container and server lists do.
+  And a history file that exists but cannot be read was reported as "No restores recorded
+  yet", which is the opposite fact: Clear sat one press away from writing an empty file
+  over every receipt it holds. The screen now says the file is unreadable and names it,
+  and Clear refuses to touch it.
+
 ## [1.6.0] - 2026-08-11
 
 ### Added

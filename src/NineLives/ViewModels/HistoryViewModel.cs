@@ -53,9 +53,17 @@ public partial class HistoryViewModel : ViewModelBase
         // Selecting the newest is what someone opening this view is nearly always after: the
         // restore they just ran.
         SelectedEntry = Entries.FirstOrDefault();
-        SetStatus(HasEntries
-            ? $"{_all.Count} restore(s) recorded."
-            : "No restores recorded yet.");
+        // "Nothing here" and "cannot read what is here" are opposite facts, and both used to
+        // arrive as an empty list (#370). Reporting the second as the first hides a damaged
+        // file - and Clear sits on this screen, one click from overwriting it.
+        if (_history.CouldNotRead)
+            SetError(
+                "The history file exists but could not be read, so this list is not what it " +
+                "holds. Do not clear it - copy it somewhere safe first: " + _history.FilePath);
+        else
+            SetStatus(HasEntries
+                ? $"{_all.Count} restore(s) recorded."
+                : "No restores recorded yet.");
     }
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
@@ -151,6 +159,18 @@ public partial class HistoryViewModel : ViewModelBase
     [RelayCommand]
     private void ClearHistory()
     {
+        // Never over a file that could not be read (#370). The list is empty because the read
+        // failed, not because there is nothing there - clearing would write an empty file over
+        // what may still hold every receipt, and a receipt is the proof a restore happened.
+        if (_history.CouldNotRead)
+        {
+            IsClearArmed = false;
+            SetError(
+                "This history could not be read, so there is no telling what clearing it would " +
+                "destroy. Move or repair the file first: " + _history.FilePath);
+            return;
+        }
+
         if (!IsClearArmed)
         {
             IsClearArmed = true;

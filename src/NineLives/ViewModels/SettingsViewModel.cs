@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using Blackcat.NineLives.Models;
 using System.IO;
+using System.Windows;
 using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -108,6 +109,19 @@ public partial class SettingsViewModel : ViewModelBase
     private void RemoveWebhook(WebhookEndpointViewModel? row)
     {
         if (row == null) return;
+
+        // A webhook URL is a secret this app never displays back - most carry their own token
+        // in the path - so removing one destroys the only copy it holds, on a single click, with
+        // nothing to undo with (#370). The same question the container and server lists ask.
+        var confirm = MessageBox.Show(
+            $"Remove the webhook \"{row.Name}\"?\n\n" +
+            "Its URL is stored in Windows Credential Manager and never displayed, so if this is " +
+            "the only copy you will need the original to add it back.\n\n" +
+            "Runs will stop being announced to it. Nothing else changes.",
+            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+        if (confirm != MessageBoxResult.Yes) return;
+
         Webhooks.Remove(row);
         SaveWebhooks();
     }
@@ -255,6 +269,10 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>True while the constructor is filling the properties from config.</summary>
     private readonly bool _loading;
 
+    /// <summary>Set while putting the retention box back, so the revert does not
+    /// re-enter its own handler and ask again (#370).</summary>
+    private bool _revertingRetention;
+
     public SettingsViewModel(ICredentialStore credentialStore, OperationLog? log = null)
     {
         _credentialStore = credentialStore;
@@ -366,7 +384,34 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     partial void OnLogRetentionDaysChanged(int value)
     {
-        if (_loading) return;
+        if (_loading || _revertingRetention) return;
+
+        // Asked before anything is deleted, and only when something would be (#370).
+        //
+        // This screen's own words are that a restore's record lives in these files and a change
+        // ticket may need the evidence later - and then it deleted them on the way past, with
+        // no question and nothing to undo with. The count is what makes the question worth
+        // asking: shortening retention on a machine that has nothing old enough to lose is not
+        // a decision, and should not be interrupted like one.
+        var doomed = _log.CountPrunable(value);
+        if (doomed > 0)
+        {
+            var confirm = MessageBox.Show(
+                $"Keeping logs for {value} day(s) deletes {doomed} log file(s) now.\n\n" +
+                "A restore's own record lives in these files. If a change ticket or an incident " +
+                "review might need the evidence, copy them out first - Open log folder is on " +
+                "this screen.\n\nDelete them?",
+                "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+
+            if (confirm != MessageBoxResult.Yes)
+            {
+                // Put the box back to what is actually in force, without re-entering this.
+                _revertingRetention = true;
+                LogRetentionDays = _log.RetentionDays;
+                _revertingRetention = false;
+                return;
+            }
+        }
 
         _log.RetentionDays = value;
         _log.Prune();
