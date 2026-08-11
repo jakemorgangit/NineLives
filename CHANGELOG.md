@@ -180,6 +180,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A rehearsal blocked by its own host says so, instead of blaming the backup** (#359).
+  `rehearse` ran no preflights at all - no space check, no version direction, no TDE
+  certificate, no S3 capability - so a scratch volume too small, a certificate missing
+  from the rehearsal target, or an engine that cannot read the storage all died inside
+  the restore and came back as NOT PROVEN, exit 2, with the scratch copy retained as
+  evidence. That reads as "this backup is bad", when the backup was never in question
+  and the host was. It now runs the same preflights the restore verb does, and a refusal
+  is its own outcome and its own exit code - could not be proven, which is a different
+  answer from proven false, and a proof loop that conflates them is worse at 3am than one
+  that does not run.
+
 - **A failure in the early restore steps is actually shown** (#355). The screen's only
   error banner sat inside step 5, which is not on screen until step 4 has been confirmed -
   so everything that can go wrong before that had no banner at all. An expired container,

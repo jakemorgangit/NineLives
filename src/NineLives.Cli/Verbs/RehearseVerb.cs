@@ -64,7 +64,8 @@ internal static class RehearseVerb
         [
             "0   PROVEN - restored, CHECKDB clean, scratch dropped (or, without --execute, printed)",
             "2   NOT PROVEN - the failure is recorded, the scratch copy retained as evidence",
-            "3   the source or target could not be reached, or FILELISTONLY answered nothing",
+            "3   could not be PROVEN - the target could not be reached, FILELISTONLY answered " +
+            "nothing, or a preflight refused (a fact about this target, not about the backup)",
             "64  usage",
             "130 cancelled with Ctrl+C - recorded, told to the channel, scratch retained if begun"
         ],
@@ -160,6 +161,48 @@ internal static class RehearseVerb
 
         var (dataPath, logPath) = await services.Sql.GetDefaultPathsAsync(target);
         var moves = RehearsalPlanner.ScratchMoves(files, scratch, dataPath, logPath);
+
+        // The same preflights the restore verb runs (#359).
+        //
+        // Without them a rehearsal that failed because of the HOST - a scratch volume too
+        // small, a missing TDE certificate, a target older than the backup, an engine that
+        // cannot read S3 - died inside the restore and reported NOT PROVEN. That says the
+        // backup is bad. It is not; the host is misconfigured, and the two want opposite
+        // responses at three in the morning.
+        //
+        // So a refusal gets its own outcome and its own exit code: "could not be proven" is a
+        // different answer from "proven false", and a proof loop that conflates them is worse
+        // than one that does not run.
+        //
+        // No container passed - the credential was ensured above, before the file list that
+        // needed it, and asking twice would only repeat the line.
+        var preflight = await Preflights.RunAsync(
+            services, target, chain, scratch, withReplace: false, force: false, moves);
+
+        foreach (var warning in preflight.Warnings)
+            errors.WriteLine($"WARNING: {warning}");
+
+        if (preflight.Refusals.Count > 0)
+        {
+            foreach (var refusal in preflight.Refusals)
+                errors.WriteLine($"REFUSED: {refusal}");
+
+            errors.WriteLine("The rehearsal did not run, so this backup is neither proven nor " +
+                             "disproven - the refusals above are about this target, not the backup.");
+
+            if (args.Has("json"))
+                CliRunResult.Write(output, new
+                {
+                    Verb = "rehearse",
+                    Outcome = "Blocked",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    Scratch = scratch,
+                    Refusals = preflight.Refusals
+                });
+
+            return ExitCodes.CouldNotAnswer;
+        }
 
         var restoreScript = new RestoreScriptGenerator().Generate(chain, new RestoreOptions
         {
