@@ -178,6 +178,21 @@ more detail on the user-facing changes; this file is the short history.
   list meant guessing whose history the timeline would show. One instance answers its own
   filter automatically; the database choice itself always stays with the user
 
+### Fixed
+
+- **A bucket has an endpoint, not a storage account** (#345). The container details pane
+  read the first label of the host name into a row labelled STORAGE ACCOUNT - correct for
+  Azure, and "s3" for every AWS bucket. Both the label and the value now follow the
+  provider, and an endpoint given with a port keeps it.
+
+- **A backup destination too long for SQL Server is refused before the run, not during it**
+  (#346). The engine caps a backup device URL at 259 characters; past that BACKUP TO URL
+  fails on the server, mid-backup, with a message about devices rather than lengths. The
+  destination is now measured where it is built, so the Back Up screen, Copy Database and
+  the CLI's backup verb all refuse it up front - naming the offending URL and its length,
+  because the fix is always in one of its parts. Easy to reach with a long endpoint, a base
+  path and the default four-segment pattern; striping makes every stripe carry it.
+
 ### Changed
 
 - **The screens stopped assuming Azure** (#51). "Azure Blob Storage" as a backup

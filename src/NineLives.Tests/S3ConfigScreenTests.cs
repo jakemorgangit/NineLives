@@ -222,6 +222,38 @@ public class S3ConfigScreenTests
         Assert.False(vm.IsSasExpired);
     }
 
+    /// <summary>
+    /// A bucket has an endpoint, not a storage account (#345). The old row read the first label
+    /// of the host, which is the account for an Azure URL and reported "s3" for every AWS
+    /// bucket - a fact about nothing, in a row labelled as though it meant something.
+    /// </summary>
+    [Fact]
+    public void TheDetailsPaneCallsAnS3EndpointAnEndpoint()
+    {
+        var bucket = SavedS3Container();
+
+        Assert.Equal("ENDPOINT", bucket.LocationLabel);
+        Assert.Equal("s3.eu-west-2.amazonaws.com", bucket.LocationDisplay);
+
+        var azure = new BlobContainerConfig
+        {
+            ContainerUrl = "https://myaccount.blob.core.windows.net/backups"
+        };
+
+        Assert.Equal("STORAGE ACCOUNT", azure.LocationLabel);
+        Assert.Equal("myaccount", azure.LocationDisplay);
+    }
+
+    /// <summary>An endpoint given with a port describes itself completely.</summary>
+    [Fact]
+    public void AnEndpointWithAPortKeepsIt()
+    {
+        Assert.Equal("storage.example.com:9000", new BlobContainerConfig
+        {
+            ContainerUrl = "s3://storage.example.com:9000/backups"
+        }.LocationDisplay);
+    }
+
     [Fact]
     public void TheDetailsPaneNamesTheKeyPairNotTheSas()
     {

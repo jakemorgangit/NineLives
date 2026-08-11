@@ -266,6 +266,25 @@ public class BlobContainerConfig : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// What to call the thing this container lives in (#345). Azure has a storage account -
+    /// the first label of the host name - and a bucket does not: an S3 URL's host is the
+    /// provider's endpoint, whole.
+    /// </summary>
+    [JsonIgnore]
+    public string LocationLabel => IsS3 ? "ENDPOINT" : "STORAGE ACCOUNT";
+
+    /// <summary>
+    /// The value for <see cref="LocationLabel"/>. Reported "s3" for every AWS bucket before
+    /// this existed, because <see cref="StorageAccountName"/> splits the host on its first dot
+    /// - which is the storage account for an Azure URL and the first label of an endpoint for
+    /// an S3 one. The authority rather than the bare host, so an endpoint given with a port
+    /// still describes itself completely.
+    /// </summary>
+    [JsonIgnore]
+    public string? LocationDisplay =>
+        IsS3 ? S3Url.TryParse(ContainerUrl)?.Authority : StorageAccountName;
+
     public string DisplayText
     {
         get
