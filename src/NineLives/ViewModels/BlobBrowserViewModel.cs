@@ -42,6 +42,30 @@ public partial class BlobBrowserViewModel : ViewModelBase
 
     [ObservableProperty]
     private ObservableCollection<BlobContainerConfig> _containers = [];
+    /// <summary>
+    /// Nothing to pick from, and where to go and fix that (#406).
+    ///
+    /// A fresh install put empty "Select..." dropdowns on this screen with no words at all, while
+    /// the Restore and Exposure screens both already named the missing thing, named the screen
+    /// that fills it, and said what would then happen. The app knows exactly what is absent; it
+    /// simply was not saying.
+    /// </summary>
+    public bool HasNoServers => Servers.Count == 0;
+
+    public bool HasNoContainers => Containers.Count == 0;
+
+    partial void OnServersChanged(ObservableCollection<ServerConnection> value)
+    {
+        OnPropertyChanged(nameof(HasNoServers));
+        OnPropertyChanged(nameof(BrowseHint));
+    }
+
+    partial void OnContainersChanged(ObservableCollection<BlobContainerConfig> value)
+    {
+        OnPropertyChanged(nameof(HasNoContainers));
+        OnPropertyChanged(nameof(BrowseHint));
+    }
+
 
     [ObservableProperty]
     private BlobContainerConfig? _selectedContainer;
@@ -112,10 +136,32 @@ public partial class BlobBrowserViewModel : ViewModelBase
     public bool MediumIsBlob => SelectedMedium == BackupMedium.AzureBlob;
     public bool MediumIsSharedPath => SelectedMedium == BackupMedium.SharedPath;
 
+    /// <summary>
+    /// The one line under the empty-state folder: what to do next, or why there is nothing to do
+    /// yet (#406).
+    ///
+    /// Four cases collapsed into one string rather than four TextBlocks and a MultiDataTrigger.
+    /// The bug it fixes is the fourth: on a fresh install this said "Select a container and click
+    /// Load Backups to browse" when there were no containers to select - an instruction nobody
+    /// could follow, on a screen that is one click from the sidebar and the natural thing to press
+    /// when you want to LOOK before committing to anything.
+    /// </summary>
+    public string BrowseHint =>
+        MediumIsBlob
+            ? HasNoContainers
+                ? "No storage configured yet. Add a container or bucket on the Blob Storage " +
+                  "screen, and what is in it can be browsed here."
+                : "Select a container and click Load Backups to browse."
+            : HasNoServers
+                ? "No saved servers yet. Add one on the SQL Servers screen, and what it has " +
+                  "recorded backing up can be read here."
+                : "Select a server and click Load Backups to read what it has backed up.";
+
     partial void OnSelectedMediumChanged(BackupMedium value)
     {
         OnPropertyChanged(nameof(MediumIsBlob));
         OnPropertyChanged(nameof(MediumIsSharedPath));
+        OnPropertyChanged(nameof(BrowseHint));
 
         // What is on screen came from the other source and no longer belongs to what is selected
         // above it. Leaving it there would put a container's files under a server's name.

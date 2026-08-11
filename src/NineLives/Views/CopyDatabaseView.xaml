@@ -90,6 +90,12 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+                            <!-- Names the missing thing and the screen that fills it (#406). A copy needs
+                                 two servers and somewhere to put the backup, and a fresh install offered
+                                 three empty dropdowns with no words at all. -->
+                            <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="No saved servers yet. Add one on the SQL Servers screen and it will appear here - a copy needs two."
+                                       Visibility="{Binding HasNoServers, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
 
                         <Button Grid.Column="1"
@@ -143,6 +149,9 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="No storage configured yet. Add a container or bucket on the Blob Storage screen and it will appear here."
+                                   Visibility="{Binding HasNoContainers, Converter={StaticResource BoolToVis}}" />
                     </StackPanel>
 
                     <StackPanel Margin="0,12,0,0"
@@ -195,6 +204,9 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+                            <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="No saved servers yet. Add one on the SQL Servers screen and it will appear here - a copy needs two."
+                                       Visibility="{Binding HasNoServers, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">

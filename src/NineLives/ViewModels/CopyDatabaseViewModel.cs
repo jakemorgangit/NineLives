@@ -74,6 +74,24 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
     [ObservableProperty]
     private ObservableCollection<BlobContainerConfig> _containers = [];
+    /// <summary>
+    /// Nothing to pick from, and where to go and fix that (#406).
+    ///
+    /// A fresh install put empty "Select..." dropdowns on this screen with no words at all, while
+    /// the Restore and Exposure screens both already named the missing thing, named the screen
+    /// that fills it, and said what would then happen. The app knows exactly what is absent; it
+    /// simply was not saying.
+    /// </summary>
+    public bool HasNoServers => Servers.Count == 0;
+
+    public bool HasNoContainers => Containers.Count == 0;
+
+    partial void OnServersChanged(ObservableCollection<ServerConnection> value) =>
+        OnPropertyChanged(nameof(HasNoServers));
+
+    partial void OnContainersChanged(ObservableCollection<BlobContainerConfig> value) =>
+        OnPropertyChanged(nameof(HasNoContainers));
+
 
     [ObservableProperty]
     private BlobContainerConfig? _container;

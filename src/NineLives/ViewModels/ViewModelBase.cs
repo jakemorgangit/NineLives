@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
@@ -46,6 +46,12 @@ public abstract partial class ViewModelBase : ObservableObject
     /// it.
     /// </summary>
     protected void SetStatus(string message) => StatusMessage = message;
+
+    /// <summary>Stage a status message without the operation that produces one.</summary>
+    internal void SetStatusForTests(string message) => SetStatus(message);
+
+    /// <summary>Stage an error without the failure that produces one.</summary>
+    internal void SetErrorForTests(string message) => SetError(message);
 
     /// <summary>
     /// Sticky: survives until another error supersedes it, the user dismisses it, or the next

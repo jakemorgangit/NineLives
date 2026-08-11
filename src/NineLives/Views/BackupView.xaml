@@ -61,6 +61,11 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+                            <!-- Names the missing thing and the screen that fills it (#406). Restore and
+                                 Exposure already said this; the dropdowns here just sat empty. -->
+                            <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="No saved servers yet. Add one on the SQL Servers screen and it will appear here."
+                                       Visibility="{Binding HasNoServers, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
 
                         <Button Grid.Column="1"
@@ -153,6 +158,9 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                        <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="No storage configured yet. Add a container or bucket on the Blob Storage screen and it will appear here."
+                                   Visibility="{Binding HasNoContainers, Converter={StaticResource BoolToVis}}" />
                     </StackPanel>
 
                     <StackPanel Margin="0,12,0,0"

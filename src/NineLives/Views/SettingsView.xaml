@@ -13,6 +13,10 @@
 
             <ContentControl Style="{StaticResource ErrorBanner}" />
 
+            <!-- Where an import says what it changed, and an export says where it went and
+                 that it holds no secrets. Both reported to nobody until #404. -->
+            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource StatusLine}" />
+
             <!-- Appearance -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                 <StackPanel>
