@@ -57,6 +57,41 @@ public class ScriptHygieneTests
         Assert.Contains("SET SINGLE_USER", script);
     }
 
+    /// <summary>
+    /// The set id travels into three per-statement comments, and #294 escaped the header but
+    /// not those (#352). A set id is not a safe string: for an msdb-sourced set it is built
+    /// from the database name, which is sysname and permits a line break.
+    /// </summary>
+    [Fact]
+    public void ANewlineInASetIdCannotEscapeItsStatementComment()
+    {
+        var chain = new BackupChain
+        {
+            FullSet = new BackupSet
+            {
+                SetId = "Sales_20260110\nDROP DATABASE [Payroll]; --",
+                DatabaseName = "Sales",
+                Type = BackupType.Full,
+                Timestamp = new DateTime(2026, 8, 1, 22, 0, 0),
+                Files = [new BackupFileInfo
+                {
+                    BlobName = "FULL/Sales/20260801_220000.bak",
+                    BlobUrl = "https://acct.blob.core.windows.net/backups/FULL/Sales/20260801_220000.bak",
+                    Type = BackupType.Full
+                }]
+            }
+        };
+
+        var script = new RestoreScriptGenerator().Generate(
+            chain, new RestoreOptions { TargetDatabaseName = "Sales" });
+
+        // One commented line - the newline became a space, so the DROP never stands alone.
+        Assert.Contains(
+            "-- Restore FULL backup (1 file(s)): Sales_20260110 DROP DATABASE [Payroll]; --",
+            script);
+        Assert.DoesNotContain("\nDROP DATABASE [Payroll]", script);
+    }
+
     [Fact]
     public void ANewlineInTheBackupDatabaseNameCannotEscapeTheHeaderComment()
     {

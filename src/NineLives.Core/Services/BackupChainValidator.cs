@@ -244,7 +244,11 @@ public class BackupChainValidator
 
     private static void CheckEmptyFiles(BackupSet set, List<ChainIssue> issues)
     {
-        var empty = set.Files.Where(f => f.SizeBytes == 0).ToList();
+        // Only files whose size is actually known (#351). A stripe read back from msdb has no
+        // size of its own - the set carries one total - and reading that absence as zero made
+        // every striped backup from an instance's own history look like a run of failed
+        // uploads, raising an Error that disables the restore on a chain that is perfectly fine.
+        var empty = set.Files.Where(f => !f.SizeIsUnknown && f.SizeBytes == 0).ToList();
         if (empty.Count == 0) return;
 
         issues.Add(new ChainIssue(ChainIssueSeverity.Error,

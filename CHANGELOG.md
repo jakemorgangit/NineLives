@@ -180,6 +180,22 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A striped backup read from an instance's own history is no longer called corrupt**
+  (#351). msdb records a backup's size once for the whole set rather than per stripe, so
+  every stripe after the first was left at zero - and zero already meant something here,
+  an interrupted or failed upload, which the validator raises as an Error that disables
+  the restore. So every striped backup discovered through the shared-path route was
+  declared damaged and refused, at DR time, on exactly the large databases that get
+  striped in the first place. A file whose size nobody could state now says so, which is
+  a different thing from being empty - and a genuinely zero-byte stripe in a container,
+  where every size IS known, is still caught.
+
+- **A backup set id cannot break out of the comment naming it** (#352). The header was
+  escaped in #294 and the three per-statement comments were not, so a set id carrying a
+  line break - and for a set read from msdb the id is built from the database name, which
+  is sysname and permits one - ended its comment and left the rest standing as a live
+  statement, in a script the app executes and `9lives script --out` hands to a pipeline.
+
 - **A restore receipt can no longer destroy the receipt beside it** (#371). When two
   writers went for the history file at once - a scheduled `9lives rehearse` while the app
   is open, which is what #298 added the cross-process lock for - a writer that could not

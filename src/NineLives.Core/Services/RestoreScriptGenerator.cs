@@ -95,7 +95,7 @@ public class RestoreScriptGenerator
         var dbName = EscapeName(options.TargetDatabaseName);
         var recoveryClause = moreToFollow ? "NORECOVERY" : GetRecoveryClause(options);
 
-        sb.AppendLine($"-- Restore FULL backup ({fullSet.FileCount} file(s)): {fullSet.SetId}");
+        sb.AppendLine($"-- Restore FULL backup ({fullSet.FileCount} file(s)): {TSql.CommentText(fullSet.SetId)}");
         sb.AppendLine($"RESTORE DATABASE {dbName}");
         AppendFromUrls(sb, fullSet, options);
 
@@ -116,7 +116,7 @@ public class RestoreScriptGenerator
         var dbName = EscapeName(options.TargetDatabaseName);
         var recoveryClause = moreToFollow ? "NORECOVERY" : GetRecoveryClause(options);
 
-        sb.AppendLine($"-- Restore DIFFERENTIAL backup ({diffSet.FileCount} file(s)): {diffSet.SetId}");
+        sb.AppendLine($"-- Restore DIFFERENTIAL backup ({diffSet.FileCount} file(s)): {TSql.CommentText(diffSet.SetId)}");
         sb.AppendLine($"RESTORE DATABASE {dbName}");
         AppendFromUrls(sb, diffSet, options);
         sb.AppendLine($"         {recoveryClause},");
@@ -131,7 +131,7 @@ public class RestoreScriptGenerator
         var dbName = EscapeName(options.TargetDatabaseName);
         var recoveryClause = isLast ? GetRecoveryClause(options) : "NORECOVERY";
 
-        sb.AppendLine($"-- Restore LOG backup ({logSet.FileCount} file(s)): {logSet.SetId}");
+        sb.AppendLine($"-- Restore LOG backup ({logSet.FileCount} file(s)): {TSql.CommentText(logSet.SetId)}");
         sb.AppendLine($"RESTORE LOG {dbName}");
         AppendFromUrls(sb, logSet, options);
 

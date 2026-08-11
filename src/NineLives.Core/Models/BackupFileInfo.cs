@@ -186,6 +186,22 @@ public class BackupFileInfo
 
     public BackupType Type { get; set; } = BackupType.Unknown;
     public long SizeBytes { get; set; }
+
+    /// <summary>
+    /// True when nobody could say how big THIS file is, as opposed to it being empty (#351).
+    ///
+    /// msdb records a backup's size once for the whole set rather than per stripe, so every
+    /// stripe after the first has no size of its own to report. Zero was standing in for that,
+    /// and zero already means something here - an interrupted or failed upload, which the
+    /// validator raises as an Error that disables the restore. So every striped backup read
+    /// back from an instance's own history was declared damaged, at the moment somebody was
+    /// trying to restore it.
+    ///
+    /// A blob listing knows every file's real size and never sets this, which is what keeps a
+    /// genuinely zero-byte stripe in a container detectable.
+    /// </summary>
+    public bool SizeIsUnknown { get; set; }
+
     public DateTimeOffset LastModified { get; set; }
 
     public string? InferredServerName { get; set; }

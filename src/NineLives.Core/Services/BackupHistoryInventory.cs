@@ -108,7 +108,13 @@ public static class BackupHistoryInventory
 
             // Size is per SET in msdb, not per stripe, so it is recorded once rather than repeated
             // on every file - a striped backup would otherwise report several times its real size.
-            SizeBytes = index == 0 ? entry.BackupSizeBytes ?? 0 : 0
+            //
+            // Every other file's size is UNKNOWN, and says so (#351). It used to be left at zero,
+            // which the validator reads as a failed upload - so a striped backup discovered
+            // through an instance's own history was reported as containing empty files and
+            // refused, when nothing was wrong with it at all.
+            SizeBytes = index == 0 ? entry.BackupSizeBytes ?? 0 : 0,
+            SizeIsUnknown = index > 0 || entry.BackupSizeBytes == null
         };
     }
 }
