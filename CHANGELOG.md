@@ -180,6 +180,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A scripted restore creates the credential it authenticates with** (#353). RESTORE
+  FROM URL needs a credential on the TARGET instance for the container's URL, and the
+  generated script deliberately never carries one - the app writes it from its credential
+  panel, and nothing in the CLI did. So the provisioning template the README leads with,
+  add-server then add-container then `restore --execute` on a freshly built VM, died on
+  its last line with Msg 3201, after both provisioning verbs had validated green.
+  `rehearse` gets it too, and gets it before the file list rather than before the
+  restore: FILELISTONLY reads the backup itself, so a scheduled rehearsal without the
+  credential failed at the read and reported NOT PROVEN - blaming the backup for a host
+  that had never been told how to reach it. The README's own list of restore preflights
+  was missing the credential too, which is how the gap stayed invisible.
+
 - **The bucket's region reaches the statement, not just the listing** (#361). The region
   was stored, used when the app listed a container, and understood by both generators -
   but only the app's restore path ever put it on the options object. Every other path

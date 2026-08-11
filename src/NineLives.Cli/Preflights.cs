@@ -22,10 +22,18 @@ internal static class Preflights
     /// consent to overwrite, can the target read the files, does the version direction work,
     /// and is the TDE certificate where the restore will need it.
     /// </summary>
+    /// <param name="container">
+    /// The container the chain came from, when it came from one. Needed because the RESTORE
+    /// authenticates with a credential on the TARGET instance, which nothing else in a
+    /// scripted run would create (#353). Null for a --server source or a shared path.
+    /// </param>
+    /// <param name="appendLog">Where the credential step narrates what it did.</param>
     public static async Task<Result> RunAsync(
         CliServices services, ServerConnection target, BackupChain chain,
         string targetDatabase, bool withReplace, bool force,
-        IReadOnlyList<FileMoveOption>? fileMoves = null)
+        IReadOnlyList<FileMoveOption>? fileMoves = null,
+        BlobContainerConfig? container = null,
+        Action<string>? appendLog = null)
     {
         var refusals = new List<string>();
         var warnings = new List<string>();
@@ -34,6 +42,25 @@ internal static class Preflights
         {
             if (force) warnings.Add(message + " (--force: proceeding anyway)");
             else refusals.Add(message);
+        }
+
+        // 0a. The credential the RESTORE will authenticate with (#353).
+        //
+        // RESTORE FROM URL needs a credential on the TARGET instance for the container's URL,
+        // and the generated script deliberately never carries one. The app creates it from its
+        // credential panel; a scripted restore had nothing that did, so the advertised
+        // provision-then-restore template died on its last line with Msg 3201 - after the
+        // server and container had both validated green.
+        //
+        // Hard refusal rather than a Verdict: --force overrides a judgement made on evidence,
+        // and a missing credential is not a judgement. The restore cannot authenticate.
+        if (container != null)
+        {
+            var credential = await BlobCredentialPreflight.EnsureAsync(
+                services.Store, services.Sql, null, container, target,
+                appendLog ?? (_ => { }));
+
+            if (!credential.CanProceed) refusals.Add(credential.Refusal!);
         }
 
         // 1. WITH REPLACE is its own consent - never inherited, never forced (#63).
