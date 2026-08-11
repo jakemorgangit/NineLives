@@ -58,11 +58,13 @@ public partial class MainViewModel : ViewModelBase
 
         Restore.Mode = value;
         Backup.Mode = value;
+        Home.Mode = value;
         Settings.CurrentMode = value;
 
         // A screen that has just been hidden must not stay on display underneath a sidebar that no
-        // longer offers it - which is what changing mode from Settings would otherwise do.
-        if (!IsViewAvailable(CurrentViewName)) NavigateTo(Nav.Restore);
+        // longer offers it - which is what changing mode from Settings would otherwise do. Home,
+        // because it exists in every mode and its feature pointers SHOW the new shape (#343).
+        if (!IsViewAvailable(CurrentViewName)) NavigateTo(Nav.Home);
     }
 
     private void OnModeChosen(AppMode mode)
@@ -70,9 +72,10 @@ public partial class MainViewModel : ViewModelBase
         Mode = mode;
         IsChoosingMode = false;
 
-        // Restore rather than back to Settings, deliberately: the point of changing the mode is the
-        // shape of the app, and landing on the settings page you came from shows none of it.
-        NavigateTo(Nav.Restore);
+        // The front door, deliberately (#343): choosing a mode is choosing the shape of the app,
+        // and Home is the one screen that says what that shape contains - landing on Restore
+        // showed one room of it, and landing back on Settings showed none.
+        NavigateTo(Nav.Home);
     }
 
     /// <summary>
@@ -98,7 +101,7 @@ public partial class MainViewModel : ViewModelBase
     /// app. Sending somebody who has just started the app to the settings page would be a stranger
     /// place to land than the one they were heading for.
     /// </summary>
-    private string _modeCardsReturnTo = Nav.Restore;
+    private string _modeCardsReturnTo = Nav.Home;
 
     private void OnModeCardsCancelled()
     {
@@ -108,13 +111,15 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>
     /// Where carrying on from the launch cards lands (#211): the last session's screen when it is
-    /// still a screen this mode offers, Restore otherwise. Restore rather than the recorded
-    /// screen's nearest cousin, because a guess about intent is worse than the app's centre.
+    /// still a screen this mode offers, the front door otherwise (#343). Home rather than the
+    /// recorded screen's nearest cousin, because a guess about intent is worse than the one
+    /// screen that introduces all the others - and the only people who reach the fallback are
+    /// the ones with no recorded intent to guess at.
     /// </summary>
     internal string LandingScreen(string? lastScreen) =>
         lastScreen != null && Nav.Views.Contains(lastScreen) && IsViewAvailable(lastScreen)
             ? lastScreen
-            : Nav.Restore;
+            : Nav.Home;
 
     /// <summary>
     /// Files everything the next launch wants back: where the window was, and which screen was in
@@ -198,6 +203,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public string VersionText => Services.AppVersion.Display;
 
+    public HomeViewModel Home { get; }
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
@@ -240,6 +246,10 @@ public partial class MainViewModel : ViewModelBase
         _sqlService = new SqlServerService(_credentialStore);
         _chainBuilder = new BackupChainBuilder();
         _scriptGenerator = new RestoreScriptGenerator();
+
+        // The front door (#343). Navigation stays here; the screen only asks.
+        Home = new HomeViewModel();
+        Home.NavigateRequested += NavigateTo;
 
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
@@ -557,6 +567,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public static class Nav
     {
+        public const string Home = "Home";
         public const string BlobStorage = "Blob Storage";
         public const string SqlServers = "SQL Servers";
         public const string BrowseBackups = "Browse Backups";
@@ -569,7 +580,7 @@ public partial class MainViewModel : ViewModelBase
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Exposure, Backup, Restore, CopyDatabase, History, Settings, About];
+            [Home, BlobStorage, SqlServers, BrowseBackups, Exposure, Backup, Restore, CopyDatabase, History, Settings, About];
     }
 
     [RelayCommand]
@@ -578,6 +589,7 @@ public partial class MainViewModel : ViewModelBase
         CurrentViewName = viewName;
         CurrentView = viewName switch
         {
+            Nav.Home => Home,
             Nav.BlobStorage => BlobConfig,
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,

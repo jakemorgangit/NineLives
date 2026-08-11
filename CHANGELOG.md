@@ -12,6 +12,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **A front door** (#343). Choosing a mode now lands on Home: what Nine Lives is in a
+  paragraph, the three get-going steps - add your storage, add a SQL Server, restore -
+  as buttons that go to the right screens, and pointers to the rest of what the chosen
+  mode offers, mirroring the sidebar exactly. Reachable any time from the sidebar
+  (Ctrl+0). The launch-time carry-on still goes to wherever work was left - the front
+  door greets arrivals, it does not toll returns - and only somebody with no recorded
+  screen at all lands there by default, which is exactly who the introduction is for.
+
 - **The Add Container form asks the provider question up front** (#51). A Storage
   Provider choice - Azure Blob Storage or S3-compatible - sits above the URL, so the
   key-pair and region fields are on screen before any URL has been typed; the

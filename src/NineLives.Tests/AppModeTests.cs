@@ -154,10 +154,10 @@ public class AppModeTests
 
         Assert.False(main.IsChoosingMode);
 
-        // Restore, specifically - the same place choosing a mode lands. "Not the settings page"
-        // was too weak a pin: it let the container list through, which is the landing the cards
-        // exist to get away from (#209).
-        Assert.Same(main.Restore, main.CurrentView);
+        // The front door, specifically - the same place choosing a mode lands (#343, which
+        // moved this from Restore). "Not the settings page" was too weak a pin: it let the
+        // container list through, which is the landing the cards exist to get away from (#209).
+        Assert.Same(main.Home, main.CurrentView);
     }
 
     /// <summary>The choice is remembered, or it would be asked again next time.</summary>
@@ -242,7 +242,9 @@ public class AppModeTests
         main.Mode = AppMode.Basic;
 
         Assert.NotSame(main.CopyDatabase, main.CurrentView);
-        Assert.Same(main.Restore, main.CurrentView);
+        // The front door (#343, which moved this from Restore): it exists in every
+        // mode, and its pointers show the new shape that just hid the old screen.
+        Assert.Same(main.Home, main.CurrentView);
     }
 
     [Fact]
