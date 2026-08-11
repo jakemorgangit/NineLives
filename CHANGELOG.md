@@ -12,6 +12,20 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The README says what the app supports on its first screen, and the permissions section
+  covers both providers** (#370). S3 first appeared at line 100 of a 600-line file with no table
+  of contents, so a reader with backups in Wasabi or R2 closed the tab before reaching it. The
+  opening sentence and the media table now name all three media, and a contents strip sits under
+  the badge. "SAS Token Requirements" has become "Storage permissions" and names the S3 key
+  pair's actual permissions - `s3:ListBucket`, `s3:GetObject`, `s3:PutObject` to back up - the
+  `IDENTITY = 'S3 Access Key'` credential, and the SQL Server 2022+ non-Express requirement, all
+  of which were documented nowhere.
+
+- **The server-side credential panel stopped being Azure-only in its wording** (#370). It read
+  "BLOB CREDENTIAL ON SERVER" for a bucket as well as a container, and refusing for a missing
+  secret said "No SAS token stored for this container" - sending somebody to refresh a SAS token
+  an S3 container has never had. It now names the access key pair.
+
 - **The saved-containers list no longer turns white while the Add Container form is open.**
   It is disabled mid-edit deliberately - the form writes to whichever container is selected, so
   clicking another one while editing used to save this container's details over that one - but

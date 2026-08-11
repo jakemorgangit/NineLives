@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -321,8 +321,14 @@ public partial class ServerCredentialViewModel : ObservableObject
         if (IdentityToCreate == BlobCredentialIdentity.SharedAccessSignature &&
             string.IsNullOrEmpty(sasToken))
         {
+            // Says which secret is missing (#370). An S3 container stores an access key pair,
+            // and being told to refresh a SAS token it never had is a wild goose chase.
             Reported?.Invoke(
-                "No SAS token stored for this container. Add or refresh the token in Blob Storage config.",
+                Container.IsS3
+                    ? "No access key pair stored for this bucket. Add or refresh the key id and " +
+                      "secret key in Blob Storage config."
+                    : "No SAS token stored for this container. Add or refresh the token in " +
+                      "Blob Storage config.",
                 true);
             return;
         }

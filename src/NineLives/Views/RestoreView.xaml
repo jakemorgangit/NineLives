@@ -1917,7 +1917,11 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <TextBlock Text="BLOB CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
+                                    <!-- Not "BLOB CREDENTIAL" (#370): this is the credential
+                                         the INSTANCE authenticates with, and it is created the
+                                         same way for a bucket as for a container - only the
+                                         IDENTITY inside it differs. -->
+                                    <TextBlock Text="STORAGE CREDENTIAL ON SERVER" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
                                     <!-- Not connected: verify credential by connecting -->
                                     <StackPanel Visibility="{Binding IsConnectedToServer, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                                         <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
