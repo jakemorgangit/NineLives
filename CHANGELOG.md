@@ -12,6 +12,27 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Save output on the execution console writes what its tooltip promises** (#370). It offered
+  "a header naming the server, the target database and the outcome" and wrote the raw console:
+  no header, and - the part that matters - no redaction. The method that built exactly that
+  header, and put it through the same redactor the operation log uses, existed and was called
+  from nowhere. A file people attach to change tickets was going out with SAS signatures still
+  in it.
+
+- **Every restore says whether the target has room** (#370). The free-space check had one
+  caller - the optional Get file names button - so whether a restore was checked at all
+  depended on whether somebody happened to press it, on a screen whose own comment calls
+  running out of disk "the worst outcome this screen can produce". It now reports on every run,
+  in the run's own log, including saying plainly when it could not check. Still a warning
+  rather than a refusal: it reads another instance's view of another machine's storage, and one
+  that under-reports must not be able to block a restore that would have worked.
+
+- **Three documents pointed at screens that do not exist** (#370). The bug report template said
+  the log folder button is on About; it is on Settings, so reports arrived without the single
+  most useful attachment. CONTRIBUTING and SECURITY cited `Services/` and `Models/` inside the
+  app project - the services are in `NineLives.Core` and that Models folder does not exist -
+  and both said "Help → About" in an app with no menu bar.
+
 - **The Backup and Copy consoles no longer vanish when the run ends** (#358). Both were bound to
   "a run is in progress", so the panel holding SQL Server's own account of what happened
   collapsed at the moment its contents started to matter. The error text left behind on the

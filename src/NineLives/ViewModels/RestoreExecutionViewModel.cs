@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using Blackcat.NineLives.Models;
@@ -688,6 +688,17 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     [RelayCommand]
     private void CopyConsole() => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
 
+    /// <summary>
+    /// Builds the file Save output writes: the console, plus the context needed to read it a week
+    /// later, redacted (#370).
+    ///
+    /// Supplied by the restore screen, because every fact in that header - which server, which
+    /// target, which chain - lives up there and none of it is visible from a console. Null in a
+    /// context that has no such screen, in which case the raw console is still saved: a log with
+    /// no header beats a Save button that does nothing.
+    /// </summary>
+    internal Func<string>? BuildSavedDocument { get; set; }
+
     [RelayCommand]
     private void SaveConsole()
     {
@@ -704,7 +715,11 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
         try
         {
-            File.WriteAllText(dialog.FileName, Console.Text);
+            // Not Console.Text (#370). The tooltip on this button promises "a header naming the
+            // server, the target database and the outcome", and the method that builds exactly
+            // that - and runs it through LogRedactor, for the same reason the operation log is
+            // redacted: this file gets attached to tickets - existed and was called from nowhere.
+            File.WriteAllText(dialog.FileName, BuildSavedDocument?.Invoke() ?? Console.Text);
             SetStatus($"Execution log saved to {dialog.FileName}");
         }
         catch (Exception ex)

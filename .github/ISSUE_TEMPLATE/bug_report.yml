@@ -83,6 +83,6 @@ body:
     attributes:
       label: Log
       description: >
-        **Open log folder** on the About screen. Secrets are already stripped, but names are not,
-        so have a read before pasting.
+        **Open log folder** on the Settings screen. Secrets are already stripped, but names are
+        not, so have a read before pasting.
       render: text
