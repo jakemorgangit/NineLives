@@ -31,6 +31,7 @@
          What each one does is decided on MainViewModel, not bound straight to a screen's command -
          see the comment there. -->
     <Window.InputBindings>
+        <KeyBinding Modifiers="Ctrl" Key="D0" Command="{Binding NavigateToCommand}" CommandParameter="Home" />
         <KeyBinding Modifiers="Ctrl" Key="D1" Command="{Binding NavigateToCommand}" CommandParameter="Blob Storage" />
         <KeyBinding Modifiers="Ctrl" Key="D2" Command="{Binding NavigateToCommand}" CommandParameter="SQL Servers" />
         <KeyBinding Modifiers="Ctrl" Key="D3" Command="{Binding NavigateToCommand}" CommandParameter="Browse Backups" />
@@ -49,6 +50,9 @@
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
         <converters:EnumToBoolConverter x:Key="EnumToBool" />
 
+        <DataTemplate DataType="{x:Type vm:HomeViewModel}">
+            <views:HomeView />
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:BlobConfigViewModel}">
             <views:BlobConfigView />
         </DataTemplate>
@@ -265,6 +269,17 @@
 
                     <!-- Navigation -->
                     <StackPanel DockPanel.Dock="Top" Margin="0,8,0,0">
+                        <!-- Above the section headers: the front door belongs to no section (#343). -->
+                        <RadioButton Style="{StaticResource SidebarButton}"
+                                     IsChecked="{Binding CurrentViewName, Converter={StaticResource EnumToBool}, ConverterParameter='Home'}"
+                                     Command="{Binding NavigateToCommand}"
+                                     CommandParameter="Home">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x2302;" FontSize="15" VerticalAlignment="Center" Width="24" />
+                                <TextBlock Text="Home" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
                         <TextBlock Text="CONFIGURATION"
                                    FontSize="10" FontWeight="Bold"
                                    Foreground="{DynamicResource DisabledTextBrush}"

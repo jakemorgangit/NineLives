@@ -1,0 +1,179 @@
+<UserControl x:Class="Blackcat.NineLives.Views.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:Blackcat.NineLives.Converters">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- The get-going step cards. -->
+        <Style x:Key="StepCard" TargetType="Border" BasedOn="{StaticResource CardBorder}">
+            <Setter Property="Padding" Value="20" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+        </Style>
+
+        <Style x:Key="StepNumber" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="StepTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="StepText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+
+        <!-- The everything-else pointers: smaller, quieter. -->
+        <Style x:Key="FeatureCard" TargetType="Border" BasedOn="{StaticResource CardBorder}">
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,12,12" />
+            <Setter Property="Width" Value="292" />
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="940" Margin="32,24,32,32" HorizontalAlignment="Center">
+
+            <!-- Who this is -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <ContentControl Template="{StaticResource NineLivesLogo}" Height="52" Margin="0,0,16,0" />
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource LogoWordmark}" FontSize="24">
+                        <Run Text="N I N E" Foreground="{DynamicResource PrimaryTextBrush}" />
+                        <Run Text=" " />
+                        <Run Text="L I V E S" Foreground="{DynamicResource AccentBrush}" />
+                    </TextBlock>
+                    <TextBlock Text="RESTORE | RECOVER | RESUME"
+                               FontSize="11"
+                               Foreground="{DynamicResource SecondaryTextBrush}" />
+                </StackPanel>
+            </StackPanel>
+
+            <TextBlock Style="{StaticResource StepText}" FontSize="13" Margin="0,10,0,24"
+                       Text="Nine Lives finds the SQL Server backups in your storage - an Azure Blob container or any S3-compatible bucket - works out the restore chains, and turns any moment you pick into a script you can read, run from here with live progress, or hand to an agent job. Everything it executes is receipted in History, and nothing destructive runs without being asked twice." />
+
+            <!-- Get going -->
+            <TextBlock Text="GET GOING" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+            <UniformGrid Columns="3" Margin="0,0,-12,20">
+                <Border Style="{StaticResource StepCard}">
+                    <StackPanel>
+                        <TextBlock Text="1" Style="{StaticResource StepNumber}" />
+                        <TextBlock Text="Add your storage" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}"
+                                   Text="Point the app at where the backups live. The credential - a SAS token or an S3 access key pair - is proven against the container and stored in Windows Credential Manager." />
+                        <Button Content="Open Blob Storage"
+                                Style="{StaticResource PrimaryButton}"
+                                HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}"
+                                CommandParameter="Blob Storage" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StepCard}">
+                    <StackPanel>
+                        <TextBlock Text="2" Style="{StaticResource StepNumber}" />
+                        <TextBlock Text="Add a SQL Server" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}"
+                                   Text="The instance restores will land on. Windows or SQL authentication; the connection and its permissions are proven in one round trip when it is saved." />
+                        <Button Content="Open SQL Servers"
+                                Style="{StaticResource PrimaryButton}"
+                                HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}"
+                                CommandParameter="SQL Servers" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StepCard}">
+                    <StackPanel>
+                        <TextBlock Text="3" Style="{StaticResource StepNumber}" />
+                        <TextBlock Text="Restore" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}"
+                                   Text="Pick a database, pick a moment - the app builds the full-diff-log chain, writes the script, and shows it before anything runs. Execute from here, or take the script away." />
+                        <Button Content="Open Restore"
+                                Style="{StaticResource SuccessButton}"
+                                HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}"
+                                CommandParameter="Restore" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <!-- What else the chosen mode offers -->
+            <TextBlock Text="ALSO HERE" Style="{StaticResource LabelText}" Margin="0,0,0,8" />
+            <WrapPanel Margin="0,0,-12,8">
+                <Border Style="{StaticResource FeatureCard}"
+                        Visibility="{Binding ShowBrowseBackups, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Browse Backups" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}" Margin="0,0,0,10"
+                                   Text="Look inside a container - or at what a server has recorded backing up - without restoring anything." />
+                        <Button Content="Open" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}" CommandParameter="Browse Backups" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCard}"
+                        Visibility="{Binding ShowBrowseBackups, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Exposure" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}" Margin="0,0,0,10"
+                                   Text="How exposed is the estate right now? Every server's most recent restorable moment, worst first." />
+                        <Button Content="Open" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}" CommandParameter="Exposure" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCard}"
+                        Visibility="{Binding ShowBackup, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Back Up" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}" Margin="0,0,0,10"
+                                   Text="To cloud storage or a path the server can write to. COPY_ONLY by default, so production schedules are left alone." />
+                        <Button Content="Open" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}" CommandParameter="Back Up" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCard}"
+                        Visibility="{Binding ShowCopyDatabase, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Copy Database" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}" Margin="0,0,0,10"
+                                   Text="Source to target in one move, through cloud storage or a shared path - backup, chain and restore handled as one action." />
+                        <Button Content="Open" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}" CommandParameter="Copy Database" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCard}">
+                    <StackPanel>
+                        <TextBlock Text="History" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}" Margin="0,0,0,10"
+                                   Text="Every executed run, receipted: what ran, where, how long it took, and whether it worked - from the app or the CLI." />
+                        <Button Content="Open" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
+                                Command="{Binding GoCommand}" CommandParameter="History" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCard}">
+                    <StackPanel>
+                        <TextBlock Text="The CLI: 9lives.exe" Style="{StaticResource StepTitle}" />
+                        <TextBlock Style="{StaticResource StepText}" Margin="0,0,0,10"
+                                   Text="The same engine from a terminal, against the same configuration - scripted restores, rehearsals and provisioning. Start with: 9lives help" />
+                        <TextBlock Text="Ships next to this app's exe."
+                                   FontSize="11" Foreground="{DynamicResource DisabledTextBrush}" />
+                    </StackPanel>
+                </Border>
+            </WrapPanel>
+
+            <TextBlock FontSize="11" Foreground="{DynamicResource DisabledTextBrush}" TextWrapping="Wrap">
+                <Run Text="{Binding VersionText, Mode=OneWay}" />
+                <Run Text=" - this page is under Home in the sidebar. How much of the app is shown is a mode, changed any time from Settings." />
+            </TextBlock>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

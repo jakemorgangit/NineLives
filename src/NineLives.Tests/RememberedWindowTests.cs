@@ -78,35 +78,39 @@ public class RememberedWindowTests
         Assert.Same(main.History, main.CurrentView);
     }
 
-    /// <summary>Nothing recorded still lands on Restore, the app's centre (#209).</summary>
+    /// <summary>
+    /// Nothing recorded lands on the front door (#343). It used to be Restore, the app's
+    /// centre (#209) - but the only people with nothing recorded are the ones who have never
+    /// been anywhere, and they are exactly who the introduction exists for.
+    /// </summary>
     [Fact]
-    public void NothingRecordedLandsOnRestore()
+    public void NothingRecordedLandsOnTheFrontDoor()
     {
         var main = Shell();
 
         main.ModeSelection.CancelCommand.Execute(null);
 
-        Assert.Same(main.Restore, main.CurrentView);
+        Assert.Same(main.Home, main.CurrentView);
     }
 
     /// <summary>
-    /// A screen the current mode no longer offers falls back to Restore - a guess at the nearest
-    /// cousin would be worse than the app's centre.
+    /// A screen the current mode no longer offers falls back to the front door - a guess at
+    /// the nearest cousin would be worse than the screen that shows the mode's actual shape.
     /// </summary>
     [Fact]
-    public void AScreenTheModeDoesNotOfferFallsBackToRestore()
+    public void AScreenTheModeDoesNotOfferFallsBackToTheFrontDoor()
     {
         var main = Shell(AppMode.Basic, MainViewModel.Nav.CopyDatabase);
 
         main.ModeSelection.CancelCommand.Execute(null);
 
-        Assert.Same(main.Restore, main.CurrentView);
+        Assert.Same(main.Home, main.CurrentView);
     }
 
     [Fact]
-    public void GarbageInTheConfigFallsBackToRestore()
+    public void GarbageInTheConfigFallsBackToTheFrontDoor()
     {
-        Assert.Equal(MainViewModel.Nav.Restore, Shell().LandingScreen("No Such Screen"));
+        Assert.Equal(MainViewModel.Nav.Home, Shell().LandingScreen("No Such Screen"));
     }
 
     // ── saving at shutdown ──────────────────────────────────────────────────────
