@@ -13,6 +13,13 @@ public class BackupOptions
     /// <summary>The database to back up, as it is named on the source instance.</summary>
     public string DatabaseName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Full, differential or log (#300). COPY_ONLY applies to full and log backups;
+    /// a differential has no copy-only form and the generator ignores the flag for one -
+    /// a differential does not move the base anyway, which is what COPY_ONLY protects.
+    /// </summary>
+    public BackupType Type { get; set; } = BackupType.Full;
+
     /// <summary>Where it is written. The medium decides TO URL or TO DISK.</summary>
     public BackupMedium Medium { get; set; } = BackupMedium.AzureBlob;
 

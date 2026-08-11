@@ -12,6 +12,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **9lives backup: the other half of the orchestrator** (#300). The CLI could restore,
+  rehearse and judge but not take a backup - and the scriptable case is everywhere: the
+  pre-change safety snapshot with the restore in the same tool, the copy-away before risky
+  maintenance, the nightly extra full to a second container. Full, differential and log
+  (`--type`), striping (`--stripes`), blob container or share, and the app's rules travel:
+  COPY_ONLY by default and LOUD in stderr AND the script header when disabled, destinations
+  from the same layout rules every browser reads, the blob credential preflight before the
+  first statement, generate-only without `--execute`, and the same history receipts and
+  webhooks as every other execution verb
 - **The CLI restore relocates** (#299): `--relocate` moves every file to the target's own
   default data and log directories keeping its original name, and `--data-path` /
   `--log-path` place them explicitly - mirroring the app's WITH MOVE control. The freshly

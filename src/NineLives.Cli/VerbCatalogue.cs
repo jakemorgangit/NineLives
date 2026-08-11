@@ -13,7 +13,7 @@ internal static class VerbCatalogue
     [
         AddServerVerb.Spec, AddContainerVerb.Spec,
         ListVerb.Spec, PointsVerb.Spec, ScriptVerb.Spec, ValidateVerb.Spec, ExposureVerb.Spec,
-        RestoreVerb.Spec, RehearseVerb.Spec
+        BackupVerb.Spec, RestoreVerb.Spec, RehearseVerb.Spec
     ];
 
     public static VerbSpec? Find(string name) => All.FirstOrDefault(
