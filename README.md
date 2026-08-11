@@ -1,4 +1,4 @@
-﻿# Nine Lives 🐈‍⬛
+# Nine Lives 🐈‍⬛
 
 [![Build](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml/badge.svg)](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml)
 
@@ -195,17 +195,17 @@ Two verbs execute, and they are built out of refusals: `restore` and `rehearse` 
 ### Restore Timeline
 ![Screenshot - Restore Timeline](docs/screenshots/restore-timeline.png)
 
-*Visual timeline with clickable restore points. Select any point to see the complete restore chain required.*
+*Every restorable moment in the container, plotted. Click a point - or pick it from the list - and the chain it needs is worked out underneath: which full, which differential, and every log between them.*
 
 ### Restore Options
 ![Screenshot - Restore Options](docs/screenshots/restore-options.png)
 
-*Configure restore options including WITH MOVE with auto-detected server paths, recovery mode, and more.*
+*Recovery mode, WITH REPLACE, point-in-time and marked transactions, and WITH MOVE with the target's own default paths filled in. The banner at the top restates the whole thing in a sentence, and keeps restating it as the options change.*
 
 ### Script Generation & Execution
 ![Screenshot - Script Execution](docs/screenshots/script-execution.png)
 
-*Generate restore scripts or execute directly with real-time progress logging.*
+*The script, in full, before anything runs - copy it, save it, hand it over as an Agent job or a runbook, or execute it here with live progress. It updates as the options above change, so what is on screen is always what would run.*
 
 ## Installation
 
