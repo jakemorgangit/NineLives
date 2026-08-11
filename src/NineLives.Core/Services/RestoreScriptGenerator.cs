@@ -7,6 +7,13 @@ public class RestoreScriptGenerator
 {
     public string Generate(BackupChain chain, RestoreOptions options)
     {
+        // Nothing is written before this (#365). A set with no files produced a statement with
+        // no FROM, which is not a syntax error - it is the valid recovery-only form, and against
+        // a target sitting in RESTORING it recovers the database wherever it had reached and
+        // ends the restore sequence for good.
+        if (DescribeSetWithNoFiles(chain) is string empty)
+            throw new InvalidOperationException(empty);
+
         var sb = new StringBuilder();
 
         // Region is an S3 concept (#51): meaningful only when the chain's devices are s3://,
@@ -48,6 +55,33 @@ public class RestoreScriptGenerator
         AppendFooter(sb);
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The one shape of chain this generator refuses outright (#365): a member with no files at
+    /// all. Returns the reason, or null when every set has something to restore from.
+    ///
+    /// Public because refusing at generation time is the last line, not the first. The restore
+    /// screen asks the same question before it generates, so the user reads a sentence rather
+    /// than catching an exception - but the CLI verbs and the copy screen build chains too, and
+    /// this is the statement that must never be emitted by any of them.
+    ///
+    /// A recovery-only RESTORE is a legitimate thing to write by hand; what makes this dangerous
+    /// is arriving at one by accident, in the middle of a chain, while a database sits in
+    /// RESTORING waiting for the rest of it.
+    /// </summary>
+    public static string? DescribeSetWithNoFiles(BackupChain? chain)
+    {
+        var empty = chain?.AllSets.FirstOrDefault(s => s.Files.Count == 0);
+        if (empty == null) return null;
+
+        return $"The {empty.TypeDisplay.ToLowerInvariant()} backup at " +
+               $"{empty.Timestamp:yyyy-MM-dd HH:mm} has no files recorded against it, so there is " +
+               "nothing to restore from. A statement generated for it would name no device, which " +
+               "SQL Server reads as a recovery-only restore: it would bring the database online " +
+               "at whatever point it had reached and end the restore sequence, and the rest of " +
+               "the chain could not then be applied. Re-scan the container, or pick a different " +
+               "restore point.";
     }
 
     private static void AppendHeader(StringBuilder sb, RestoreOptions options, BackupChain chain)
@@ -106,7 +140,7 @@ public class RestoreScriptGenerator
         AppendFileMoves(sb, options);
 
         sb.AppendLine($"         {recoveryClause},");
-        AppendCommonOptions(sb, options);
+        AppendCommonOptions(sb, options, Recovers(options, moreToFollow));
         sb.AppendLine("GO");
         sb.AppendLine();
     }
@@ -121,7 +155,7 @@ public class RestoreScriptGenerator
         sb.AppendLine($"RESTORE DATABASE {dbName}");
         AppendFromUrls(sb, diffSet, options);
         sb.AppendLine($"         {recoveryClause},");
-        AppendCommonOptions(sb, options);
+        AppendCommonOptions(sb, options, Recovers(options, moreToFollow));
         sb.AppendLine("GO");
         sb.AppendLine();
     }
@@ -154,7 +188,7 @@ public class RestoreScriptGenerator
             sb.AppendLine($"         STOPAT = '{options.StopAt.Value:yyyy-MM-ddTHH:mm:ss}',");
 
         sb.AppendLine($"         {recoveryClause},");
-        AppendCommonOptions(sb, options);
+        AppendCommonOptions(sb, options, Recovers(options, moreToFollow: !isLast));
         sb.AppendLine("GO");
         sb.AppendLine();
     }
@@ -213,14 +247,29 @@ public class RestoreScriptGenerator
         }
     }
 
-    private static void AppendCommonOptions(StringBuilder sb, RestoreOptions options)
+    /// <summary>
+    /// The options every statement in the chain carries.
+    ///
+    /// <paramref name="recovers"/> separates the three that belong to the statement that brings
+    /// the database online from the ones that apply to each RESTORE individually (#364).
+    /// KEEP_REPLICATION is refused outright alongside NORECOVERY - Msg 3031, "Option 'norecovery'
+    /// conflicts with option(s) 'keep_replication'" - so emitting it on every statement made the
+    /// option unusable for any chain longer than one statement, which is every log-shipping and
+    /// replication scenario it exists for. The broker options describe what a database should do
+    /// once it is up, and a database mid-chain is not up.
+    /// </summary>
+    private static void AppendCommonOptions(StringBuilder sb, RestoreOptions options, bool recovers)
     {
-        if (options.KeepReplication)
-            sb.AppendLine("         KEEP_REPLICATION,");
-        if (options.EnableBroker)
-            sb.AppendLine("         ENABLE_BROKER,");
-        if (options.NewBroker)
-            sb.AppendLine("         NEW_BROKER,");
+        if (recovers)
+        {
+            if (options.KeepReplication)
+                sb.AppendLine("         KEEP_REPLICATION,");
+            if (options.EnableBroker)
+                sb.AppendLine("         ENABLE_BROKER,");
+            if (options.NewBroker)
+                sb.AppendLine("         NEW_BROKER,");
+        }
+
         if (options.WithChecksum)
             sb.AppendLine("         CHECKSUM,");
         if (options.ContinueAfterError)
@@ -249,6 +298,17 @@ public class RestoreScriptGenerator
         sb.AppendLine("-- Restore script complete.");
         sb.AppendLine("-- ============================================================");
     }
+
+    /// <summary>
+    /// Whether THIS statement is the one that brings the database online.
+    ///
+    /// Not the same question as "is it the last statement": a chain deliberately left in
+    /// NORECOVERY or STANDBY - a log-shipping secondary, a restore somebody means to add more
+    /// logs to - ends without ever recovering, and the options that describe a running database
+    /// belong on none of its statements.
+    /// </summary>
+    private static bool Recovers(RestoreOptions options, bool moreToFollow)
+        => !moreToFollow && options.RecoveryMode == RecoveryMode.Recovery;
 
     private static string GetRecoveryClause(RestoreOptions options)
     {
