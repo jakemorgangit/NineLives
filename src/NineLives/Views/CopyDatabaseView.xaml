@@ -100,7 +100,8 @@
                                Text="Where the backup is written and then read back from. Blob needs no network path between the two servers; a shared path is faster and costs no egress, where both can reach it." />
 
                     <StackPanel Orientation="Horizontal">
-                        <RadioButton Content="Azure Blob Storage"
+                        <RadioButton Content="Cloud storage"
+                                     ToolTip="A saved container - Azure Blob Storage or an S3-compatible bucket."
                                      GroupName="CopyMedium"
                                      Style="{StaticResource DarkRadioButton}"
                                      IsChecked="{Binding Medium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"

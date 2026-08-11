@@ -172,6 +172,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Changed
 
+- **The screens stopped assuming Azure** (#51). "Azure Blob Storage" as a backup
+  source, destination or browse medium now reads "Cloud storage" - a saved container,
+  whichever provider answers it - across Restore, Back Up, Copy Database and Browse
+  Backups, with labels, empty-states and the delete-container dialog following. The
+  genuinely Azure-specific texts (Entra guidance, SAS specifics) still say Azure,
+  because there they mean it.
+
 - The engine - every service and model - now lives in NineLives.Core, a library with no UI
   framework behind it. Nothing a user can see is different; this is the load-bearing wall for
   the command-line front end (#63), where the same chain calculation, the same preflights and

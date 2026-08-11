@@ -75,7 +75,7 @@
                     </Style>
                 </Border.Style>
                 <StackPanel>
-                    <TextBlock Text="No blob containers configured"
+                    <TextBlock Text="No storage containers configured"
                                Style="{StaticResource SubHeaderText}"
                                Margin="0,0,0,6" />
                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
@@ -102,12 +102,12 @@
                                 Visibility="{Binding ShowMediumChoice, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="WHERE THE BACKUPS LIVE" Style="{StaticResource LabelText}" />
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                            <RadioButton Content="Azure Blob Storage"
+                            <RadioButton Content="Cloud storage"
                                          GroupName="BackupMedium"
                                          Style="{StaticResource DarkRadioButton}"
                                          IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
                                          Margin="0,0,20,0"
-                                         ToolTip="RESTORE FROM URL. Needs a server-side credential, and needs no network path between the two hosts." />
+                                         ToolTip="A saved container - Azure Blob Storage or an S3-compatible bucket. RESTORE FROM URL: needs a server-side credential, and no network path between the two hosts." />
                             <RadioButton Content="A path both servers can see"
                                          GroupName="BackupMedium"
                                          Style="{StaticResource DarkRadioButton}"
@@ -133,7 +133,7 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                            <TextBlock Text="BLOB CONTAINER" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="STORAGE CONTAINER" Style="{StaticResource LabelText}" />
                             <!-- Tag pills here too, not only on the containers screen. This is the
                                  dropdown where "which of these is production" actually gets
                                  decided, and it was the one place the tags did not follow (#117
@@ -1948,7 +1948,7 @@
                                                 Content="{Binding Credential.CreateButtonText}"
                                                 Margin="0,0,0,0" Padding="10,6"
                                                 Style="{StaticResource SecondaryButton}"
-                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. No secret is ever included in the generated script."
+                                                ToolTip="Creates the SQL Server credential for this container URL, or updates an existing one, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. No secret is ever included in the generated script."
                                                 HorizontalAlignment="Left" />
                                     </StackPanel>
                                 </StackPanel>

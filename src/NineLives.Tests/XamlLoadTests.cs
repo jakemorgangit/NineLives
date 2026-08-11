@@ -1424,7 +1424,7 @@ public class XamlLoadTests(WpfFixture wpf)
             var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
             Assert.Empty(vm.Containers);
-            Assert.DoesNotContain("No blob containers configured", shown);
+            Assert.DoesNotContain("No storage containers configured", shown);
         });
     }
 
@@ -1440,7 +1440,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
             var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
-            Assert.Contains("No blob containers configured", shown);
+            Assert.Contains("No storage containers configured", shown);
         });
     }
 

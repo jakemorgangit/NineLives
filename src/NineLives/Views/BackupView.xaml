@@ -14,7 +14,7 @@
             <!-- Header -->
             <StackPanel Margin="0,0,0,20">
                 <TextBlock Text="Back Up a Database" Style="{StaticResource HeaderText}" />
-                <TextBlock Text="Take a backup to Azure Blob Storage or to a path the server can write to. Copy-only by default, so a production differential schedule is left alone."
+                <TextBlock Text="Take a backup to cloud storage or to a path the server can write to. Copy-only by default, so a production differential schedule is left alone."
                            Style="{StaticResource SecondaryText}"
                            TextWrapping="Wrap"
                            Margin="0,4,0,0" />
@@ -127,12 +127,12 @@
 
                     <TextBlock Text="WRITE IT TO" Style="{StaticResource LabelText}" Margin="0,10,0,0" />
                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                        <RadioButton Content="Azure Blob Storage"
+                        <RadioButton Content="Cloud storage"
                                      GroupName="BackupMedium"
                                      Style="{StaticResource DarkRadioButton}"
                                      IsChecked="{Binding Medium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
                                      Margin="0,0,20,0"
-                                     ToolTip="BACKUP TO URL. Needs a credential on the server, and needs no network path between hosts." />
+                                     ToolTip="A saved container - Azure Blob Storage or an S3-compatible bucket. BACKUP TO URL: needs a credential on the server, and no network path between hosts." />
                         <RadioButton Content="A path the server can write to"
                                      GroupName="BackupMedium"
                                      Style="{StaticResource DarkRadioButton}"
