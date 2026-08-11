@@ -115,6 +115,11 @@
                                                Text="{Binding ProvenDisplay}"
                                                ToolTip="When a rehearsal (#238) last PROVED this database restores, and how long the restore plus CHECKDB took - the measured RTO. Arithmetic says what could restore; only a rehearsal says it does." />
 
+                                    <!-- Disabled on an unreachable row, and saying why (#370).
+                                         The handler already refused those with a bare return, so
+                                         the loudest rows on the screen - the ones that sort to the
+                                         top because they are alarms - carried a live button that
+                                         did nothing at all when pressed. -->
                                     <Button Content="Open in Restore"
                                             Command="{Binding DataContext.RestoreFromRowCommand,
                                                       RelativeSource={RelativeSource AncestorType=ItemsControl}}"
@@ -122,7 +127,13 @@
                                             Style="{StaticResource SecondaryButton}"
                                             Padding="10,4" Margin="0,6,0,0"
                                             HorizontalAlignment="Left"
+                                            Visibility="{Binding IsUnreachable, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
                                             ToolTip="Jumps to the Restore screen with this server's backup history loaded and this database selected - one click from seeing to acting. From there, Rehearse proves it." />
+
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
+                                               Margin="0,6,0,0" TextWrapping="Wrap"
+                                               Visibility="{Binding IsUnreachable, Converter={StaticResource BoolToVis}}"
+                                               Text="Nothing can be restored from here until this server answers - fix the connection on the SQL Servers screen." />
                                 </StackPanel>
                             </Grid>
                         </Border>
