@@ -2552,6 +2552,18 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     internal async Task<CredentialPreflight> PreflightAsync(ServerConnection server, Action<string> appendLog)
     {
+        // Can this engine speak S3 at all (#51)? Asked first, and asked here rather than only in
+        // the CLI - which is where it shipped, leaving the app promising a check that only the
+        // other front end performed. A capability, so nothing overrides it: the connector is
+        // either in the engine or it is not.
+        if (S3CapabilityPreflight.UsesS3(RestoreChain))
+        {
+            appendLog("Checking the target can restore from S3-compatible storage...");
+            if (await S3CapabilityPreflight.RefusalAsync(_sqlService, server, RestoreChain)
+                is { } s3Refusal)
+                return CredentialPreflight.Stop(s3Refusal);
+        }
+
         // Both non-blob media end in FROM DISK on the target, so both need the same answer: can
         // the instance that will run the RESTORE actually read these files (#203).
         if (MediumIsSharedPath || MediumIsAdHocFile)
