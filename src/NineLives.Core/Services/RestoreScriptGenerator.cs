@@ -12,9 +12,10 @@ public class RestoreScriptGenerator
         // Region is an S3 concept (#51): meaningful only when the chain's devices are s3://,
         // and a stale value from a previous source must not leak into another provider's
         // statements.
-        var s3 = chain.FullSet.Files.Any(f =>
-            !f.IsOnDisk && f.BlobUrl.StartsWith("s3://", StringComparison.OrdinalIgnoreCase));
-        if (!s3) options.S3Region = null;
+        // The whole chain, and read from the device the RESTORE will name (#375): a chain can
+        // span containers, and a set read from an instance's history keeps its URL in a
+        // different field than one discovered by listing.
+        if (!S3CapabilityPreflight.UsesS3(chain)) options.S3Region = null;
 
         var dbName = EscapeName(options.TargetDatabaseName);
         var hasDiffs = chain.DiffSets.Count > 0;
@@ -174,9 +175,12 @@ public class RestoreScriptGenerator
         {
             var file = set.Files[i];
 
-            var device = file.IsOnDisk
+            // Asked of the device string, not of which field held it (#375). A backup written
+            // to a bucket and read back from the instance's own msdb carries its s3:// URL in
+            // LocalPath, which made IsOnDisk true and emitted DISK = N's3://...'.
+            var device = BackupDevice.IsPath(file.RestoreDevice)
                 ? $"DISK = N'{TSql.EscapeLiteral(file.RestoreDevice)}'"
-                : $"URL = N'{TSql.EscapeLiteral(BlobUrlEncoder.Encode(file.BlobUrl))}'";
+                : $"URL = N'{TSql.EscapeLiteral(BlobUrlEncoder.Encode(file.RestoreDevice))}'";
 
             var prefix = i == 0 ? "    FROM" : "        ";
             var suffix = i < set.Files.Count - 1 ? "," : "";

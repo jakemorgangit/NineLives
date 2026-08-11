@@ -180,6 +180,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A bucket path recorded in msdb restores from a URL, not from a disk** (#375). Whether
+  a device is a path or a URL was answered two different ways: the inspection statements
+  read the device string, and the restore generator read which FIELD of the file held it.
+  Those agree for anything discovered by listing a container, and disagree for a backup
+  written to a bucket and later read back from the instance's own history - that arrives
+  with its `s3://` URL in the local-path field, so the generated statement said
+  `DISK = N's3://...'`, which SQL Server cannot open, and the region was stripped off it
+  as well. There is now one rule, in one place, and it asks the device: a UNC prefix or a
+  drive letter is a path and everything else is a URL, so a provider whose scheme nobody
+  has thought of yet is still addressed correctly.
+
 - **A scripted restore creates the credential it authenticates with** (#353). RESTORE
   FROM URL needs a credential on the TARGET instance for the container's URL, and the
   generated script deliberately never carries one - the app writes it from its credential
