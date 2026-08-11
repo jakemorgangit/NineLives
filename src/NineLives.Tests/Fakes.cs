@@ -199,6 +199,9 @@ public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
 
     public string FilePath => "(in memory)";
 
+    /// <summary>Set to play a history file that exists and cannot be read (#370).</summary>
+    public bool CouldNotRead { get; set; }
+
     public List<RestoreHistoryEntry> Load() => Entries.ToList();
 
     public void Append(RestoreHistoryEntry entry) => Entries.Insert(0, entry);
