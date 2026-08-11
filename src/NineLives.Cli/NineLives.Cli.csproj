@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- The console front end (#63): the same engine the GUI uses - the same chain calculation,
@@ -13,7 +13,7 @@
          Windows filenames are case-insensitive, so it would collide with the GUI beside it. -->
     <AssemblyName>9lives</AssemblyName>
     <RootNamespace>Blackcat.NineLives.Cli</RootNamespace>
-    <Version>1.6.0</Version>
+    <Version>1.6.1</Version>
     <Product>Nine Lives</Product>
     <Authors>Jake Morgan</Authors>
     <Company>Blackcat Data Solutions Ltd</Company>

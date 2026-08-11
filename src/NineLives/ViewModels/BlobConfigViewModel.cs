@@ -192,6 +192,17 @@ public partial class BlobConfigViewModel : ViewModelBase
     [ObservableProperty]
     private bool _testSuccess;
 
+    /// <summary>
+    /// The connection worked and the container held nothing (#368).
+    ///
+    /// Separate from <see cref="TestSuccess"/> because it is neither outcome: the credential is
+    /// proven, so calling it a failure would send somebody to re-check a SAS token that is fine,
+    /// and the thing they were looking for is not there, so calling it a success is how they end
+    /// up at an empty Browse Backups two screens later with no idea why.
+    /// </summary>
+    [ObservableProperty]
+    private bool _testFoundNothing;
+
     [ObservableProperty]
     private string? _sasExpiryText;
 
@@ -926,6 +937,11 @@ public partial class BlobConfigViewModel : ViewModelBase
     [RelayCommand]
     private async Task TestConnectionAsync()
     {
+        // Cleared here rather than beside the result, because the refusals below return before
+        // ever reaching it - and a stale "found nothing" would paint the next test's error
+        // message in the wrong colour (#368).
+        TestFoundNothing = false;
+
         BlobContainerConfig? config;
         if (IsEditing)
         {
@@ -1011,7 +1027,24 @@ public partial class BlobConfigViewModel : ViewModelBase
             var summary = _blobService.GetContainerSummary(files);
             ContainerSummary = summary;
             TestSuccess = true;
-            TestResult = $"Connected! {summary.TotalFiles} files found ({summary.TotalSizeDisplay})";
+
+            // Reaching a container and finding nothing in it is not the same result as reaching
+            // one full of backups, and "Connected! 0 files found (0 B)" said it in the voice of a
+            // tick (#368). It is the commonest new-user failure there is - a base path that does
+            // not match how the backups are actually laid out - and the cost of dressing it as
+            // success is that the user goes on, and meets an inexplicably empty Browse Backups
+            // two screens later with nothing to connect it to.
+            //
+            // The credential still gets its own sentence, because it IS proven and that is what
+            // the button claims to test. What follows is the next move.
+            TestFoundNothing = summary.TotalFiles == 0;
+            TestResult = TestFoundNothing
+                ? "Connected, but no backups were found in this container. The credential works " +
+                  "and the container exists - so either it is empty, or the backups sit under a " +
+                  "path this container's base path does not cover. Check the base path above " +
+                  "against where the backup job actually writes."
+                : $"Connected! {summary.TotalFiles} " +
+                  $"{(summary.TotalFiles == 1 ? "file" : "files")} found ({summary.TotalSizeDisplay})";
         }
         catch (OperationCanceledException)
         {

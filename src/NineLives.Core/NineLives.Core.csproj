@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- The engine with no UI attached (#63): discovery, chain building, script generation,
@@ -11,7 +11,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>NineLives.Core</AssemblyName>
     <RootNamespace>Blackcat.NineLives</RootNamespace>
-    <Version>1.6.0</Version>
+    <Version>1.6.1</Version>
     <Product>Nine Lives</Product>
     <Authors>Jake Morgan</Authors>
     <Company>Blackcat Data Solutions Ltd</Company>

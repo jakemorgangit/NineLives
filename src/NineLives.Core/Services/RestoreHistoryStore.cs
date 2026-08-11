@@ -9,6 +9,16 @@ public interface IRestoreHistoryStore
     /// <summary>Most recent first. Never throws - an unreadable history is not worth an error dialog.</summary>
     List<RestoreHistoryEntry> Load();
 
+    /// <summary>
+    /// True when the file is there and could not be read (#370).
+    ///
+    /// Load answers an empty list either way, and the two mean opposite things: one is a fresh
+    /// install, the other is a history that exists and is unreadable. Reporting the second as
+    /// "no restores recorded yet" hides it - and then Clear, offered right next to that
+    /// sentence, would overwrite a file that may still hold every receipt.
+    /// </summary>
+    bool CouldNotRead { get; }
+
     /// <summary>Adds one execution. Never throws: recording history must not be able to fail a restore.</summary>
     void Append(RestoreHistoryEntry entry);
 
@@ -117,11 +127,16 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
 
     public string FilePath => _path;
 
+    /// <inheritdoc />
+    public bool CouldNotRead { get; private set; }
+
     public List<RestoreHistoryEntry> Load()
     {
         lock (_gate)
         {
-            return ReadUnlocked() ?? [];
+            var entries = ReadUnlocked();
+            CouldNotRead = entries == null;
+            return entries ?? [];
         }
     }
 

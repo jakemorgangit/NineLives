@@ -59,7 +59,13 @@
                          is SELECTED when Save runs, so clicking another one while editing saved
                          this container's name, URL, credential and tags over that one - silently,
                          with the original left untouched and two containers left sharing a name. -->
+                    <!-- CardListBox for its TEMPLATE, not its look: the default one turns its
+                         background white the moment IsEnabled goes false, and the rows here draw
+                         their text in PrimaryTextBrush - white on white in the dark and
+                         high-contrast themes. The item template and container style below are
+                         local and still win. -->
                     <ListBox ItemsSource="{Binding Containers}"
+                             Style="{StaticResource CardListBox}"
                              IsEnabled="{Binding IsEditing, Converter={StaticResource InverseBool}}"
                              SelectedItem="{Binding SelectedContainer}"
                              Background="Transparent"
@@ -286,12 +292,26 @@
                                             Command="{Binding DeleteCommand}" />
                                 </StackPanel>
 
-                                <!-- Test Result -->
-                                <Border Background="{DynamicResource InputBackgroundBrush}"
-                                        CornerRadius="4"
+                                <!-- Test Result. Reached-but-empty is neither outcome (#368):
+                                     the credential is proven and the thing being looked for is
+                                     not there, so it is styled as the finding it is. -->
+                                <Border CornerRadius="4"
                                         Padding="12,8"
                                         Margin="0,16,0,0"
+                                        BorderThickness="1"
                                         Visibility="{Binding TestResult, Converter={StaticResource NullToVis}}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="Transparent" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding TestFoundNothing}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource WarningPanelBorderBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
                                     <TextBlock Text="{Binding TestResult}"
                                                Style="{StaticResource BodyText}"
                                                TextWrapping="Wrap" />
@@ -828,12 +848,25 @@
                                            Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
-                            <!-- Test Result in Edit Mode -->
-                            <Border Background="{DynamicResource InputBackgroundBrush}"
-                                    CornerRadius="4"
+                            <!-- Test Result in Edit Mode. Same warning state as above (#368) -
+                                 this is the form somebody is on while getting the path right. -->
+                            <Border CornerRadius="4"
                                     Padding="12,8"
                                     Margin="0,16,0,0"
+                                    BorderThickness="1"
                                     Visibility="{Binding TestResult, Converter={StaticResource NullToVis}}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TestFoundNothing}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource WarningPanelBackgroundBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource WarningPanelBorderBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <TextBlock Text="{Binding TestResult}"
                                            Style="{StaticResource BodyText}"
                                            TextWrapping="Wrap" />

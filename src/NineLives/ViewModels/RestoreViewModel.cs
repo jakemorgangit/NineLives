@@ -874,6 +874,10 @@ public partial class RestoreViewModel : ViewModelBase
         // The run reports through the same status line as the rest of the screen, and its cancel
         // state feeds the one Stop button that covers every server call here.
         Execution.CancelStateChanged += RefreshCancelState;
+
+        // What Save output actually writes (#370). The console alone has none of the context and
+        // none of the redaction.
+        Execution.BuildSavedDocument = BuildSavedLog;
         Execution.PropertyChanged += (_, e) =>
         {
             switch (e.PropertyName)
@@ -1903,7 +1907,9 @@ public partial class RestoreViewModel : ViewModelBase
             : !Options.HasStandbyFileIfNeeded
                 ? "STANDBY needs an undo file path - without one the script would end in " +
                   "STANDBY = '', which fails after the database has already been overwritten."
-            : null;
+            // The generator refuses this one outright rather than emitting it (#365); asked here
+            // so the screen explains it instead of surfacing an exception.
+            : RestoreScriptGenerator.DescribeSetWithNoFiles(chain);
 
         ScriptBlockedReason = blocked ?? string.Empty;
 
@@ -2580,7 +2586,50 @@ public partial class RestoreViewModel : ViewModelBase
         var containers = await CheckOtherContainersHaveCredentialsAsync(server, appendLog);
         if (!containers.CanProceed) return containers;
 
+        await ReportSpaceAsync(appendLog);
+
         return await CheckVersionCompatibilityAsync(server, appendLog);
+    }
+
+    /// <summary>
+    /// Puts the free-space answer into the run's own record, every run (#370).
+    ///
+    /// The check itself has one caller - Get file names - so whether a restore was checked for
+    /// room depended on whether somebody had pressed an optional button, on a screen whose own
+    /// comment calls running out of disk "the worst outcome this screen can produce". Its inputs
+    /// are the file sizes RESTORE FILELISTONLY returns, so it genuinely cannot run without that
+    /// read; what it can do is stop being silent about which of the two happened.
+    ///
+    /// A warning, not a refusal, deliberately. This reads someone else's DMV about someone else's
+    /// storage, and an instance that under-reports free space must not be able to block a restore
+    /// that would have worked - the same reasoning that already makes a failure to answer silent
+    /// rather than scary. What changes is that the answer, or its absence, is now on the record
+    /// beside everything else the run did.
+    /// </summary>
+    private async Task ReportSpaceAsync(Action<string> appendLog)
+    {
+        try
+        {
+            if (FetchedFileMoves.Count == 0)
+            {
+                appendLog(
+                    "Free space on the target was not checked - press Get file names before a " +
+                    "restore to have it read the file sizes and compare them with the target's " +
+                    "volumes.");
+                return;
+            }
+
+            await CheckSpaceAsync(CancellationToken.None);
+
+            appendLog(HasSpaceWarning
+                ? $"WARNING: {SpaceWarning}"
+                : "Checked free space on the target: the restored files fit.");
+        }
+        catch (Exception ex)
+        {
+            // Never the reason a restore does not start.
+            _log.Info($"[space] could not check before execute: {ex.Message}");
+        }
     }
 
     /// <summary>

@@ -329,6 +329,10 @@ public partial class MainViewModel : ViewModelBase
             // choice about what the sidebar contains would be answering it twice - and there is no
             // way past it, because leaving would mean an app that has not been told how much of
             // itself to show.
+            //
+            // That last sentence was a claim about intent rather than about the code until #369:
+            // Ctrl+0..9 are bound on the window and stayed live behind the cards, so there were
+            // ten ways past. NavigateTo now refuses while IsChoosingMode.
             IsChoosingMode = true;
             CurrentView = ModeSelection;
         }
@@ -536,6 +540,11 @@ public partial class MainViewModel : ViewModelBase
             case Nav.History:
                 History.Refresh();
                 break;
+            case Nav.Exposure:
+                // The one screen whose whole content is a snapshot of something that changes
+                // underneath it, and F5 did nothing here (#370).
+                if (Exposure.RefreshCommand.CanExecute(null)) Exposure.RefreshCommand.Execute(null);
+                break;
         }
     }
 
@@ -552,6 +561,13 @@ public partial class MainViewModel : ViewModelBase
     private void CancelCurrent()
     {
         if (Restore.Execution.CancelCommand.CanExecute(null)) { Restore.Execution.CancelCommand.Execute(null); return; }
+
+        // The other two screens that RUN something long, and that Esc did not reach (#370). A
+        // backup and a copy are both writing while they run, which puts them above the reads
+        // below rather than below them - the ordering here is cost of letting it continue.
+        if (Backup.IsRunning) { Backup.CancelCommand.Execute(null); return; }
+        if (CopyDatabase.IsRunning) { CopyDatabase.CancelCommand.Execute(null); return; }
+
         if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
         if (Restore.CancelLoadCommand.CanExecute(null)) { Restore.CancelLoadCommand.Execute(null); return; }
         if (Exposure.CanCancelSweep) Exposure.StopSweepCommand.Execute(null);
@@ -586,6 +602,19 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void NavigateTo(string viewName)
     {
+        // The mode cards are a gate, not a screen (#369). Ctrl+0..9 are bound on the Window and
+        // stay live behind them, so a keystroke landed on Blob Storage with the sidebar collapsed
+        // to zero width, no mode chosen, no navigation and no way back to the cards - an app that
+        // had to be restarted, and one that would not even record which screen it was on. Both
+        // internal callers clear the flag before navigating, so this refuses only the keyboard.
+        if (IsChoosingMode) return;
+
+        // A mode that hides a screen hides it from the keyboard too (#369). Basic mode's sidebar
+        // offers neither Back Up nor Browse Backups, and Ctrl+4 and Ctrl+3 reached both. Home
+        // rather than nothing, the same fallback OnModeChanged uses, so the key still does
+        // something explicable.
+        if (!IsViewAvailable(viewName)) viewName = Nav.Home;
+
         CurrentViewName = viewName;
         CurrentView = viewName switch
         {

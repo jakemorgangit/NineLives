@@ -199,6 +199,9 @@ public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
 
     public string FilePath => "(in memory)";
 
+    /// <summary>Set to play a history file that exists and cannot be read (#370).</summary>
+    public bool CouldNotRead { get; set; }
+
     public List<RestoreHistoryEntry> Load() => Entries.ToList();
 
     public void Append(RestoreHistoryEntry entry) => Entries.Insert(0, entry);
@@ -250,8 +253,13 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make the restore fail the way a real one does.</summary>
     public Exception? ExecuteThrows { get; set; }
 
+    /// <summary>Refuse the connection, for the screens that have to explain one (#357).</summary>
+    public Exception? TestConnectionThrows { get; set; }
+
     public Task<bool> TestConnectionAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(true);
+        => TestConnectionThrows != null
+            ? Task.FromException<bool>(TestConnectionThrows)
+            : Task.FromResult(true);
 
     public Task<bool?> WouldConnectWithCertificateValidationAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult<bool?>(true);
@@ -763,5 +771,30 @@ internal static class RestoreSetup
     {
         vm.Inventory.SelectedDatabaseName ??= vm.Inventory.DiscoveredDatabases.FirstOrDefault();
         vm.Timeline.SelectedPoint ??= vm.Timeline.Points.LastOrDefault();
+    }
+}
+
+/// <summary>
+/// A MainViewModel past the mode cards - where a test about screens wants to start (#369).
+///
+/// The cards are the landing screen on EVERY launch, not just the first, and navigation is now
+/// refused behind them: Ctrl+1..9 stay bound on the window, and a keystroke used to land on a
+/// screen with the sidebar collapsed to zero width, no mode chosen and no way back.
+///
+/// So a test that constructs a MainViewModel and navigates straight away is staging a state the
+/// app does not have. Choosing a mode is what a first-run user does, and it is the one route past
+/// the cards that works whether or not a mode was saved.
+/// </summary>
+public static class Launched
+{
+    public static MainViewModel App(AppMode mode = AppMode.Pro) =>
+        App(new FakeCredentialStore(), mode);
+
+    public static MainViewModel App(FakeCredentialStore store, AppMode mode = AppMode.Pro)
+    {
+        var main = new MainViewModel(store);
+        main.ModeSelection.ChooseCommand.Execute(
+            main.ModeSelection.Cards.Single(c => c.Mode == mode));
+        return main;
     }
 }

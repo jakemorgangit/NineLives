@@ -1,8 +1,8 @@
 # Security policy
 
-Nine Lives holds Azure SAS tokens and SQL Server passwords, and it generates and runs T-SQL against
-instances you point it at — usually with rights to drop and replace databases. Security reports are
-taken seriously here.
+Nine Lives holds Azure SAS tokens, S3 access key pairs, SQL Server passwords and webhook URLs, and
+it generates and runs T-SQL against instances you point it at — usually with rights to drop and
+replace databases. Security reports are taken seriously here.
 
 ## Reporting a vulnerability
 
@@ -13,7 +13,7 @@ taken seriously here.
   the fix stay in one place until there's something to release.
 - **jake@blackcat.wales** if you'd rather use email.
 
-Useful things to include: the version (Help → About), what an attacker would gain, and the smallest
+Useful things to include: the version (the About screen), what an attacker would gain, and the smallest
 set of steps that shows it. A proof of concept helps but is not required — a clear description of
 the flaw is enough.
 
@@ -40,9 +40,23 @@ Worth stating plainly, because it determines whether a given finding is a bug or
 
 - **It runs locally as you.** It has whatever access your Windows account has, and no privilege
   boundary of its own.
-- **Secrets live in Windows Credential Manager**, per-user, under `NineLives:Blob:*` and
-  `NineLives:SQL:*`. They are never written to `config.json`, never included in generated scripts,
-  and never sent anywhere except the SQL Server you connect to.
+- **Secrets live in Windows Credential Manager**, per-user, under four prefixes:
+  `NineLives:Blob:*` (SAS tokens, and S3 access key pairs as `AccessKeyId:SecretKey`),
+  `NineLives:SQL:*` (SQL Server passwords), `NineLives:Webhook:*` (one per configured endpoint)
+  and `NineLives:WebhookProxy` (proxy credentials). A webhook URL counts as a secret here: the app
+  never displays one back, and most carry their own token in the path. None are written to
+  `config.json` and none appear in an exported config. Each goes to exactly one place and nowhere
+  else: a SQL password to the instance it belongs to, a SAS token or S3 key pair to the storage
+  endpoint it authenticates against, a webhook URL to the endpoint it addresses.
+- **A generated script never contains a credential.** The server-side `CREDENTIAL` a restore from
+  a URL needs is created on the instance separately, so the script you read before running it is
+  safe to paste into a change ticket.
+- **An Azure container can be reached without a stored secret at all.** Entra ID is supported —
+  interactive sign-in, or `DefaultAzureCredential` for a managed identity or a service principal
+  from the environment — and neither writes anything to Credential Manager. Worth saying here
+  because the usual reason to read this file is to find out whether long-lived SAS tokens are
+  compulsory. They are not. S3-compatible buckets authenticate with an access key pair, which is
+  stored.
 - **`config.json` is trusted input.** It sits in `%LOCALAPPDATA%\NineLives`, is plain text, and has
   no integrity checking. Anything able to write it is already running as you. That said, values
   read from it still get escaped properly before reaching T-SQL — someone who can write that file
@@ -56,9 +70,10 @@ unexpected, or turns untrusted data into executed T-SQL, is.
 
 ### Particularly interested in
 
-- SAS tokens or SQL passwords ending up anywhere other than Credential Manager — logs, the
-  generated script, `config.json`, the clipboard, an error message, a crash dump.
-- Anything that reaches T-SQL without going through `Services/TSql.cs`, or a way past its quoting.
+- Any stored secret — a SAS token, an S3 secret key, a SQL password, a webhook URL — ending up
+  anywhere other than Credential Manager: logs, the generated script, `config.json`, the exported
+  config, the clipboard, an error message, a crash dump.
+- Anything that reaches T-SQL without going through `src/NineLives.Core/Services/TSql.cs`, or a way past its quoting.
 - A restore being aimed at a server or database other than the one shown in the confirmation.
 - Credentials being sent over a connection that isn't validated the way the settings claim.
 
@@ -72,8 +87,6 @@ Not vulnerabilities to report — they're on the list:
   you can verify in the meantime.
 - `TrustServerCertificate` defaults to true
   ([#17](https://github.com/jakemorgangit/NineLives/issues/17)).
-- Entra ID / Managed Identity is not supported yet; SAS tokens only
-  ([#29](https://github.com/jakemorgangit/NineLives/issues/29)).
 
 ## Thank you
 

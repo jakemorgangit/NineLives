@@ -1,4 +1,4 @@
-<UserControl x:Class="Blackcat.NineLives.Views.CopyDatabaseView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.CopyDatabaseView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:Blackcat.NineLives.Converters"
@@ -44,6 +44,24 @@
                                Margin="0,0,0,6" />
                     <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap" LineHeight="22"
                                Text="This is not a copy-only backup, so it resets the differential base on the server being copied FROM. Every differential that database's schedule takes afterwards will depend on the file this writes." />
+                </StackPanel>
+            </Border>
+
+            <!-- What this does to the TARGET (#370). WillOverwriteTheTarget has existed since
+                 this screen was written, with a comment saying this is the part that destroys
+                 something and should be stated rather than buried in a checkbox - and it was
+                 bound nowhere, so the checkbox is exactly where it stayed. -->
+            <Border CornerRadius="6" Padding="14,12" Margin="0,0,0,16"
+                    Background="{DynamicResource DangerBackgroundBrush}"
+                    BorderBrush="{DynamicResource ErrorBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding WillOverwriteTheTarget, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="THIS WILL OVERWRITE THE TARGET DATABASE"
+                               Style="{StaticResource LabelText}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap" LineHeight="22"
+                               Text="{Binding OverwriteWarning}" />
                 </StackPanel>
             </Border>
 
@@ -342,11 +360,17 @@
                         <TextBlock Text="{Binding OutcomeText}" TextWrapping="Wrap" Style="{StaticResource BodyText}" />
                     </Border>
 
+                    <!-- Bound to the output, not to the run (#358). This console is where the
+                         target's recovery explanation and the literal RESTORE ... WITH RECOVERY
+                         statements are printed when the restore half fails - so binding it to
+                         IsRunning collapsed the panel that had just printed the exact statements
+                         needed to get the target out of RESTORING, and the only way back to them
+                         was to re-run a production operation. -->
                     <Border Background="{DynamicResource ConsoleBackgroundBrush}"
                             BorderBrush="{DynamicResource ConsoleBorderBrush}"
                             BorderThickness="1" CornerRadius="4"
                             Margin="0,12,0,0"
-                            Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
+                            Visibility="{Binding HasConsoleOutput, Converter={StaticResource BoolToVis}}">
                         <ScrollViewer MaxHeight="220"
                                       VerticalScrollBarVisibility="Auto"
                                       Padding="12,10,12,10">

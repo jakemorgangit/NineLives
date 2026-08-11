@@ -129,6 +129,32 @@ public sealed class OperationLog
     /// Drops files past the retention window. Called once at startup rather than on every write -
     /// enumerating a directory to append one line would be silly.
     /// </summary>
+    /// <summary>
+    /// How many log files a given retention would delete, without deleting any of them (#370).
+    ///
+    /// Shortening the retention destroys evidence: the screen that offers the setting says in
+    /// its own words that a restore's record lives in these files and a change ticket may need
+    /// it later. Asking first is only reasonable if the question can say what is at stake, and
+    /// asking at all is only reasonable when something actually goes.
+    /// </summary>
+    public int CountPrunable(int retentionDays)
+    {
+        try
+        {
+            if (!System.IO.Directory.Exists(_directory)) return 0;
+
+            var cutoff = DateTime.Now.AddDays(-Math.Max(1, retentionDays));
+            return System.IO.Directory
+                .EnumerateFiles(_directory, "ninelives-*.log")
+                .Count(f => File.GetLastWriteTime(f) < cutoff);
+        }
+        catch
+        {
+            // Counting must not be able to fail the thing that asked.
+            return 0;
+        }
+    }
+
     public void Prune()
     {
         try

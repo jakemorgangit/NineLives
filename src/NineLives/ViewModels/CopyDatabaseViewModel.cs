@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -253,6 +253,18 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// </summary>
     public bool WillOverwriteTheTarget => WithReplace && !string.IsNullOrWhiteSpace(TargetDatabaseName);
 
+    /// <summary>
+    /// What the overwrite actually costs, in the words that matter at the moment of reading it.
+    ///
+    /// Named rather than generic: "this will overwrite the target" is a sentence people's eyes
+    /// slide off, and the whole risk of this screen is doing it to the wrong database.
+    /// </summary>
+    public string OverwriteWarning =>
+        $"'{TargetDatabaseName}' on {TargetServer?.ServerName ?? "the target server"} will be " +
+        "replaced by the copy. Whatever is in it now is gone when the restore starts - not when " +
+        "it finishes - so there is no point after which changing your mind helps. Untick " +
+        "\"Overwrite the target\" to restore under a name that is not in use instead.";
+
     /// <summary>True when the source's own differential schedule is about to be disturbed.</summary>
     public bool WillResetTheDifferentialBase => !CopyOnly;
 
@@ -294,6 +306,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsRefused));
         OnPropertyChanged(nameof(CanGenerate));
         OnPropertyChanged(nameof(WillOverwriteTheTarget));
+        OnPropertyChanged(nameof(OverwriteWarning));
         OnPropertyChanged(nameof(WillResetTheDifferentialBase));
         GenerateCommand.NotifyCanExecuteChanged();
 
@@ -658,6 +671,20 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     public ObservableCollection<string> Console { get; } = [];
 
     /// <summary>
+    /// Whether the console has anything in it - which is not the same as a run being in progress
+    /// (#358).
+    ///
+    /// The console used to be bound to IsRunning, so it collapsed the instant the run ended and
+    /// took SQL Server's own account of the failure with it. The error text left on screen says
+    /// "see the console for each failure", and the console was gone.
+    ///
+    /// Set as lines arrive rather than computed from Console.Count, so it survives the collection
+    /// being repopulated and can be pinned by a test that never touches a view.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hasConsoleOutput;
+
+    /// <summary>
     /// The confirmation, naming BOTH servers.
     ///
     /// The whole point of this screen is that two are involved, so a prompt that names one of them
@@ -703,6 +730,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         IsRunning = true;
         ClearStatus();
         Console.Clear();
+        HasConsoleOutput = false;
         Outcome = CopyOutcome.NotStarted;
         OutcomeText = string.Empty;
 
@@ -1001,9 +1029,21 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// since its console was built; this screen now carries it too. InvokeAsync, not Invoke - a
     /// blocked connection thread is how "live" output arrives in bursts.
     /// </summary>
+
+    /// <summary>
+    /// Write one console line, as the run itself does (#358).
+    ///
+    /// The console outliving its run is a property of the screen, not of a SQL connection, and
+    /// staging a real copy to prove it would need two servers. This writes the same line by the
+    /// same route the run uses.
+    /// </summary>
+    internal void AppendConsoleForTests(string line) => Append(line);
+
     private void Append(string line)
     {
         if (_consoleDispatcher == null || _consoleDispatcher.CheckAccess()) Console.Add(line);
         else _consoleDispatcher.InvokeAsync(() => Console.Add(line));
+
+        HasConsoleOutput = true;
     }
 }

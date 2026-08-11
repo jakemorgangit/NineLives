@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to Nine Lives are recorded here.
 
@@ -8,7 +8,182 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.6.1] - 2026-08-11
+
+### Added
+
+- **`script` can relocate** (#370). `restore` took `--relocate`, `--data-path` and `--log-path`;
+  `script` took none of them, so the workflow the two exist to serve together - generate the
+  script here, hand it to a DBA, run it in the change window on a freshly provisioned machine -
+  silently dropped the WITH MOVE clauses, and the restore failed at run time with a
+  directory-not-found after WITH REPLACE had already dropped the target. Relocation cannot be
+  worked out offline: the logical file names come from RESTORE FILELISTONLY and the default
+  directories come from the instance. So `script` now takes a `--target` used only to ask those
+  two questions, and refuses the relocation flags without one rather than emitting a script that
+  quietly has no MOVE in it.
+
+### Fixed
+
+- **The README says what the app supports on its first screen, and the permissions section
+  covers both providers** (#370). S3 first appeared at line 100 of a 600-line file with no table
+  of contents, so a reader with backups in Wasabi or R2 closed the tab before reaching it. The
+  opening sentence and the media table now name all three media, and a contents strip sits under
+  the badge. "SAS Token Requirements" has become "Storage permissions" and names the S3 key
+  pair's actual permissions - `s3:ListBucket`, `s3:GetObject`, `s3:PutObject` to back up - the
+  `IDENTITY = 'S3 Access Key'` credential, and the SQL Server 2022+ non-Express requirement, all
+  of which were documented nowhere.
+
+- **The server-side credential panel stopped being Azure-only in its wording** (#370). It read
+  "BLOB CREDENTIAL ON SERVER" for a bucket as well as a container, and refusing for a missing
+  secret said "No SAS token stored for this container" - sending somebody to refresh a SAS token
+  an S3 container has never had. It now names the access key pair.
+
+- **The saved-containers list no longer turns white while the Add Container form is open.**
+  It is disabled mid-edit deliberately - the form writes to whichever container is selected, so
+  clicking another one while editing used to save this container's details over that one - but
+  nobody had looked at what "disabled" makes a ListBox look like. WPF's default template swaps
+  its background to a system colour the moment that happens, and a template trigger beats the
+  background set on the control, so the panel went white in every theme while the rows kept
+  drawing their names in white. Reported from the high-contrast theme, where it is unmissable.
+  It now dims instead of recolouring, and a test pins that disabling it must never change its
+  colour.
+
+- **The About screen links to the documentation, the issue tracker and the releases** (#370).
+  The only hyperlink anywhere in the app was blackcat.wales, so a user stuck on a screen had no
+  route to any of it from inside the tool. Its description also called this a restore-only,
+  cloud-only utility - in an app with a Back Up screen, a Copy Database screen and a shared-path
+  medium.
+
+- **Save output on the execution console writes what its tooltip promises** (#370). It offered
+  "a header naming the server, the target database and the outcome" and wrote the raw console:
+  no header, and - the part that matters - no redaction. The method that built exactly that
+  header, and put it through the same redactor the operation log uses, existed and was called
+  from nowhere. A file people attach to change tickets was going out with SAS signatures still
+  in it.
+
+- **Every restore says whether the target has room** (#370). The free-space check had one
+  caller - the optional Get file names button - so whether a restore was checked at all
+  depended on whether somebody happened to press it, on a screen whose own comment calls
+  running out of disk "the worst outcome this screen can produce". It now reports on every run,
+  in the run's own log, including saying plainly when it could not check. Still a warning
+  rather than a refusal: it reads another instance's view of another machine's storage, and one
+  that under-reports must not be able to block a restore that would have worked.
+
+- **Three documents pointed at screens that do not exist** (#370). The bug report template said
+  the log folder button is on About; it is on Settings, so reports arrived without the single
+  most useful attachment. CONTRIBUTING and SECURITY cited `Services/` and `Models/` inside the
+  app project - the services are in `NineLives.Core` and that Models folder does not exist -
+  and both said "Help → About" in an app with no menu bar.
+
+- **The Backup and Copy consoles no longer vanish when the run ends** (#358). Both were bound to
+  "a run is in progress", so the panel holding SQL Server's own account of what happened
+  collapsed at the moment its contents started to matter. The error text left behind on the
+  backup screen reads "see the console for each failure" - and the console it names was gone.
+  On the copy screen it was worse: that console is where the target's recovery explanation and
+  the literal `RESTORE ... WITH RECOVERY` statements are printed when the restore half fails, so
+  the app hid the exact statements needed to get the target out of RESTORING, and the only way
+  back to them was to re-run a production operation. They are now bound to having output.
+
+- **Browse Backups says what went wrong** (#356). It had no error banner and no status line, so
+  every failure on it was silent: an expired SAS, a 403, a DNS failure, a genuinely empty
+  container and never having pressed the button all left the identical empty state, and pressing
+  Load Backups with nothing selected was a button that visibly did nothing at all. The view model
+  had been writing those messages the whole time - into a screen with nothing bound to them.
+
+- **A failed Connect on the SQL Servers screen explains itself** (#357). The message went to the
+  error banner, which lives inside the edit form; the Connect button lives in the panel shown
+  when that form is closed. So on the last step of first run, a typo'd instance name or a wrong
+  password flashed "Connecting..." and returned to a screen with nothing on it - while Test, one
+  button away against the same server, explained itself properly. Connect now writes the same
+  surface Test does, in the same words, since they fail the same way for the same reasons.
+
+- **A container that answers and holds nothing is no longer reported as a success** (#368).
+  "Connected! 0 files found (0 B)" was the commonest new-user failure there is - a base path
+  that does not match how the backups are actually laid out - presented in the voice of a
+  tick. The user goes on, and meets an inexplicably empty Browse Backups two screens later
+  with nothing to connect it to. It now reads as the finding it is, and says the three things
+  worth saying: the credential works, the container exists, and the backups may be under a
+  path this container's base path does not cover. The credential keeps its own sentence
+  deliberately, because it *is* proven and re-checking a working SAS token is its own wasted
+  afternoon.
+
+- **The keyboard cannot escape the first-run mode cards** (#369). Ctrl+0..9 are bound on the
+  window and stayed live behind them, so a keystroke landed on Blob Storage with the sidebar
+  collapsed to zero width, no mode chosen, no navigation and no way back to the cards - an app
+  that had to be restarted, and one that would not even record which screen it was on. The
+  comment beside the cards called them a gate there was no way past; there were ten. The
+  milder version of the same hole: in Basic mode, Ctrl+4 reached the Back Up screen the mode
+  exists to hide, and Ctrl+3 reached Browse Backups. Navigation now refuses while the cards
+  are up, and a screen the mode hides falls back to Home the way narrowing the mode already
+  does.
+
+- **A backup set with no files no longer generates a restore that ends the sequence** (#365).
+  A set discovered with nothing recorded against it produced a RESTORE naming no device -
+  which is not a syntax error but the valid recovery-only form. Run against a target sitting
+  in RESTORING, a log-shipping secondary or a paused restore, it would have brought the
+  database online wherever it had got to and ended the restore sequence for good: no further
+  log applicable, the whole chain to start again. The validator now reports it as an error,
+  the restore screen explains it where the script would be, and the generator refuses rather
+  than emitting it.
+
+- **A striped set missing its first file is caught** (#363). The stripe check returned early
+  on a single-file set, so a set holding only `..._2.bak` - stripe 1 purged by retention or
+  never uploaded - passed clean, while the *same* set as stripes 2 and 3 was correctly
+  flagged. It was blind precisely at its worst case. The question is now asked of the stripe
+  numbers rather than the file count: a lone `_2` says stripe 1 is missing on its own. A set
+  mixing an unnumbered file with a numbered one is caught too, and named.
+
+- **One striped set written to two folders is no longer offered as two restore points**
+  (#363). Multi-directory striping - how a large backup gets spread over two volumes - groups
+  by parent folder, so it arrived as two sets at the same instant, each holding half a media
+  set and each looking complete. A chain that should have offered four restore points offered
+  seven, every one of them restoring from half a set. The halves are now recognised by their
+  stripe numbers: no overlap and together running 1..N means one media set and nothing else.
+  Two genuinely complete backups that share a second each contain a stripe 1, so they are left
+  alone as the warning they are.
+
+- **KEEP_REPLICATION and the broker options only on the statement that recovers** (#364). They
+  were emitted on every statement in the chain while the recovery clause was chosen
+  separately, and SQL Server refuses the combination outright - Msg 3031, "Option 'norecovery'
+  conflicts with option(s) 'keep_replication'". The first statement failed, which made the
+  option unusable for any chain longer than one statement: every log-shipping and replication
+  scenario it exists for. A chain deliberately left in NORECOVERY or STANDBY now carries them
+  nowhere, since it never brings a database online for them to describe.
+
+- **Copy Database says which database it is about to overwrite** (#370). It defaults to
+  overwriting, which is usually the point - a test environment being refreshed - but the
+  only thing saying so was a ticked checkbox. The property that would have said it out
+  loud has existed since the screen was written, with a comment calling this the part
+  that destroys something, and it was bound to nothing. It now names the database and the
+  server, because the risk on this screen is doing it to the wrong one.
+
+- **Esc reaches the two other screens that write, and F5 reaches Exposure** (#370). The
+  stop key stopped a restore and ignored a running backup or copy - both of which are
+  writing while they run - so it worked in one of the three places something is being
+  written. F5 refreshed Restore, Browse and History but not the one screen whose whole
+  content is a snapshot of an estate that moves underneath it.
+
+- **Three things that destroyed something without saying so** (#370). Shortening the log
+  retention deleted files immediately and silently - on the same screen that calls them a
+  restore's own record, needed later by a change ticket. It now says how many would go and
+  asks, and only when something actually would. Removing a webhook took the URL with it on
+  one click; the URL is a secret the app never displays back, and most carry their own
+  token, so that was the only copy - it now asks, like the container and server lists do.
+  And a history file that exists but cannot be read was reported as "No restores recorded
+  yet", which is the opposite fact: Clear sat one press away from writing an empty file
+  over every receipt it holds. The screen now says the file is unreadable and names it,
+  and Clear refuses to touch it.
+
+### Changed
+
+- **Test classes that share a static hook no longer run beside each other** (#348). Nothing
+  a user sees changes. Two test hooks in Core are plain static fields, set by one test class
+  and cleared when it finishes; xUnit runs classes in different collections at the same time,
+  so a second class touching the same field would be handed the first one's fake, or have it
+  removed underneath it mid-test. It has never happened, because only one class drives each
+  hook today - which is exactly what makes it easy to break by writing an ordinary second
+  test, and the failure would read as a network flake on CI rather than a fixture problem.
+  Those classes now share one collection, and a test pins that so it cannot be quietly undone.
 
 ## [1.6.0] - 2026-08-11
 
