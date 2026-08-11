@@ -20,9 +20,9 @@ internal static class RehearseVerb
         "rehearse",
         "Prove a database restores: scratch restore + CHECKDB + drop, receipt in History",
         "9lives rehearse (--container NAME | --server NAME) --database DB --target SERVER " +
-        "[--at \"yyyy-MM-dd HH:mm:ss\"] [--execute]",
+        "[--at \"yyyy-MM-dd HH:mm:ss\"] [--execute] [--json]",
         Valued: ["container", "server", "database", "at", "target"],
-        Switches: ["execute"],
+        Switches: ["json", "execute"],
         Options:
         [
             ("--container NAME", "A blob container configured in the app, as the source."),
@@ -34,7 +34,10 @@ internal static class RehearseVerb
             ("--at TIME", "Prove the chain to this moment. Omitted, the newest reachable " +
                 "point - which is the honest answer to \"could I restore what I have NOW?\""),
             ("--execute", "Actually run it. Without this, the full rehearsal script prints " +
-                "and nothing is touched.")
+                "and nothing is touched."),
+            ("--json", "The proof as data on stdout: outcome, chain, point, the measured " +
+                "duration - the RTO number - and the history id. The artefact a pipeline " +
+                "archives.")
         ],
         Notes:
         [
@@ -154,9 +157,24 @@ internal static class RehearseVerb
                          $"{(stopAt ?? point.Timestamp):yyyy-MM-dd HH:mm:ss}, proving " +
                          $"'{sourceDatabase}' as scratch '{scratch}' on {target.ServerName}.");
 
+        var json = args.Has("json");
+
         if (!args.Has("execute"))
         {
-            output.WriteLine(script);
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "rehearse",
+                    Outcome = "Generated",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    Scratch = scratch,
+                    Chain = point.TypeDisplay,
+                    ProveTo = stopAt ?? point.Timestamp,
+                    Script = script
+                });
+            else
+                output.WriteLine(script);
             errors.WriteLine("Nothing was executed. Add --execute to run the rehearsal.");
             return ExitCodes.Ok;
         }
@@ -182,8 +200,9 @@ internal static class RehearseVerb
             await services.Sql.ExecuteWithProgressAsync(target, script, Progress, ct);
 
             var completedAt = DateTime.Now;
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = target.ServerName,
@@ -196,7 +215,22 @@ internal static class RehearseVerb
                 Outcome = RestoreOutcome.Succeeded,
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "rehearse",
+                    Outcome = "Proven",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    Chain = point.TypeDisplay,
+                    ProvenTo = stopAt ?? point.Timestamp,
+                    StartedAt = startedAt,
+                    CompletedAt = completedAt,
+                    DurationSeconds = Math.Round((completedAt - startedAt).TotalSeconds, 1),
+                    HistoryId = receipt.Id
+                });
 
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Succeeded, "Rehearsal", sourceDatabase, target.ServerName,
@@ -216,8 +250,9 @@ internal static class RehearseVerb
             // interruption may have landed after its restore began.
             var completedAt = DateTime.Now;
             log.AppendLine("Cancelled from the terminal.");
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = target.ServerName,
@@ -231,7 +266,20 @@ internal static class RehearseVerb
                 ErrorMessage = "Cancelled from the terminal.",
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "rehearse",
+                    Outcome = "Cancelled",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    Scratch = scratch,
+                    ScratchRetained = true,
+                    HistoryId = receipt.Id,
+                    Error = "Cancelled from the terminal."
+                });
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Rehearsal", sourceDatabase, target.ServerName,
                 "Cancelled from the terminal.", completedAt - startedAt));
@@ -244,8 +292,9 @@ internal static class RehearseVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine(ex.Message);
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = target.ServerName,
@@ -259,7 +308,20 @@ internal static class RehearseVerb
                 ErrorMessage = ex.Message,
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "rehearse",
+                    Outcome = "NotProven",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    Scratch = scratch,
+                    ScratchRetained = true,
+                    HistoryId = receipt.Id,
+                    Error = ex.Message
+                });
 
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Rehearsal", sourceDatabase, target.ServerName,

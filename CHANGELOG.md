@@ -12,6 +12,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The execution verbs end as data, and receipts know their origin** (#303). `--json` on
+  restore, rehearse and backup puts the ending on stdout machine-shaped: outcome, chain,
+  point reached, measured duration - the rehearsal's proof carrying the real RTO number -
+  warnings, refusals and the history id, while the prose stays on stderr. A pipeline
+  archives the artefact instead of parsing sentences. And every receipt now records which
+  front end acted: History rows say "via CLI", because a 3am scripted restore reads
+  differently in an incident review than a clicked one
 - **Ephemeral mode: an estate defined only in the environment** (#302). `--ephemeral` on
   any verb resolves server and container names against zero-persistence definitions from
   NINELIVES_SERVER, NINELIVES_SQL_USER/PASSWORD, NINELIVES_CONTAINER_URL and NINELIVES_SAS -

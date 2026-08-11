@@ -23,10 +23,10 @@ internal static class RestoreVerb
         "9lives restore (--container NAME | --server NAME) --database DB --target SERVER " +
         "[--at \"yyyy-MM-dd HH:mm:ss\"] [--target-database NAME] [--with-replace] [--norecovery] " +
         "[--relocate | --data-path DIR [--log-path DIR]] " +
-        "[--stop-before-mark NAME | --stop-at-mark NAME] [--execute] [--force]",
+        "[--stop-before-mark NAME | --stop-at-mark NAME] [--execute] [--force] [--json]",
         Valued: ["container", "server", "database", "at", "target", "target-database",
                  "stop-before-mark", "stop-at-mark", "data-path", "log-path"],
-        Switches: ["execute", "with-replace", "norecovery", "force", "relocate"],
+        Switches: ["execute", "with-replace", "norecovery", "force", "relocate", "json"],
         Options:
         [
             ("--container NAME", "A blob container configured in the app, as the source."),
@@ -54,7 +54,10 @@ internal static class RestoreVerb
                 "verdict print and nothing is touched."),
             ("--force", "Override what the EVIDENCE says - version direction, missing TDE " +
                 "certificate, unreadable files - loudly, as warnings. It cannot stand in " +
-                "for --with-replace: evidence is overridable, consent is not.")
+                "for --with-replace: evidence is overridable, consent is not."),
+            ("--json", "The ending as data on stdout - outcome, chain, point, duration, " +
+                "warnings, refusals, history id - in place of the script or beside the " +
+                "prose, which stays on stderr. The run's result as an artefact.")
         ],
         Notes:
         [
@@ -234,9 +237,27 @@ internal static class RestoreVerb
         foreach (var refusal in preflight.Refusals)
             errors.WriteLine($"REFUSED: {refusal}");
 
+        var json = args.Has("json");
+
         if (!args.Has("execute"))
         {
-            output.WriteLine(script);
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "restore",
+                    Outcome = preflight.Refusals.Count > 0 ? "Refused" : "Generated",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    TargetDatabase = targetDatabase,
+                    Chain = point.TypeDisplay,
+                    RestoreTo = stopAt ?? point.Timestamp,
+                    Warnings = preflight.Warnings,
+                    Refusals = preflight.Refusals,
+                    Script = script
+                });
+            else
+                output.WriteLine(script);
+
             errors.WriteLine(preflight.Refusals.Count > 0
                 ? "Nothing was executed - and --execute would be refused for the reasons above."
                 : "Nothing was executed. Add --execute to run this.");
@@ -245,6 +266,17 @@ internal static class RestoreVerb
 
         if (preflight.Refusals.Count > 0)
         {
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "restore",
+                    Outcome = "Refused",
+                    Server = target.ServerName,
+                    Database = sourceDatabase,
+                    TargetDatabase = targetDatabase,
+                    Warnings = preflight.Warnings,
+                    Refusals = preflight.Refusals
+                });
             errors.WriteLine("Not run. Every refusal above must be resolved - or, for the " +
                              "evidence-based ones, deliberately overridden with --force.");
             return ExitCodes.Failed;
@@ -252,16 +284,37 @@ internal static class RestoreVerb
 
         return await ExecuteAsync(
             services, target, script, sourceDatabase, targetDatabase, point, stopAt,
-            chain, args.Get("container"), errors, ct);
+            chain, args.Get("container"), json ? output : null, errors, ct);
     }
 
     private static async Task<int> ExecuteAsync(
         CliServices services, ServerConnection target, string script, string sourceDatabase,
         string targetDatabase, RestorePoint point, DateTime? stopAt, BackupChain chain,
-        string? containerName, TextWriter errors, CancellationToken ct)
+        string? containerName, TextWriter? jsonOut, TextWriter errors, CancellationToken ct)
     {
         var startedAt = DateTime.Now;
         var log = new System.Text.StringBuilder();
+
+        // The run's ending as data (#303), when asked for - stdout carries only this.
+        void EmitResult(string outcome, DateTime completedAt, string historyId, string? error = null)
+        {
+            if (jsonOut == null) return;
+            CliRunResult.Write(jsonOut, new
+            {
+                Verb = "restore",
+                Outcome = outcome,
+                Server = target.ServerName,
+                Database = sourceDatabase,
+                TargetDatabase = targetDatabase,
+                Chain = point.TypeDisplay,
+                RestoredTo = stopAt ?? point.Timestamp,
+                StartedAt = startedAt,
+                CompletedAt = completedAt,
+                DurationSeconds = Math.Round((completedAt - startedAt).TotalSeconds, 1),
+                HistoryId = historyId,
+                Error = error
+            });
+        }
 
         void Progress(string message)
         {
@@ -279,8 +332,9 @@ internal static class RestoreVerb
             await services.Sql.ExecuteWithProgressAsync(target, script, Progress, ct);
 
             var completedAt = DateTime.Now;
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = target.ServerName,
@@ -292,7 +346,9 @@ internal static class RestoreVerb
                 Outcome = RestoreOutcome.Succeeded,
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            EmitResult("Succeeded", completedAt, receipt.Id);
 
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Succeeded, "Restore", sourceDatabase, target.ServerName,
@@ -310,8 +366,9 @@ internal static class RestoreVerb
             // conventional 128+SIGINT so a wrapping script can tell interruption from failure.
             var completedAt = DateTime.Now;
             log.AppendLine("Cancelled from the terminal.");
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = target.ServerName,
@@ -324,7 +381,9 @@ internal static class RestoreVerb
                 ErrorMessage = "Cancelled from the terminal.",
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            EmitResult("Cancelled", completedAt, receipt.Id, "Cancelled from the terminal.");
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Restore", sourceDatabase, target.ServerName,
                 "Cancelled from the terminal - check the target database's state before " +
@@ -338,8 +397,9 @@ internal static class RestoreVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine(ex.Message);
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = target.ServerName,
@@ -352,7 +412,9 @@ internal static class RestoreVerb
                 ErrorMessage = ex.Message,
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            EmitResult("Failed", completedAt, receipt.Id, ex.Message);
 
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Restore", sourceDatabase, target.ServerName,
