@@ -8,6 +8,16 @@ using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.ViewModels;
 
+/// <summary>
+/// The Blob Storage form's provider choice (#51). UI state only - what persists is the
+/// container URL, whose scheme is the provider truth everywhere else in the app.
+/// </summary>
+public enum StorageProviderChoice
+{
+    Azure,
+    S3
+}
+
 public partial class BlobConfigViewModel : ViewModelBase
 {
     private readonly ICredentialStore _credentialStore;
@@ -51,12 +61,31 @@ public partial class BlobConfigViewModel : ViewModelBase
     private string _editSasToken = string.Empty;
 
     /// <summary>
-    /// True when the URL on the form is an s3:// endpoint (#51). The scheme is the provider
-    /// answer everywhere else in the app, so the form reads it the same way: typing an s3://
-    /// URL swaps the SAS section for the key-pair section, live, with nothing to also select.
+    /// True when the URL on the form is an s3:// endpoint (#51). What is SAVED never carries a
+    /// provider field - the URL's scheme is the answer - so this is the truth the form's
+    /// provider choice below has to agree with by the time Save runs.
     /// </summary>
     public bool IsS3Url =>
         EditContainerUrl.TrimStart().StartsWith("s3://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Which provider the form is collecting for. UI state, not a persisted field: the saved
+    /// truth stays the URL's own scheme. This exists because the scheme alone made S3
+    /// invisible on an empty Add Container form - every section defaulted to its Azure shape
+    /// and nothing said a bucket was even possible until an s3:// URL had been typed. The
+    /// choice shows the right sections immediately; typing a URL with a scheme snaps the
+    /// choice to match it (the URL wins - it is what will be saved); a mismatch left standing
+    /// is refused at Save with the fix named.
+    ///
+    /// An enum bound through EnumToBool, exactly like the authentication radios above it: that
+    /// converter answers an uncheck with Binding.DoNothing, which is what keeps the radio
+    /// group's own unchecking from writing junk back through the binding.
+    /// </summary>
+    [ObservableProperty]
+    private StorageProviderChoice _editProvider = StorageProviderChoice.Azure;
+
+    /// <summary>The provider choice as the yes/no every section gate and code branch asks.</summary>
+    public bool EditIsS3 => EditProvider == StorageProviderChoice.S3;
 
     /// <summary>The two halves the form collects for an s3:// container. Combined on save into
     /// the one AccessKeyId:SecretKey string the engine's credential and the vault slot both
@@ -287,10 +316,24 @@ public partial class BlobConfigViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(IsS3Url));
 
+        // A typed scheme decides: the URL is what gets saved, so the provider choice follows
+        // it rather than arguing with it. A URL with no scheme yet moves nothing, so the
+        // choice made on an empty form survives the typing that comes after it.
+        if (IsS3Url) EditProvider = StorageProviderChoice.S3;
+        else if (value.TrimStart().StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            EditProvider = StorageProviderChoice.Azure;
+
+        CheckForUnsavedChanges();
+    }
+
+    partial void OnEditProviderChanged(StorageProviderChoice value)
+    {
+        OnPropertyChanged(nameof(EditIsS3));
+
         // An s3:// endpoint has exactly one way in - the key pair - so the Entra choices
         // vanish from the form and the mode snaps back rather than silently riding along on
         // a container that can never use it (#51).
-        if (IsS3Url && EditAuthMode != BlobAuthMode.SasToken)
+        if (value == StorageProviderChoice.S3 && EditAuthMode != BlobAuthMode.SasToken)
             EditAuthMode = BlobAuthMode.SasToken;
 
         if (IsEditing) UpdateSasExpiryStatusForForm();
@@ -327,7 +370,7 @@ public partial class BlobConfigViewModel : ViewModelBase
 
         // Whichever credential the form is collecting - the SAS box or the key-pair halves -
         // counts the same way: against the stored sentinel, anything entered is a change.
-        var enteredSecret = IsS3Url ? ComposedS3Pair : EditSasToken;
+        var enteredSecret = EditIsS3 ? ComposedS3Pair : EditSasToken;
         var sasChanged = _originalSas == StoredSasSentinel
             ? !string.IsNullOrEmpty(enteredSecret)
             : enteredSecret != _originalSas;
@@ -393,7 +436,7 @@ public partial class BlobConfigViewModel : ViewModelBase
     /// change what kind of credential is even in play.</summary>
     private void UpdateSasExpiryStatusForForm()
     {
-        if (IsS3Url)
+        if (EditIsS3)
         {
             SasExpiryText = string.Empty;
             IsSasExpired = false;
@@ -409,7 +452,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         // A key pair has no se= to read: it does not expire on a schedule the app can see, and
         // an expiry line against it would send someone hunting for a token that does not exist
         // (#51). Same reasoning as Entra below.
-        if ((IsEditing && IsS3Url) || (!IsEditing && container.IsS3))
+        if ((IsEditing && EditIsS3) || (!IsEditing && container.IsS3))
         {
             SasExpiryText = string.Empty;
             IsSasExpired = false;
@@ -580,6 +623,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = string.Empty;
         EditTags = string.Empty;
         EditContainerUrl = string.Empty;
+        EditProvider = StorageProviderChoice.Azure;
         EditAuthMode = BlobAuthMode.SasToken;
         EditSasToken = string.Empty;
         EditS3KeyId = string.Empty;
@@ -607,6 +651,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = SelectedContainer.Name;
         EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        EditProvider = SelectedContainer.IsS3 ? StorageProviderChoice.S3 : StorageProviderChoice.Azure;
         EditAuthMode = SelectedContainer.AuthMode;
         var storedToken = _credentialStore.GetSasToken(SelectedContainer);
         HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
@@ -645,10 +690,18 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
 
         bool haveTokenToSave;
-        if (IsS3Url)
+        if (EditIsS3)
         {
             // The URL and the pair are both shape-checked here, at entry - a malformed one
-            // refused now is an authentication failure that never happens later (#51).
+            // refused now is an authentication failure that never happens later (#51). The
+            // saved truth is the URL's scheme, so the provider choice and the URL must agree
+            // before anything persists.
+            if (!IsS3Url)
+            {
+                SetError("S3-compatible storage is selected, but the URL is not an s3:// one. "
+                    + "An S3 container URL is s3://endpoint[:port]/bucket.");
+                return;
+            }
             if (S3Url.TryParse(EditContainerUrl.TrimEnd('/')) == null)
             {
                 SetError("An s3:// container URL is s3://endpoint[:port]/bucket - the endpoint "
@@ -678,6 +731,14 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
         else
         {
+            // The mirror of the check above: an s3:// URL with Azure selected is a mismatch
+            // someone should resolve, not a guess the save should make.
+            if (IsS3Url)
+            {
+                SetError("This URL is s3:// - S3-compatible storage. Select that above, or "
+                    + "paste an https:// Azure container URL.");
+                return;
+            }
             haveTokenToSave = IsSasAuth && !string.IsNullOrWhiteSpace(EditSasToken);
             if (IsNew && IsSasAuth && !haveTokenToSave)
             {
@@ -687,7 +748,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         }
 
         // Addressing, not a secret - and null clears a stale region when the URL stops being s3.
-        var s3Region = IsS3Url && !string.IsNullOrWhiteSpace(EditS3Region)
+        var s3Region = EditIsS3 && !string.IsNullOrWhiteSpace(EditS3Region)
             ? EditS3Region.Trim()
             : null;
 
@@ -767,7 +828,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             {
                 // For an s3:// container the two halves leave the form as the one string the
                 // engine's CREATE CREDENTIAL wants - the same slot the SAS occupies (#51).
-                _credentialStore.SaveSasToken(container, IsS3Url ? ComposedS3Pair : EditSasToken);
+                _credentialStore.SaveSasToken(container, EditIsS3 ? ComposedS3Pair : EditSasToken);
             }
             catch (Exception ex)
             {
@@ -836,6 +897,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         if (SelectedContainer == null) return;
         EditName = SelectedContainer.Name;
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        EditProvider = SelectedContainer.IsS3 ? StorageProviderChoice.S3 : StorageProviderChoice.Azure;
         HasStoredSasToken = true; // Still have a token; user will replace it
         EditSasToken = string.Empty;
         EditS3KeyId = string.Empty;
@@ -866,12 +928,20 @@ public partial class BlobConfigViewModel : ViewModelBase
         BlobContainerConfig? config;
         if (IsEditing)
         {
-            if (IsS3Url)
+            if (EditIsS3)
             {
                 // Built from the form, so what is tested is exactly what is on screen - the
                 // URL and region included, which matters when the region is the thing being
                 // fixed. The pair comes from the form when entered, else the stored one; in
                 // memory only either way, same rule as the SAS below (#12).
+                if (S3Url.TryParse(EditContainerUrl.TrimEnd('/')) == null)
+                {
+                    TestSuccess = false;
+                    TestResult = "An s3:// container URL is s3://endpoint[:port]/bucket - "
+                        + "fix the URL and test again.";
+                    return;
+                }
+
                 var pair = ComposedS3Pair.Length > 0
                     ? ComposedS3Pair
                     : SelectedContainer != null ? _credentialStore.GetSasToken(SelectedContainer) : null;

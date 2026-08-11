@@ -370,18 +370,43 @@
                                           Style="{StaticResource TagPillList}"
                                           Margin="0,0,0,16" />
 
+                            <!-- Asked up front so the right sections show before a URL exists -
+                                 the scheme alone made S3 invisible on an empty form. What is
+                                 SAVED still carries no provider field: the URL's scheme is the
+                                 truth, a typed scheme snaps this choice, and Save refuses a
+                                 mismatch left standing. -->
+                            <TextBlock Text="STORAGE PROVIDER" Style="{StaticResource LabelText}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,16">
+                                <RadioButton Content="Azure Blob Storage"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditProvider, Converter={StaticResource EnumToBool}, ConverterParameter=Azure}"
+                                             GroupName="StorageProvider"
+                                             Margin="0,0,24,0"
+                                             ToolTip="An https:// container URL, reached with a SAS token or an Entra ID sign-in." />
+                                <RadioButton Content="S3-compatible"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditProvider, Converter={StaticResource EnumToBool}, ConverterParameter=S3}"
+                                             GroupName="StorageProvider"
+                                             ToolTip="AWS S3, Wasabi, Backblaze B2, Cloudflare R2 or a storage appliance speaking the S3 API. An s3:// URL, reached with an access key pair. Restoring from it needs SQL Server 2022+ (not Express)." />
+                            </StackPanel>
+
                             <TextBlock Text="CONTAINER URL" Style="{StaticResource LabelText}" />
-                            <TextBlock Text="e.g. https://myaccount.blob.core.windows.net/backups - or s3://s3.eu-west-2.amazonaws.com/backups for S3-compatible storage"
+                            <TextBlock Text="e.g. https://myaccount.blob.core.windows.net/backups"
                                        Style="{StaticResource SecondaryText}"
-                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                       Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                            <TextBlock Text="s3://endpoint[:port]/bucket - e.g. s3://s3.eu-west-2.amazonaws.com/backups"
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                       Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}}" />
                             <TextBox Text="{Binding EditContainerUrl, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,16" />
 
-                            <!-- The URL's scheme picks the provider (#51), so an s3:// container
-                                 has nothing to choose here: the pair is the one way in, and the
-                                 Entra options would be noise against a bucket. -->
-                            <StackPanel Visibility="{Binding IsS3Url, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                            <!-- An s3:// container has nothing to choose here: the pair is the
+                                 one way in, and the Entra options would be noise against a
+                                 bucket (#51). -->
+                            <StackPanel Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                             <TextBlock Text="AUTHENTICATION" Style="{StaticResource LabelText}" />
                             <StackPanel Margin="0,4,0,16">
                                 <RadioButton Content="SAS token"
@@ -423,7 +448,7 @@
                             <!-- The key pair, two boxes combining into the one string the
                                  engine's CREATE CREDENTIAL wants (#51). Stored together in the
                                  SAS slot; like the SAS, never displayed once stored. -->
-                            <StackPanel Visibility="{Binding IsS3Url, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Text="ACCESS KEY PAIR" Style="{StaticResource LabelText}" />
                                 <TextBlock Text="A key pair is stored securely and cannot be displayed. Enter a new pair below to replace it."
                                            Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
@@ -468,7 +493,7 @@
                                          Margin="0,0,0,16" />
                             </StackPanel>
 
-                            <StackPanel Visibility="{Binding IsS3Url, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                            <StackPanel Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                             <StackPanel Visibility="{Binding IsSasAuth, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="SAS TOKEN" Style="{StaticResource LabelText}" />
                             <TextBlock Text="Token is stored securely and cannot be displayed. Enter a new token below to replace it."

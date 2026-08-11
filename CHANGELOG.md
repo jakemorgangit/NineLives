@@ -12,6 +12,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The Add Container form asks the provider question up front** (#51). A Storage
+  Provider choice - Azure Blob Storage or S3-compatible - sits above the URL, so the
+  key-pair and region fields are on screen before any URL has been typed; the
+  scheme-driven swap alone left S3 invisible on an empty form. Nothing new is stored:
+  the URL's scheme stays the truth, a typed scheme still snaps the choice to match,
+  and a mismatch left standing is refused at save with the fix named.
+
 - **S3-compatible object storage, the screen half** (#51). The Blob Storage screen reads the
   URL's scheme the way everything else does: type an `s3://` URL and the SAS section becomes
   the key-pair boxes - access key id and secret key, combined on save into the engine's own

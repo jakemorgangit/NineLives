@@ -34,10 +34,10 @@ public class S3ConfigScreenTests
         return container;
     }
 
-    // ── the scheme drives the form ──────────────────────────────────────────────
+    // ── the provider choice and the scheme agree ────────────────────────────────
 
     [Fact]
-    public void TypingAnS3UrlSnapsTheAuthModeToTheKeyPair()
+    public void TypingAnS3UrlSelectsTheProviderAndSnapsTheAuthMode()
     {
         var vm = NewViewModel();
         vm.AddNewCommand.Execute(null);
@@ -46,8 +46,69 @@ public class S3ConfigScreenTests
         vm.EditContainerUrl = "s3://storage.example.com/backups";
 
         Assert.True(vm.IsS3Url);
+        Assert.True(vm.EditIsS3);
         // Entra cannot reach a bucket - the mode snaps back rather than riding along silently.
         Assert.Equal(BlobAuthMode.SasToken, vm.EditAuthMode);
+    }
+
+    /// <summary>
+    /// The reason the choice exists at all: on an empty Add Container form the scheme has not
+    /// been typed yet, so without an explicit selection every section defaulted to its Azure
+    /// shape and nothing said a bucket was even possible.
+    /// </summary>
+    [Fact]
+    public void ChoosingS3ShowsTheKeyPairFormBeforeAnyUrlExists()
+    {
+        var vm = NewViewModel();
+        vm.AddNewCommand.Execute(null);
+        Assert.False(vm.EditIsS3);
+
+        vm.EditProvider = StorageProviderChoice.S3;
+
+        Assert.Equal(BlobAuthMode.SasToken, vm.EditAuthMode);
+        // Typing the s3 URL afterwards leaves the choice standing.
+        vm.EditContainerUrl = "s3://storage.example.com/backups";
+        Assert.True(vm.EditIsS3);
+    }
+
+    [Fact]
+    public void AnAzureUrlSnapsTheChoiceBack()
+    {
+        var vm = NewViewModel();
+        vm.AddNewCommand.Execute(null);
+        vm.EditProvider = StorageProviderChoice.S3;
+
+        // The URL is what gets saved, so a typed scheme outranks the earlier selection.
+        vm.EditContainerUrl = "https://acct.blob.core.windows.net/backups";
+
+        Assert.False(vm.EditIsS3);
+    }
+
+    [Fact]
+    public void AProviderUrlMismatchIsRefusedBothWays()
+    {
+        // Paste an Azure URL, then click back to S3: the mismatch the save must not guess at.
+        var vm = NewViewModel();
+        vm.AddNewCommand.Execute(null);
+        vm.EditName = "bucket";
+        vm.EditContainerUrl = "https://acct.blob.core.windows.net/backups";
+        vm.EditProvider = StorageProviderChoice.S3;
+        vm.EditS3KeyId = "AKIDEXAMPLE";
+        vm.EditS3SecretKey = "secret";
+        vm.SaveCommand.Execute(null);
+        Assert.Contains("not an s3://", vm.ErrorMessage);
+        Assert.Empty(_store.Config.BlobContainers);
+
+        // The mirror: an s3:// URL with Azure re-selected over it.
+        var vm2 = NewViewModel();
+        vm2.AddNewCommand.Execute(null);
+        vm2.EditName = "bucket";
+        vm2.EditContainerUrl = "s3://storage.example.com/backups";
+        vm2.EditProvider = StorageProviderChoice.Azure;
+        vm2.EditSasToken = "sv=2026&sig=x";
+        vm2.SaveCommand.Execute(null);
+        Assert.Contains("S3-compatible", vm2.ErrorMessage);
+        Assert.Empty(_store.Config.BlobContainers);
     }
 
     // ── saving ──────────────────────────────────────────────────────────────────
@@ -131,6 +192,8 @@ public class S3ConfigScreenTests
         vm.SelectedContainer = vm.Containers.Single();
 
         vm.EditCommand.Execute(null);
+        // Editing an s3 container opens with the provider already selected.
+        Assert.True(vm.EditIsS3);
         // The region is shown back (addressing, not a secret); the pair is not.
         Assert.Equal("eu-west-2", vm.EditS3Region);
         Assert.Equal(string.Empty, vm.EditS3KeyId);
