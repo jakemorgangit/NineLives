@@ -1,4 +1,5 @@
-using System.Windows.Controls.Primitives;
+﻿using System.Windows.Controls.Primitives;
+using Blackcat.NineLives.Models;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
 
@@ -17,7 +18,10 @@ public class NavigationTests(WpfFixture wpf)
     [Fact]
     public void EveryNameInTheListReachesItsOwnView()
     {
-        var vm = new MainViewModel(new FakeCredentialStore());
+        // Past the cards first (#369): navigation is refused behind them, so a MainViewModel
+        // straight from the constructor cannot navigate anywhere. Pro, because this walks every
+        // name and the narrower modes hide three of them.
+        var vm = Launched.App(AppMode.Pro);
         var reached = new List<object>();
 
         foreach (var name in MainViewModel.Nav.Views)
@@ -36,11 +40,16 @@ public class NavigationTests(WpfFixture wpf)
     [Fact]
     public void AnUnknownNameFallsBackRatherThanCrashing()
     {
-        var vm = new MainViewModel(new FakeCredentialStore());
+        var vm = Launched.App(AppMode.Pro);
+        vm.NavigateToCommand.Execute(MainViewModel.Nav.History);
 
         vm.NavigateToCommand.Execute("Not A View");
 
+        // Landed somewhere real rather than throwing - and specifically NOT left on the screen
+        // it was already on, which is what "NotNull" alone would have accepted once navigation
+        // learned to refuse things (#369).
         Assert.NotNull(vm.CurrentView);
+        Assert.NotSame(vm.History, vm.CurrentView);
     }
 
     /// <summary>

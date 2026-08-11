@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -67,7 +67,7 @@ public class ExpectedResponsesTests
     [Fact]
     public void ReloadReachesTheExposureDashboard()
     {
-        var main = new MainViewModel(new FakeCredentialStore());
+        var main = Launched.App(AppMode.Pro);
         main.NavigateToCommand.Execute(MainViewModel.Nav.Exposure);
 
         Assert.Equal(MainViewModel.Nav.Exposure, main.CurrentViewName);

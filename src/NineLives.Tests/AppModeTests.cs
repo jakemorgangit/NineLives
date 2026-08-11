@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -235,7 +235,7 @@ public class AppModeTests
         var store = new FakeCredentialStore();
         store.Config.Mode = AppMode.Pro;
 
-        var main = new MainViewModel(store);
+        var main = Launched.App(store, AppMode.Pro);
         main.NavigateToCommand.Execute(MainViewModel.Nav.CopyDatabase);
         Assert.Same(main.CopyDatabase, main.CurrentView);
 
@@ -253,7 +253,7 @@ public class AppModeTests
         var store = new FakeCredentialStore();
         store.Config.Mode = AppMode.Pro;
 
-        var main = new MainViewModel(store);
+        var main = Launched.App(store, AppMode.Pro);
         main.NavigateToCommand.Execute(MainViewModel.Nav.History);
 
         main.Mode = AppMode.Standard;
