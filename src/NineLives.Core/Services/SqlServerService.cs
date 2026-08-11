@@ -458,15 +458,7 @@ public class SqlServerService : ISqlServerService
     /// which quietly limited HEADERONLY, FILELISTONLY and VERIFYONLY to blob - the restore itself
     /// has been device-aware since #149, and the inspection statements should match it.
     /// </summary>
-    private static string DeviceClause(string device)
-    {
-        var isPath = device.StartsWith(@"\\", StringComparison.Ordinal)
-                     || (device.Length >= 2 && device[1] == ':');
-
-        return isPath
-            ? $"DISK = N'{TSql.EscapeLiteral(device)}'"
-            : $"URL = N'{TSql.EscapeLiteral(device)}'";
-    }
+    private static string DeviceClause(string device) => BackupDevice.Clause(device);
 
     public async Task<List<FileMoveOption>> RestoreFileListOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, CancellationToken ct = default)
