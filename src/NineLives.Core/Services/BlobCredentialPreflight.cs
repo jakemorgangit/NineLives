@@ -35,8 +35,10 @@ public static class BlobCredentialPreflight
         var credentialName = container.ContainerUrl;
 
         // No stored token means nothing this app could write anyway - an Entra container has
-        // none by design. Whatever is on the server is what the run will use.
-        var sasToken = store.GetSasToken(container);
+        // none by design. Whatever is on the server is what the run will use. The in-memory
+        // copy wins over the vault, same rule as the blob service (#302): an unsaved or
+        // ephemeral container carries its secret on the object, never in a store.
+        var sasToken = container.UnsavedSasToken ?? store.GetSasToken(container);
         if (string.IsNullOrEmpty(sasToken)) return CredentialPreflight.Proceed;
 
         var credential = await sql.CredentialExistsAsync(server, credentialName);

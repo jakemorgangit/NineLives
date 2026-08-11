@@ -12,6 +12,13 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **Ephemeral mode: an estate defined only in the environment** (#302). `--ephemeral` on
+  any verb resolves server and container names against zero-persistence definitions from
+  NINELIVES_SERVER, NINELIVES_SQL_USER/PASSWORD, NINELIVES_CONTAINER_URL and NINELIVES_SAS -
+  consulted before the profile's config and written nowhere, secrets held in process memory
+  only. For the locked-down service account that must not own vault state and the CI agent
+  where nothing may outlive the job. History receipts still write and webhooks still fire -
+  they are the point. Documented on the overview help page
 - **The exposure sweep can speak** (#301): `9lives exposure --notify` pushes the sweep's
   verdict through the configured webhooks - ONE message per sweep, the worst offenders
   named worst first, into the same channel the runs already report to. Warning level and

@@ -32,6 +32,17 @@ internal static class HelpWriter
         output.WriteLine("refused; 3 the question could not be answered; 64 usage.");
         output.WriteLine();
         Wrapped(output,
+            "Ephemeral mode: pass --ephemeral on any verb to resolve names against " +
+            "zero-persistence definitions from environment variables, consulted before the " +
+            "profile's config and written nowhere - for locked-down service accounts and CI " +
+            "agents where nothing may outlive the job. NINELIVES_SERVER (address, resolvable " +
+            "as the name NINELIVES_SERVER_NAME or 'env'), NINELIVES_SQL_USER and " +
+            "NINELIVES_SQL_PASSWORD (SQL auth; omit both for Windows auth), " +
+            "NINELIVES_CONTAINER_URL (resolvable as NINELIVES_CONTAINER_NAME or 'env') and " +
+            "NINELIVES_SAS. Secrets stay in process memory; history receipts still write and " +
+            "webhooks still fire - they are the point.");
+        output.WriteLine();
+        Wrapped(output,
             "Two disciplines every verb keeps: data goes to stdout and everything human goes " +
             "to stderr, so output pipes and redirects cleanly; and timestamps parse exact " +
             "invariant formats only (yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm, yyyy-MM-dd) - a " +
