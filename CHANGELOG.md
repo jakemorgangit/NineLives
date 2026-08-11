@@ -10,6 +10,8 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-11
+
 ### Added
 
 - **A front door** (#343). Choosing a mode now lands on Home: what Nine Lives is in a
@@ -121,7 +123,6 @@ more detail on the user-facing changes; this file is the short history.
   belongs to the rehearsal alone; a failed run still retains its scratch copy as evidence until
   the next run has been seen (#259)
 
-### Added
 
 - **The CLI: 9lives.exe** (#63). The restore engine from a terminal - the same chain
   calculation, striped-set grouping and script generation the app runs, against the same
@@ -177,6 +178,20 @@ more detail on the user-facing changes; this file is the short history.
   two servers both backing up a database called Sales are the everyday DR pair, and a mixed
   list meant guessing whose history the timeline would show. One instance answers its own
   filter automatically; the database choice itself always stays with the user
+
+### Changed
+
+- **The screens stopped assuming Azure** (#51). "Azure Blob Storage" as a backup
+  source, destination or browse medium now reads "Cloud storage" - a saved container,
+  whichever provider answers it - across Restore, Back Up, Copy Database and Browse
+  Backups, with labels, empty-states and the delete-container dialog following. The
+  genuinely Azure-specific texts (Entra guidance, SAS specifics) still say Azure,
+  because there they mean it.
+
+- The engine - every service and model - now lives in NineLives.Core, a library with no UI
+  framework behind it. Nothing a user can see is different; this is the load-bearing wall for
+  the command-line front end (#63), where the same chain calculation, the same preflights and
+  the same script generation must run without a window ever existing
 
 ### Fixed
 
@@ -336,21 +351,6 @@ more detail on the user-facing changes; this file is the short history.
   because the fix is always in one of its parts. Easy to reach with a long endpoint, a base
   path and the default four-segment pattern; striping makes every stripe carry it.
 
-### Changed
-
-- **The screens stopped assuming Azure** (#51). "Azure Blob Storage" as a backup
-  source, destination or browse medium now reads "Cloud storage" - a saved container,
-  whichever provider answers it - across Restore, Back Up, Copy Database and Browse
-  Backups, with labels, empty-states and the delete-container dialog following. The
-  genuinely Azure-specific texts (Entra guidance, SAS specifics) still say Azure,
-  because there they mean it.
-
-- The engine - every service and model - now lives in NineLives.Core, a library with no UI
-  framework behind it. Nothing a user can see is different; this is the load-bearing wall for
-  the command-line front end (#63), where the same chain calculation, the same preflights and
-  the same script generation must run without a window ever existing
-
-### Fixed
 
 - **Two processes cannot lose each other's receipts** (#298). The restore history's
   read-modify-write was serialised in-process only - and the CLI made it two processes: a
