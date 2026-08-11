@@ -57,11 +57,14 @@ internal static class ListVerb
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)
     {
-        var (sets, _, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, _, error, loadExit) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
-            return ExitCodes.Usage;
+            // The loader says which kind of failure this was (#370): a malformed
+            // invocation exits 64, a source that holds nothing for this database
+            // exits 2 - the finding, not a usage error.
+            return loadExit;
         }
 
         var byDatabase = sets
@@ -78,17 +81,21 @@ internal static class ListVerb
             })
             .ToList();
 
+        // An empty source is the same finding whichever way it is printed (#370). The JSON
+        // branch returned Ok unconditionally, so adding --json to a check flipped its verdict:
+        // a container that had silently stopped receiving backups reported success, and the
+        // pipeline piped [] into jq and did nothing. An output format must never change the
+        // answer - the spec has documented 2 for this case all along.
+        if (byDatabase.Count == 0)
+            errors.WriteLine("The source holds no recognisable backups.");
+
         if (args.Has("json"))
         {
             output.WriteLine(JsonSerializer.Serialize(byDatabase, JsonOut.Options));
-            return ExitCodes.Ok;
+            return byDatabase.Count == 0 ? ExitCodes.Failed : ExitCodes.Ok;
         }
 
-        if (byDatabase.Count == 0)
-        {
-            errors.WriteLine("The source holds no recognisable backups.");
-            return ExitCodes.Failed;
-        }
+        if (byDatabase.Count == 0) return ExitCodes.Failed;
 
         TableWriter.Write(output,
             ["DATABASE", "FULL", "DIFF", "LOG", "LATEST BACKUP"],

@@ -107,11 +107,14 @@ internal static class RehearseVerb
             return ExitCodes.Usage;
         }
 
-        var (sets, sourceContainer, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, sourceContainer, error, loadExit) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
-            return ExitCodes.Usage;
+            // The loader says which kind of failure this was (#370): a malformed
+            // invocation exits 64, a source that holds nothing for this database
+            // exits 2 - the finding, not a usage error.
+            return loadExit;
         }
 
         var builder = new BackupChainBuilder();

@@ -21,7 +21,14 @@ internal static class InventoryLoader
     /// something the sets do not carry: the bucket's region (#361). Null for a --server source,
     /// which has no container - the backups were found through an instance's own history.
     /// </summary>
-    public static async Task<(List<BackupSet>? sets, BlobContainerConfig? container, string? error)> LoadAsync(
+    /// <param name="exitCode">
+    /// What the caller should exit with when this fails (#370). Not every failure here is a
+    /// usage error: "give exactly one source" and "no container by that name" are things the
+    /// INVOCATION got wrong, but "this source holds no backups for that database" is a finding
+    /// about the estate - the alarm `validate` exists to raise. Returning 64 for it told a
+    /// pipeline its own command line was malformed, so it logged and moved on instead of paging.
+    /// </param>
+    public static async Task<(List<BackupSet>? sets, BlobContainerConfig? container, string? error, int exitCode)> LoadAsync(
         CliArguments args, CliServices services)
     {
         BlobContainerConfig? source = null;
@@ -30,14 +37,15 @@ internal static class InventoryLoader
         var serverName = args.Get("server");
 
         if ((containerName == null) == (serverName == null))
-            return (null, null, "Give exactly one source: --container NAME or --server NAME.");
+            return (null, null, "Give exactly one source: --container NAME or --server NAME.",
+                    ExitCodes.Usage);
 
         List<BackupSet> sets;
 
         if (containerName != null)
         {
             var (container, error) = services.FindContainer(containerName);
-            if (container == null) return (null, null, error);
+            if (container == null) return (null, null, error, ExitCodes.Usage);
             source = container;
 
             var files = await services.Blobs.ListBackupFilesAsync(container);
@@ -46,7 +54,7 @@ internal static class InventoryLoader
         else
         {
             var (server, error) = services.FindServer(serverName!);
-            if (server == null) return (null, null, error);
+            if (server == null) return (null, null, error, ExitCodes.Usage);
 
             var history = await services.Sql.ReadBackupHistoryAsync(server, args.Get("database"));
             sets = BackupHistoryInventory.ToSets(history);
@@ -61,10 +69,12 @@ internal static class InventoryLoader
                 .ToList();
 
             if (sets.Count == 0)
-                return (null, null, $"The source has no backups for a database called '{database}'. " +
-                              "Run the list verb to see what it does hold.");
+                return (null, null,
+                    $"The source has no backups for a database called '{database}'. " +
+                    "Run the list verb to see what it does hold.",
+                    ExitCodes.Failed);
         }
 
-        return (sets, source, null);
+        return (sets, source, null, ExitCodes.Ok);
     }
 }
