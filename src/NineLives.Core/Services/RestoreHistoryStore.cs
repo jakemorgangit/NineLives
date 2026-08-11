@@ -48,17 +48,41 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
     /// existed, the exact thing the exposure dashboard's Proven column reads.
     ///
     /// A sidecar .lock file held with FileShare.None; DeleteOnClose so a crash cannot
-    /// orphan it. Writers queue in a short retry loop. After the timeout the write proceeds
-    /// WITHOUT the lock: the overlap window is milliseconds, and losing this entry for
-    /// certain is worse than the small chance of the race the lock exists to close.
+    /// orphan it. Writers queue with an exponential backoff, and a writer that never gets the
+    /// lock does not write.
+    ///
+    /// That last rule reverses the original one, which let the write proceed WITHOUT the lock
+    /// on the reasoning that losing this entry for certain was worse than a small chance of
+    /// the race. The premise was wrong in both halves, and CI proved it: this test lost FOUR
+    /// of fifty entries on a loaded runner. An unlocked read-modify-write does not risk losing
+    /// THIS entry - it silently drops whatever the other writer put in between the read and
+    /// the write, so the trade was one certain loss against several possible ones, and the
+    /// entries at risk are the receipts proving a restore happened.
+    ///
+    /// The backoff below is the other half of the fix, and the reason the timeout is now
+    /// rarely reached: it starts at 2ms rather than 50 (the first attempt after a release
+    /// should be quick - the old fixed sleep made every writer wait out most of a slot it
+    /// could have had immediately), and it jitters, because writers that collide once will
+    /// collide forever if they all back off by exactly the same amount.
     /// </summary>
+    private const int LockTimeoutMs = 10_000;
+
+    /// <summary>
+    /// Per instance rather than a static seam, so a test that shortens it cannot affect another
+    /// test running beside it.
+    /// </summary>
+    private readonly int _lockTimeoutMs;
+
     private FileStream? AcquireCrossProcessLock()
     {
         var directory = Path.GetDirectoryName(_path)!;
         Directory.CreateDirectory(directory);
         var lockPath = _path + ".lock";
 
-        for (var attempt = 0; attempt < 40; attempt++)
+        var deadline = Environment.TickCount64 + _lockTimeoutMs;
+        var wait = 2;
+
+        while (true)
         {
             try
             {
@@ -66,17 +90,14 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
                     lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
                     bufferSize: 1, FileOptions.DeleteOnClose);
             }
-            catch (IOException)
-            {
-                Thread.Sleep(50);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Thread.Sleep(50);
-            }
-        }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
 
-        return null;
+            if (Environment.TickCount64 >= deadline) return null;
+
+            Thread.Sleep(wait + Random.Shared.Next(wait));
+            wait = Math.Min(wait * 2, 50);
+        }
     }
 
     public RestoreHistoryStore() : this(Path.Combine(
@@ -84,9 +105,15 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
         "NineLives"))
     { }
 
-    /// <summary>Lets the tests write somewhere disposable instead of the real profile.</summary>
-    internal RestoreHistoryStore(string directory)
-        => _path = Path.Combine(directory, "restore-history.json");
+    /// <summary>
+    /// Lets the tests write somewhere disposable instead of the real profile, and shorten the
+    /// lock wait so the refusal path can be exercised without a ten-second test.
+    /// </summary>
+    internal RestoreHistoryStore(string directory, int lockTimeoutMs = LockTimeoutMs)
+    {
+        _path = Path.Combine(directory, "restore-history.json");
+        _lockTimeoutMs = lockTimeoutMs;
+    }
 
     public string FilePath => _path;
 
@@ -105,6 +132,12 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
             lock (_gate)
             {
                 using var crossProcess = AcquireCrossProcessLock();
+
+                // A lock that could not be taken is not a lock. Writing anyway makes this a
+                // read-modify-write with no exclusion, which drops whatever the other writer
+                // added in between - so the entries lost are somebody else's, not this one's.
+                // `using` a null is a silent no-op, which is exactly how this went unnoticed.
+                if (crossProcess == null) return;
 
                 var existing = ReadUnlocked();
 
@@ -140,6 +173,12 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
             lock (_gate)
             {
                 using var crossProcess = AcquireCrossProcessLock();
+
+                // Same rule as Append. Clearing without the lock would take the other writer's
+                // in-flight entry with it, and a Clear that did not happen is visible - the
+                // list is still there - where a silently destroyed receipt is not.
+                if (crossProcess == null) return;
+
                 WriteUnlocked([]);
             }
         }
