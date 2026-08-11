@@ -226,12 +226,14 @@ public class S3ListingTests : IDisposable
                     "<Message>Access Denied</Message></Error>")
             ]));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<S3RequestFailedException>(
             () => blobs.VerifyConnectionAsync(config));
 
         Assert.Contains("AccessDenied", ex.Message);
         Assert.Contains("HTTP 403", ex.Message);
         Assert.Contains("Access Denied", ex.Message);
+        Assert.Equal("AccessDenied", ex.Code);
+        Assert.Equal(403, ex.Status);
     }
 
     [Fact]
@@ -241,10 +243,11 @@ public class S3ListingTests : IDisposable
             new Queue<(HttpStatusCode, string)>(
                 [(HttpStatusCode.InternalServerError, "<html>proxy says no</html>")]));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<S3RequestFailedException>(
             () => blobs.VerifyConnectionAsync(config));
 
         Assert.Contains("HTTP 500", ex.Message);
+        Assert.Null(ex.Code);
     }
 
     [Fact]

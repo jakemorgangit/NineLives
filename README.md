@@ -97,7 +97,7 @@ Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-b
 
 The full reference ships inside the exe: `9lives help` for the overview, `9lives help restore` (or any verb) for the complete page - every option, the behaviour, the exit codes, examples. Documentation that lives in the binary cannot drift from it, and a test holds every page to the parser's own option lists.
 
-**Provisioning from nothing.** A freshly built VM - a Terraform clone, a DR bubble, a scratch environment - has no app config and nobody at a screen. `add-server` and `add-container` create the configuration from the command line, validated by default: the server is asked its version (address, credentials and permissions proven in one round trip), the container is asked to answer with exactly the recorded SAS - because a SAS is a string that looks right for weeks after it expired. Both converge on re-run, secrets can ride in `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` instead of flags, and a chained script stops at the first failed validation. The whole template is three lines, and the only variable is the moment:
+**Provisioning from nothing.** A freshly built VM - a Terraform clone, a DR bubble, a scratch environment - has no app config and nobody at a screen. `add-server` and `add-container` create the configuration from the command line, validated by default: the server is asked its version (address, credentials and permissions proven in one round trip), the container is asked to answer with exactly the recorded credential - because a SAS is a string that looks right for weeks after it expired. An `s3://` URL works here too: the credential is then the pair `AccessKeyId:SecretKey`, and `--region` says the bucket's region when the provider needs one said. Both converge on re-run, secrets can ride in `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` instead of flags, and a chained script stops at the first failed validation. The whole template is three lines, and the only variable is the moment:
 
 ```
 9lives add-server --name target --address localhost --user svc_restore --password %SQL_PW%
@@ -131,6 +131,13 @@ Two verbs execute, and they are built out of refusals: `restore` and `rehearse` 
 - Support for striped backup sets (multiple files per backup)
 - Availability Group backups using Ola Hallengren's default AG naming (`Cluster$AG_Database_FULL_yyyymmdd_hhmmss_n.bak`)
 - Secure SAS token storage using Windows Credential Manager
+
+### S3-Compatible Object Storage
+- An `s3://` container is just another entry in the list: AWS S3, Wasabi, Backblaze B2, Cloudflare R2 and storage appliances speaking the S3 API
+- The URL's own scheme picks the provider - `s3://endpoint/bucket` - so nothing else to configure, and a base path after the bucket scopes everything
+- Authenticates with the access key pair, stored together in Windows Credential Manager; the region is only needed when the endpoint's host name does not carry it
+- Browsing uses a built-in SigV4 listing client (no SDK), pinned against AWS's published signature test vectors
+- Restoring from S3 needs SQL Server 2022+ (not Express) - the app refuses earlier, before anything is dropped, because the S3 connector simply is not there
 
 ### SQL Server Connectivity
 - Windows Authentication and SQL Server Authentication support
