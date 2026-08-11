@@ -14,6 +14,8 @@ namespace Blackcat.NineLives.Tests;
 /// base prefix scopes and strips, folder markers are not backups, keys flow through the same
 /// inference Azure listings do, and a refusal surfaces the provider's own sentence.
 /// </summary>
+/// <remarks>Sets S3ListingClient.SenderForTests, a process-wide static (#348).</remarks>
+[Collection(WpfCollection.Name)]
 public class S3ListingTests : IDisposable
 {
     public void Dispose() => S3ListingClient.SenderForTests = null;

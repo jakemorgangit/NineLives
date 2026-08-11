@@ -36,6 +36,17 @@ more detail on the user-facing changes; this file is the short history.
   over every receipt it holds. The screen now says the file is unreadable and names it,
   and Clear refuses to touch it.
 
+### Changed
+
+- **Test classes that share a static hook no longer run beside each other** (#348). Nothing
+  a user sees changes. Two test hooks in Core are plain static fields, set by one test class
+  and cleared when it finishes; xUnit runs classes in different collections at the same time,
+  so a second class touching the same field would be handed the first one's fake, or have it
+  removed underneath it mid-test. It has never happened, because only one class drives each
+  hook today - which is exactly what makes it easy to break by writing an ordinary second
+  test, and the failure would read as a network flake on CI rather than a fixture problem.
+  Those classes now share one collection, and a test pins that so it cannot be quietly undone.
+
 ## [1.6.0] - 2026-08-11
 
 ### Added

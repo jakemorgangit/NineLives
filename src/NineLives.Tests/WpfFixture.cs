@@ -19,6 +19,20 @@ namespace Blackcat.NineLives.Tests;
 /// Shares the one Application across every class that needs it. A second WpfFixture instance would
 /// try to construct a second Application, which the runtime refuses - so classes join this
 /// collection rather than each taking their own class fixture.
+///
+/// It is also how the suite serialises everything else that shares PROCESS-WIDE state, which is
+/// why classes that never touch a Window are members (#348). xUnit runs collections in parallel
+/// and classes within one collection in sequence, and a class can only belong to one - so
+/// anything that must not run beside these has to be here rather than in a collection of its own.
+///
+/// What that means today: the static test seams. BlobStorageService.CredentialFactoryForTests and
+/// S3ListingClient.SenderForTests are plain static fields, set by one class and cleared in its
+/// Dispose, and a second class reading them concurrently would be served the first one's fake or
+/// have the seam nulled underneath it mid-test. That fails perhaps one run in ten, on CI rather
+/// than locally, and looks like a network flake rather than a fixture problem.
+///
+/// So: a test class that sets a static seam belongs in this collection. The rule is not
+/// enforceable by the compiler, which is the reason it is written down here.
 /// </summary>
 [CollectionDefinition(Name)]
 public sealed class WpfCollection : ICollectionFixture<WpfFixture>
