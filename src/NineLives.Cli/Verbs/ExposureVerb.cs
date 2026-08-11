@@ -16,15 +16,20 @@ internal static class ExposureVerb
     public static readonly VerbSpec Spec = new(
         "exposure",
         "Sweep every server: if it died now, what is lost? Exit code = worst level",
-        "9lives exposure [--server NAME] [--json]",
+        "9lives exposure [--server NAME] [--json] [--notify | --notify-always]",
         Valued: ["server"],
-        Switches: ["json"],
+        Switches: ["json", "notify", "notify-always"],
         Options:
         [
             ("--server NAME", "Sweep one configured server. Omitted, every configured server " +
                 "is swept in parallel - the estate, not a sample."),
             ("--json", "Rows as JSON on stdout: server, database, level, recoveryModel, " +
-                "lastFull, lastDifferential, lastLog, recoverableTo, verdict.")
+                "lastFull, lastDifferential, lastLog, recoverableTo, verdict."),
+            ("--notify", "Push the sweep's verdict through the configured webhooks - one " +
+                "message per sweep, worst offenders first, into the same channel the runs " +
+                "report to. Speaks only at warning level and above."),
+            ("--notify-always", "Like --notify, but a clean sweep also sends its all-clear - " +
+                "for the channel that wants the heartbeat, not just the bad news.")
         ],
         Notes:
         [
@@ -40,8 +45,13 @@ internal static class ExposureVerb
             "worst morning the servers that do answer still get judged.",
             "The worst level found IS the exit code, which makes this the scheduled-task " +
             "verb: wire it to a scheduler and a failing exit turns quiet log-backup silence " +
-            "into a red pipeline while attention is elsewhere. The app's webhooks cover the " +
-            "push side; this is the pull side any monitoring system can poll."
+            "into a red pipeline while attention is elsewhere - and --notify closes the " +
+            "loop with zero extra infrastructure, pushing the same verdict through the " +
+            "configured webhooks. One message per sweep, the worst offenders named worst " +
+            "first, never one per row: a channel flooded by forty rows is a channel " +
+            "somebody mutes. Endpoint subscriptions apply - a problem message honours " +
+            "Problems, the --notify-always all-clear honours Finished. Task Scheduler plus " +
+            "this flag is backup monitoring for an estate with no agent and no dashboard."
         ],
         ExitCodes:
         [
@@ -56,7 +66,9 @@ internal static class ExposureVerb
             ("9lives exposure",
                 "the whole estate, one exit code"),
             ("9lives exposure --server SRV01 --json",
-                "one server's rows for a dashboard or jq")
+                "one server's rows for a dashboard or jq"),
+            ("9lives exposure --notify",
+                "the scheduled shape: exit code for the scheduler, worst rows to the channel")
         ]);
 
     public static async Task<int> RunAsync(
@@ -167,6 +179,43 @@ internal static class ExposureVerb
         }
 
         var worst = rows.Count == 0 ? ExposureLevel.Ok : rows.Max(r => r.Level);
+
+        // --notify closes the loop (#301): the same verdict, through the configured
+        // webhooks. One message per sweep - a channel flooded by forty rows is a channel
+        // somebody mutes - speaking only at warning level and above unless --notify-always
+        // asks for the heartbeat. The exit code is unaffected either way.
+        if (args.Has("notify") || args.Has("notify-always"))
+        {
+            if (worst != ExposureLevel.Ok)
+            {
+                var alarms = rows.Count(r => r.Level == ExposureLevel.Alarm);
+                var warnings = rows.Count(r => r.Level == ExposureLevel.Warning);
+                var offenders = rows
+                    .Where(r => r.Level != ExposureLevel.Ok)
+                    .Take(5)
+                    .Select(r => $"{r.ServerName}/{r.DatabaseName} - {r.Verdict}");
+                var named = string.Join("  |  ", offenders);
+                var overflow = alarms + warnings > 5
+                    ? $"  |  ...and {alarms + warnings - 5} more"
+                    : string.Empty;
+
+                services.Notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Exposure",
+                    $"{alarms} alarm(s), {warnings} warning(s)",
+                    $"{servers.Count} server(s)",
+                    named + overflow));
+                await services.Notifier.DrainAsync(NotificationDrain);
+            }
+            else if (args.Has("notify-always"))
+            {
+                services.Notifier.Notify(new RunNotification(
+                    RunPhase.Succeeded, "Exposure",
+                    $"all {rows.Count} database(s) inside their windows",
+                    $"{servers.Count} server(s)"));
+                await services.Notifier.DrainAsync(NotificationDrain);
+            }
+        }
+
         return worst switch
         {
             ExposureLevel.Alarm => ExitCodes.Failed,
@@ -174,4 +223,7 @@ internal static class ExposureVerb
             _ => ExitCodes.Ok
         };
     }
+
+    /// <summary>Long enough for a slow webhook, short enough that a dead one cannot hold the exit.</summary>
+    private static readonly TimeSpan NotificationDrain = TimeSpan.FromSeconds(10);
 }

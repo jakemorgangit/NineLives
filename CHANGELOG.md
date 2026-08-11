@@ -12,6 +12,12 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The exposure sweep can speak** (#301): `9lives exposure --notify` pushes the sweep's
+  verdict through the configured webhooks - ONE message per sweep, the worst offenders
+  named worst first, into the same channel the runs already report to. Warning level and
+  above by default; `--notify-always` adds the all-clear heartbeat. Endpoint subscriptions
+  apply, the exit code is unaffected, and Task Scheduler plus this flag is backup
+  monitoring for an entire estate with no agent, no dashboard and no PowerShell module
 - **9lives backup: the other half of the orchestrator** (#300). The CLI could restore,
   rehearse and judge but not take a backup - and the scriptable case is everywhere: the
   pre-change safety snapshot with the restore in the same tool, the copy-away before risky
