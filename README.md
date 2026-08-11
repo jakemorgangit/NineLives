@@ -4,9 +4,26 @@
 
 **Every database deserves nine lives.**
 
-Nine Lives is a modern desktop application for **backing up, restoring, and PROVING SQL Server databases restore** — to and from Azure Blob Storage or a file share both servers can see. Point-in-time recovery with a visual timeline (down to a named marked transaction), intelligent chain detection from LSNs, striped backups, TDE awareness, restore rehearsals with receipts, an exposure dashboard, and run notifications to Teams or Slack. Built with WPF on .NET 10, featuring dark, light and high-contrast UIs.
+Nine Lives is a modern desktop application for **backing up, restoring, and PROVING SQL Server databases restore** — to and from Azure Blob Storage, any S3-compatible bucket (AWS, Wasabi, Backblaze B2, Cloudflare R2, MinIO), or a file share both servers can see. Point-in-time recovery with a visual timeline (down to a named marked transaction), intelligent chain detection from LSNs, striped backups, TDE awareness, restore rehearsals with receipts, an exposure dashboard, and run notifications to Teams or Slack. Built with WPF on .NET 10, featuring dark, light and high-contrast UIs.
 
 *A free tool from [Blackcat Data Solutions](https://blackcat.wales).*
+
+**Contents** &nbsp;·&nbsp;
+[Why](#why-nine-lives) &nbsp;·&nbsp;
+[Where backups can live](#three-media-both-directions) &nbsp;·&nbsp;
+[Proof, not hope](#proof-not-hope) &nbsp;·&nbsp;
+[Safety nets](#safety-nets) &nbsp;·&nbsp;
+[The CLI](#the-cli-9livesexe) &nbsp;·&nbsp;
+[Features](#features) &nbsp;·&nbsp;
+[Screenshots](#screenshots) &nbsp;·&nbsp;
+[Installation](#installation) &nbsp;·&nbsp;
+[Usage guide](#usage-guide) &nbsp;·&nbsp;
+[Storage permissions](#storage-permissions) &nbsp;·&nbsp;
+[Folder structure](#backup-folder-structure) &nbsp;·&nbsp;
+[Restore chain logic](#restore-chain-logic) &nbsp;·&nbsp;
+[Security](#security) &nbsp;·&nbsp;
+[Limitations](#known-limitations) &nbsp;·&nbsp;
+[Troubleshooting](#troubleshooting)
 
 ![Screenshot - Main Interface](docs/screenshots/main-interface.png)
 
@@ -27,16 +44,16 @@ Restoring a native SQL Server backup is painful with existing tooling when the d
 
 Nine Lives discovers every backup, groups striped sets, computes the full restore chain (full → differential → log tail), and gives you a clickable point-in-time timeline. Generate the T-SQL, or execute it directly with live progress.
 
-### Two media, both directions
+### Three media, both directions
 
 Where a backup lives is a choice per operation, not a property of the tool:
 
-|             | Azure Blob Storage      | A path both servers can see |
-|-------------|-------------------------|-----------------------------|
-| **Back up** | `BACKUP ... TO URL`     | `BACKUP ... TO DISK`        |
-| **Restore** | `RESTORE ... FROM URL`  | `RESTORE ... FROM DISK`     |
+|             | Azure Blob Storage      | S3-compatible bucket    | A path both servers can see |
+|-------------|-------------------------|-------------------------|-----------------------------|
+| **Back up** | `BACKUP ... TO URL`     | `BACKUP ... TO URL`     | `BACKUP ... TO DISK`        |
+| **Restore** | `RESTORE ... FROM URL`  | `RESTORE ... FROM URL`  | `RESTORE ... FROM DISK`     |
 
-Neither is right in every estate. **Blob** needs no network path between the two hosts, which is often the real blocker when source and target sit in different environments. **A shared path** is faster, costs no egress, needs no SAS with write, and does not make the restore wait on an upload — where both instances can reach it.
+None is right in every estate. **Blob** needs no network path between the two hosts, which is often the real blocker when source and target sit in different environments. **An S3-compatible bucket** is the same shape for anyone already on AWS, Wasabi, Backblaze B2, Cloudflare R2 or a storage appliance that speaks the API — type an `s3://` URL and the rest of the app neither knows nor cares which provider answered. It needs SQL Server 2022 or later, and not Express, because that is where Microsoft's S3 connector arrives; the app refuses earlier versions before anything is dropped rather than failing mid-restore. **A shared path** is faster, costs no egress, needs no credential with write, and does not make the restore wait on an upload — where both instances can reach it.
 
 There is also a third source for the classic case neither medium covers: **a backup file somebody handed you** — a vendor's `.bak`, a file that outlived its server. Paste the path, and the file's own headers drive the same chain, options and execution as everything else.
 
@@ -435,19 +452,38 @@ When clicking **Execute on Server**:
 4. Watch the real-time execution log for progress
 5. Upon completion, the database is restored and online (if RECOVERY mode selected)
 
-## SAS Token Requirements
+## Storage permissions
 
-Your SAS token needs the following minimum permissions:
-- **List (l)** - To enumerate blobs in the container
-- **Read (r)** - To read backup files
+Two different things need access, and it is worth keeping them apart: **the app** browses your storage to discover backups, and **the SQL Server instance** reads them during the restore itself. They authenticate separately.
 
-For restore execution, the SQL Server instance must have a credential for the blob container URL. Two identities work: `SHARED ACCESS SIGNATURE`, and — on SQL Server 2022 and later or Azure SQL MI — `Managed Identity`. You can create the SAS kind from the app using "Create credential on server" in the Restore options; the SAS token is never included in generated scripts.
+### Azure Blob Storage
+
+A SAS token for the app needs at minimum:
+
+- **List (l)** — to enumerate blobs in the container
+- **Read (r)** — to read backup files
+
+`sp=rl` is enough to browse and restore. `sp=racwdl` (read, add, create, write, delete, list) is what backing up *to* the container also needs.
+
+For restore execution the instance must have a `CREDENTIAL` named for the container URL. Two identities work: `SHARED ACCESS SIGNATURE`, and — on SQL Server 2022 and later, or Azure SQL MI — `Managed Identity`.
+
+### S3-compatible buckets
+
+The access key pair needs, on the bucket and its contents:
+
+- **`s3:ListBucket`** — on the bucket itself, to discover backups
+- **`s3:GetObject`** — on the objects, to read them
+- **`s3:PutObject`** — only if you also back up to this bucket
+
+The instance's credential is created with `IDENTITY = 'S3 Access Key'` and the same key pair as its secret. Restoring from S3 needs **SQL Server 2022 or later, and not Express** — that is where Microsoft's S3 connector arrives. The app checks before anything is dropped rather than failing mid-restore, and no `--force` overrides it: a capability is either in the engine or it is not.
+
+A region is only needed when the endpoint's host name does not carry one. It rides into the statements as `BACKUP_OPTIONS` / `RESTORE_OPTIONS` JSON.
+
+### The credential on the server, either provider
+
+You can create it from the app with **Create credential on server** in the Restore options. The secret is never included in a generated script — the credential is created separately, which is what makes a generated script safe to paste into a change ticket.
 
 A credential that already exists is never rewritten by running a restore. If it holds a managed identity the app reports it as valid and leaves it alone, since replacing it would change how the whole instance reaches that container. Replacing one is a deliberate press of the button on the credential panel, which says exactly what it would do.
-
-Example SAS token permissions: `sp=rl` (read + list)
-
-Recommended: `sp=racwdl` (read, add, create, write, delete, list) for full functionality.
 
 ## Backup Folder Structure
 
