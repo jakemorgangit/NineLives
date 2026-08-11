@@ -59,7 +59,13 @@
                          is SELECTED when Save runs, so clicking another one while editing saved
                          this container's name, URL, credential and tags over that one - silently,
                          with the original left untouched and two containers left sharing a name. -->
+                    <!-- CardListBox for its TEMPLATE, not its look: the default one turns its
+                         background white the moment IsEnabled goes false, and the rows here draw
+                         their text in PrimaryTextBrush - white on white in the dark and
+                         high-contrast themes. The item template and container style below are
+                         local and still win. -->
                     <ListBox ItemsSource="{Binding Containers}"
+                             Style="{StaticResource CardListBox}"
                              IsEnabled="{Binding IsEditing, Converter={StaticResource InverseBool}}"
                              SelectedItem="{Binding SelectedContainer}"
                              Background="Transparent"

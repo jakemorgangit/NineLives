@@ -54,6 +54,46 @@
                     </Hyperlink>
                 </TextBlock>
 
+                <!-- The way out of the app to everything that explains it (#370). Until this,
+                     the only hyperlink anywhere in Nine Lives was blackcat.wales, so somebody
+                     stuck on a screen had no route to the documentation from inside the tool. -->
+                <Border Height="1" Background="{DynamicResource CardBorderBrush}" Margin="0,0,0,20" />
+
+                <TextBlock Text="PROJECT" Style="{StaticResource LabelText}" HorizontalAlignment="Center" />
+                <TextBlock HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                           Margin="0,4,0,20" Style="{StaticResource BodyText}">
+                    <Hyperlink NavigateUri="{Binding DocumentationUrl}"
+                               RequestNavigate="Hyperlink_RequestNavigate"
+                               Foreground="{DynamicResource AccentBrush}"
+                               TextDecorations="None"
+                               ToolTip="What every screen does, the path patterns, the CLI, and the permissions each provider needs.">
+                        <Run Text="Documentation" />
+                    </Hyperlink>
+                    <Run Text="   ·   " Foreground="{DynamicResource SecondaryTextBrush}" />
+                    <Hyperlink NavigateUri="{Binding IssuesUrl}"
+                               RequestNavigate="Hyperlink_RequestNavigate"
+                               Foreground="{DynamicResource AccentBrush}"
+                               TextDecorations="None"
+                               ToolTip="Report a bug or ask for something. The bug template says which log to attach and where to find it.">
+                        <Run Text="Report an issue" />
+                    </Hyperlink>
+                    <Run Text="   ·   " Foreground="{DynamicResource SecondaryTextBrush}" />
+                    <Hyperlink NavigateUri="{Binding ReleasesUrl}"
+                               RequestNavigate="Hyperlink_RequestNavigate"
+                               Foreground="{DynamicResource AccentBrush}"
+                               TextDecorations="None"
+                               ToolTip="What changed in each version, and the downloads.">
+                        <Run Text="Releases" />
+                    </Hyperlink>
+                    <LineBreak />
+                    <Hyperlink NavigateUri="{Binding RepositoryUrl}"
+                               RequestNavigate="Hyperlink_RequestNavigate"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               TextDecorations="None">
+                        <Run Text="{Binding RepositoryUrl, Mode=OneWay}" FontSize="11" />
+                    </Hyperlink>
+                </TextBlock>
+
                 <ContentControl Style="{StaticResource ErrorBanner}" />
 
                 <TextBlock HorizontalAlignment="Center"

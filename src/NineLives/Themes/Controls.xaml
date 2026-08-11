@@ -291,12 +291,51 @@
         </Setter>
     </Style>
 
+    <!--
+        A list that keeps the app's own colours when it is disabled.
+
+        WPF's default ListBox template swaps its border background to SystemColors.ControlBrushKey
+        the moment IsEnabled goes false, and a template trigger beats the Background set on the
+        control - so an explicit Background="Transparent" loses. The saved-containers list is
+        disabled while the Add Container form is open (#354), and the result was a WHITE panel in
+        every theme, with the unselected rows greyed to SystemColors.GrayText on top of it: in
+        high contrast that is grey on white, which is unreadable, and in dark it is a slab of
+        white in the middle of a dark window.
+
+        Being unavailable for a moment is not a reason to stop being legible. This template has no
+        system-colour swap at all; the disabled state is carried by opacity, which dims the list
+        without recolouring anything.
+    -->
     <Style x:Key="CardListBox" TargetType="ListBox">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
         <Setter Property="ItemContainerStyle" Value="{StaticResource CardListBoxItem}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBox">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer Focusable="False"
+                                      Padding="{TemplateBinding Padding}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                            <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                        </ScrollViewer>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="bd" Property="Opacity" Value="0.55" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Card Style -->
