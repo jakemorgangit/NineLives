@@ -246,6 +246,34 @@ public partial class RestoreViewModel : ViewModelBase
     private ServerConnection? _connectedServer;
 
     /// <summary>
+    /// The saved servers the target step offers (#318) - the same list the Servers screen
+    /// manages, refreshed with the rest of the config-derived lists.
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<ServerConnection> _targetServers = [];
+
+    /// <summary>
+    /// The chosen target. Setting it here or connecting on the Servers screen are the same
+    /// decision made in two places, so each reflects into the other - the preflights, the
+    /// execution and the credential panel all keep reading ConnectedServer, which both feed.
+    /// </summary>
+    [ObservableProperty]
+    private ServerConnection? _selectedTargetServer;
+
+    /// <summary>The step's empty-list hint - no saved servers means the combo has nothing to offer.</summary>
+    public bool HasNoTargetServers => TargetServers.Count == 0;
+
+    partial void OnTargetServersChanged(ObservableCollection<ServerConnection> value) =>
+        OnPropertyChanged(nameof(HasNoTargetServers));
+
+    partial void OnSelectedTargetServerChanged(ServerConnection? value)
+    {
+        Steps.Target.Report(value != null, value?.Name ?? string.Empty);
+        if (value != null && !ReferenceEquals(_connectedServer, value))
+            ConnectedServer = value;
+    }
+
+    /// <summary>
     /// The instance every server call on this screen runs against.
     ///
     /// Setting it re-checks the credential, rather than leaving the caller to remember: forgetting
@@ -260,6 +288,13 @@ public partial class RestoreViewModel : ViewModelBase
             _connectedServer = value;
             Credential.Server = value;
             _ = Credential.RefreshAsync();
+
+            // The Servers screen's connect answers the target step too (#318): already
+            // connected means the question is pre-answered, visibly and changeably.
+            if (!ReferenceEquals(SelectedTargetServer, value))
+                SelectedTargetServer = value == null
+                    ? null
+                    : TargetServers.FirstOrDefault(s => s.Id == value.Id) ?? value;
         }
     }
 
@@ -454,7 +489,7 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowAuditPanel));
         OnPropertyChanged(nameof(ShowCredentialPanel));
         OnPropertyChanged(nameof(ShowAgentJob));
-        OnPropertyChanged(nameof(ShowAdvancedOptions));
+        OnPropertyChanged(nameof(ShowAdvancedOptions));
         OnPropertyChanged(nameof(ShowMultipleContainers));
 
         // A medium that is no longer offered must not stay selected underneath a hidden control -
@@ -519,6 +554,17 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public async Task AcceptHandoffAsync(BrowseHandoff handoff)
     {
+        // This screen already refuses to regenerate the script mid-restore because it is the
+        // record of what is actually running - the handoff cannot be allowed to do what the
+        // regenerate button may not (#288). Clicking a red dashboard row must not wipe the
+        // chain and timeline out from under a 40-minute restore.
+        if (IsExecuting)
+        {
+            SetError("A restore is running on this screen. Wait for it to finish (or stop it) " +
+                     "and hand over again - jumping sources now would wipe the record of the run.");
+            return;
+        }
+
         SelectedMedium = handoff.Medium == BackupMedium.SharedPath
             ? BackupMedium.SharedPath
             : BackupMedium.AzureBlob;
@@ -532,6 +578,12 @@ public partial class RestoreViewModel : ViewModelBase
         }
         else if (handoff.Container != null)
         {
+            // What arrives is what the browser showed. Extra containers ticked on an earlier
+            // visit would make the load see MORE than was looked at - a chain assembling from
+            // backups the user never saw (#288).
+            foreach (var choice in AdditionalContainers)
+                choice.IsSelected = false;
+
             SelectedContainer = Containers.FirstOrDefault(c => c.Id == handoff.Container.Id)
                                 ?? handoff.Container;
         }
@@ -540,14 +592,36 @@ public partial class RestoreViewModel : ViewModelBase
 
         // The filters land only when the load found them - a database the load did not see would
         // put the working set into a state the screen cannot have reached by hand.
-        if (handoff.ServerFilter != null && Inventory.DiscoveredServers.Contains(handoff.ServerFilter))
-            Inventory.SelectedServerName = handoff.ServerFilter;
+        string? droppedFilter = null;
+        if (handoff.ServerFilter != null)
+        {
+            // The way every other server comparison works (#288): identity, not ordinal. The
+            // dashboard hands over the name msdb records while a blob listing infers from
+            // paths - a case difference must not silently drop the instance filter.
+            var match = Inventory.DiscoveredServers.FirstOrDefault(d =>
+            {
+                var (server, instance) = ServerIdentity.Split(d);
+                return ServerIdentity.Matches(server, instance, handoff.ServerFilter);
+            });
+
+            if (match != null)
+                Inventory.SelectedServerName = match;
+            else
+                droppedFilter = handoff.ServerFilter;
+        }
 
         if (handoff.Database != null &&
             Inventory.DiscoveredDatabases.Contains(handoff.Database, StringComparer.OrdinalIgnoreCase))
             Inventory.SelectedDatabaseName =
                 Inventory.DiscoveredDatabases.First(d =>
                     string.Equals(d, handoff.Database, StringComparison.OrdinalIgnoreCase));
+
+        // Said last, so nothing the filters trigger can clear it: applying only the database
+        // filter is a DIFFERENT question than the one clicked, and silence would present its
+        // answer as the clicked one's.
+        if (droppedFilter != null)
+            SetStatus($"The instance filter '{droppedFilter}' is not among this source's " +
+                      "instances, so every instance's backups are shown.");
     }
 
     /// <summary>The saved connections, for choosing whose backup history to read.</summary>
@@ -838,6 +912,18 @@ public partial class RestoreViewModel : ViewModelBase
                 RefreshSteps();
         };
 
+        // A chosen target survives source backtracking (#318). Changing the source withdraws
+        // every later step's completion - the container cannot know the target is an independent
+        // decision - so when the step is offered again this puts the answer still sitting in the
+        // combo straight back, and the user lands on the restore point, not on a question they
+        // already answered.
+        Steps.Target.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RestoreStep.IsVisible) &&
+                Steps.Target.IsVisible && !Steps.Target.IsComplete && SelectedTargetServer != null)
+                Steps.Target.Report(true, SelectedTargetServer.Name);
+        };
+
         // The selection now lives on the timeline (#115 seam 2), which is a different object, so
         // this is a subscription rather than a generated partial hook.
         Timeline.PropertyChanged += (_, e) =>
@@ -888,6 +974,17 @@ public partial class RestoreViewModel : ViewModelBase
         SourceServers = new ObservableCollection<ServerConnection>(config.Servers);
         if (previousSource != null)
             SourceServer = SourceServers.FirstOrDefault(x => x.Id == previousSource);
+
+        // The target step offers the same saved list (#318). A selection survives the rebuild by
+        // identity; a target chosen on the Servers screen before this screen ever loaded is
+        // re-pointed at the config instance so the combo shows it as the answer.
+        var previousTarget = SelectedTargetServer?.Id ?? ConnectedServer?.Id;
+        TargetServers = new ObservableCollection<ServerConnection>(config.Servers);
+        if (previousTarget != null)
+        {
+            var match = TargetServers.FirstOrDefault(x => x.Id == previousTarget);
+            if (match != null) SelectedTargetServer = match;
+        }
 
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
@@ -1824,6 +1921,11 @@ public partial class RestoreViewModel : ViewModelBase
         options.StopAtMark = SelectedLogMark?.Name;
         options.StopBeforeMark = StopBeforeMark;
 
+        // The source container's region rides into the RESTORE_OPTIONS when the source is S3
+        // (#51). The generator ignores it - and clears it - for any non-S3 chain, so a stale
+        // value cannot leak between sources.
+        options.S3Region = SelectedContainer?.S3Region;
+
         GeneratedScript = _scriptGenerator.Generate(chain!, options);
         HasScript = true;
     }
@@ -1893,7 +1995,7 @@ public partial class RestoreViewModel : ViewModelBase
 
         var job = SqlAgentJobScript.Wrap(
             GeneratedScript,
-            SqlAgentJobScript.SuggestName(TargetDatabaseName, DateTime.Now),
+            SqlAgentJobScript.SuggestName("restore", TargetDatabaseName, DateTime.Now),
             $"Restore {Inventory.SelectedDatabaseName ?? "a database"} as {TargetDatabaseName}, " +
             $"generated by Nine Lives on {DateTime.Now:yyyy-MM-dd HH:mm}.");
 
@@ -2198,16 +2300,25 @@ public partial class RestoreViewModel : ViewModelBase
     /// <summary>
     /// Reads logmarkhistory for the selected database (#243). On demand, because most databases
     /// have no marks and the combo should not cost a round trip to prove it.
+    ///
+    /// Asked on the SOURCE instance when the medium has one (#268): logmarkhistory is written
+    /// where the marked transactions RAN, so on a shared-path restore to a different target, the
+    /// target's msdb has never heard of them - asking it reports "no marks" when the truth is
+    /// "wrong catalogue". Blob has no source instance, so the connected server answers there;
+    /// it also covers ad-hoc's file-that-outlived-its-server case as best effort. The marks
+    /// themselves ride inside the log backups either way - this is discovery, not correctness.
     /// </summary>
     [RelayCommand]
     private async Task LoadLogMarksAsync()
     {
-        var server = ConnectedServer;
+        var server = (MediumIsBlob ? null : SourceServer) ?? ConnectedServer;
         var database = Inventory.SelectedDatabaseName;
 
         if (server == null || string.IsNullOrWhiteSpace(database))
         {
-            SetError("Connect to a server and choose a database first - the marks live in its msdb.");
+            SetError(MediumIsBlob
+                ? "Connect to a server and choose a database first - the marks live in its msdb."
+                : "Choose the source server and a database first - the marks were recorded in its msdb.");
             return;
         }
 
@@ -2368,6 +2479,70 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// The rehearsal as a disabled, unscheduled Agent job (#259): the proof renews itself weekly
+    /// once somebody adds a schedule, receipts accumulating in the job history. Same prep as the
+    /// clicked rehearsal, but the scratch name is STABLE with a guarded pre-drop of its own
+    /// leftover - a timestamped name would collide with itself on the job's second run.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRehearse))]
+    private async Task CopyRehearsalAsAgentJobAsync()
+    {
+        var server = ConnectedServer;
+        var chain = RestoreChain;
+        if (server == null || chain == null || !CanRehearse) return;
+
+        var sourceName = Inventory.SelectedDatabaseName ?? chain.FullSet.DatabaseName ?? "database";
+        var scratch = RehearsalPlanner.ScheduledScratchName(sourceName);
+
+        IsBusy = true;
+        try
+        {
+            var devices = chain.FullSet.Files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+            var files = await _sqlService.RestoreFileListOnlyAsync(server, devices);
+            if (files.Count == 0)
+            {
+                SetError("FILELISTONLY returned nothing - the rehearsal cannot relocate files it " +
+                         "cannot list.");
+                return;
+            }
+
+            var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(server);
+            var moves = RehearsalPlanner.ScratchMoves(files, scratch, dataPath, logPath);
+
+            var restoreScript = _scriptGenerator.Generate(chain, new RestoreOptions
+            {
+                TargetDatabaseName = scratch,
+                WithReplace = false,
+                RecoveryMode = RecoveryMode.Recovery,
+                FileMoves = moves
+            });
+
+            var script = RehearsalPlanner.BuildScheduledScript(restoreScript, scratch);
+
+            var job = SqlAgentJobScript.Wrap(
+                script,
+                $"NineLives rehearsal - {sourceName}",
+                $"Weekly proof that {sourceName} restores: scratch restore, DBCC CHECKDB, drop. " +
+                "A failed run retains the scratch copy as evidence until the next run clears it.");
+
+            TryCopyToClipboard(job,
+                "Rehearsal job copied to clipboard. Created disabled and unscheduled - add the " +
+                "weekly schedule and enable it deliberately. Each run's outcome lands in the " +
+                "job history; a failure retains the scratch copy as evidence.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"The rehearsal job could not be prepared: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
     /// The last thing checked before a restore runs, and it differs by medium.
     ///
     /// Blob needs the server-side credential to be usable. A shared path needs no credential at all
@@ -2377,6 +2552,18 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     internal async Task<CredentialPreflight> PreflightAsync(ServerConnection server, Action<string> appendLog)
     {
+        // Can this engine speak S3 at all (#51)? Asked first, and asked here rather than only in
+        // the CLI - which is where it shipped, leaving the app promising a check that only the
+        // other front end performed. A capability, so nothing overrides it: the connector is
+        // either in the engine or it is not.
+        if (S3CapabilityPreflight.UsesS3(RestoreChain))
+        {
+            appendLog("Checking the target can restore from S3-compatible storage...");
+            if (await S3CapabilityPreflight.RefusalAsync(_sqlService, server, RestoreChain)
+                is { } s3Refusal)
+                return CredentialPreflight.Stop(s3Refusal);
+        }
+
         // Both non-blob media end in FROM DISK on the target, so both need the same answer: can
         // the instance that will run the RESTORE actually read these files (#203).
         if (MediumIsSharedPath || MediumIsAdHocFile)

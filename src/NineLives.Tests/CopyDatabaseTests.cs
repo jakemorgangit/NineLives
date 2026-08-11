@@ -249,17 +249,24 @@ public class CopyDatabaseTests
         Assert.Contains("over itself", vm.Refusal);
     }
 
-    /// <summary>The same instance under a DIFFERENT name is an ordinary copy, and is allowed.</summary>
+    /// <summary>
+    /// The same instance under a DIFFERENT name is refused too (#282): with no MOVE clauses,
+    /// the restored files land on the live source's own paths and SQL Server fails the
+    /// restore with Msg 1834 - after the backup half has already run. This test used to
+    /// bless the copy as "ordinary"; the refusal names the way that works instead.
+    /// </summary>
     [Fact]
-    public async Task CopyingOntoTheSameInstanceUnderAnotherNameIsFine()
+    public async Task CopyingOntoTheSameInstanceUnderAnotherNameIsRefusedWithTheWayOut()
     {
         var (vm, _) = await ReadyAsync();
 
         vm.TargetServer = vm.SourceServer;
         vm.TargetDatabaseName = "MyDb_Copy";
 
-        Assert.False(vm.IsRefused);
-        Assert.True(vm.CanGenerate);
+        Assert.True(vm.IsRefused);
+        Assert.Contains("1834", vm.Refusal);
+        Assert.Contains("Restore screen", vm.Refusal);
+        Assert.False(vm.CanGenerate);
     }
 
     /// <summary>

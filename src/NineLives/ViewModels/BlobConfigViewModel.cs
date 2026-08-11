@@ -8,6 +8,16 @@ using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.ViewModels;
 
+/// <summary>
+/// The Blob Storage form's provider choice (#51). UI state only - what persists is the
+/// container URL, whose scheme is the provider truth everywhere else in the app.
+/// </summary>
+public enum StorageProviderChoice
+{
+    Azure,
+    S3
+}
+
 public partial class BlobConfigViewModel : ViewModelBase
 {
     private readonly ICredentialStore _credentialStore;
@@ -49,6 +59,61 @@ public partial class BlobConfigViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _editSasToken = string.Empty;
+
+    /// <summary>
+    /// True when the URL on the form is an s3:// endpoint (#51). What is SAVED never carries a
+    /// provider field - the URL's scheme is the answer - so this is the truth the form's
+    /// provider choice below has to agree with by the time Save runs.
+    /// </summary>
+    public bool IsS3Url =>
+        EditContainerUrl.TrimStart().StartsWith("s3://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Which provider the form is collecting for. UI state, not a persisted field: the saved
+    /// truth stays the URL's own scheme. This exists because the scheme alone made S3
+    /// invisible on an empty Add Container form - every section defaulted to its Azure shape
+    /// and nothing said a bucket was even possible until an s3:// URL had been typed. The
+    /// choice shows the right sections immediately; typing a URL with a scheme snaps the
+    /// choice to match it (the URL wins - it is what will be saved); a mismatch left standing
+    /// is refused at Save with the fix named.
+    ///
+    /// An enum bound through EnumToBool, exactly like the authentication radios above it: that
+    /// converter answers an uncheck with Binding.DoNothing, which is what keeps the radio
+    /// group's own unchecking from writing junk back through the binding.
+    /// </summary>
+    [ObservableProperty]
+    private StorageProviderChoice _editProvider = StorageProviderChoice.Azure;
+
+    /// <summary>The provider choice as the yes/no every section gate and code branch asks.</summary>
+    public bool EditIsS3 => EditProvider == StorageProviderChoice.S3;
+
+    /// <summary>The two halves the form collects for an s3:// container. Combined on save into
+    /// the one AccessKeyId:SecretKey string the engine's credential and the vault slot both
+    /// want - the halves are never stored separately.</summary>
+    [ObservableProperty]
+    private string _editS3KeyId = string.Empty;
+
+    [ObservableProperty]
+    private string _editS3SecretKey = string.Empty;
+
+    /// <summary>
+    /// The bucket's region, when the provider needs one said (#51). Addressing, not a secret -
+    /// it rides in the config next to the URL.
+    /// </summary>
+    [ObservableProperty]
+    private string _editS3Region = string.Empty;
+
+    private string _originalS3Region = string.Empty;
+
+    /// <summary>
+    /// The pair as the one string everything downstream understands, or empty when the form
+    /// holds no complete pair. Trimmed halves: a pasted key id arrives with the clipboard's
+    /// whitespace often enough, and neither half legitimately contains any.
+    /// </summary>
+    private string ComposedS3Pair =>
+        string.IsNullOrWhiteSpace(EditS3KeyId) || string.IsNullOrWhiteSpace(EditS3SecretKey)
+            ? string.Empty
+            : $"{EditS3KeyId.Trim()}:{EditS3SecretKey.Trim()}";
 
     [ObservableProperty]
     private string _editPathPattern = BlobContainerConfig.DefaultPathPattern;
@@ -175,6 +240,31 @@ public partial class BlobConfigViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Containers deleted on THIS screen since the last successful save (#276) - the merge in
+    /// SaveContainers would otherwise resurrect them from the fresh config.
+    /// </summary>
+    private readonly HashSet<string> _pendingDeletes = [];
+
+    /// <summary>
+    /// Catches the list up with entries added elsewhere - Settings' import, the CLI's
+    /// add-container - since this screen loaded (#276). Called on navigation, like every other
+    /// screen's refresh; skipped mid-edit so the open editor's selection survives.
+    /// </summary>
+    public void RefreshFromConfig()
+    {
+        if (IsEditing || IsBusy) return;
+
+        var config = _credentialStore.LoadConfig();
+        var onDisk = config.BlobContainers.Select(c => c.Id).ToHashSet();
+        if (onDisk.SetEquals(Containers.Select(c => c.Id))) return;
+
+        var selectedId = SelectedContainer?.Id;
+        LoadContainers();
+        SelectedContainer = Containers.FirstOrDefault(c => c.Id == selectedId)
+                            ?? Containers.FirstOrDefault();
+    }
+
+    /// <summary>
     /// Persists the container list. Returns false and sets the error when the write failed, so
     /// callers do not go on to report success - the config save used to swallow everything and
     /// the UI said "saved successfully" whether or not anything reached the disk.
@@ -184,8 +274,28 @@ public partial class BlobConfigViewModel : ViewModelBase
         try
         {
             var config = _credentialStore.LoadConfig();
-            config.BlobContainers = [.. Containers];
+
+            // Merge, never replace (#276). Assigning [.. Containers] deleted anything the
+            // import or the CLI's add-container had written since this screen loaded. Known
+            // entries come from this screen, edits included; unseen entries are kept; only
+            // the ledger's local deletions are dropped.
+            var mine = Containers.Where(c => c.Id != null).ToDictionary(c => c.Id!);
+            var merged = new List<BlobContainerConfig>();
+            foreach (var existing in config.BlobContainers)
+            {
+                if (existing.Id != null && _pendingDeletes.Contains(existing.Id)) continue;
+                merged.Add(existing.Id != null && mine.TryGetValue(existing.Id, out var ours)
+                    ? ours
+                    : existing);
+            }
+
+            foreach (var container in Containers)
+                if (!merged.Any(m => ReferenceEquals(m, container)))
+                    merged.Add(container);
+
+            config.BlobContainers = merged;
             _credentialStore.SaveConfig(config);
+            _pendingDeletes.Clear();
             return true;
         }
         catch (Exception ex)
@@ -202,8 +312,37 @@ public partial class BlobConfigViewModel : ViewModelBase
     }
 
     partial void OnEditNameChanged(string value) => CheckForUnsavedChanges();
-    partial void OnEditContainerUrlChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditContainerUrlChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsS3Url));
+
+        // A typed scheme decides: the URL is what gets saved, so the provider choice follows
+        // it rather than arguing with it. A URL with no scheme yet moves nothing, so the
+        // choice made on an empty form survives the typing that comes after it.
+        if (IsS3Url) EditProvider = StorageProviderChoice.S3;
+        else if (value.TrimStart().StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            EditProvider = StorageProviderChoice.Azure;
+
+        CheckForUnsavedChanges();
+    }
+
+    partial void OnEditProviderChanged(StorageProviderChoice value)
+    {
+        OnPropertyChanged(nameof(EditIsS3));
+
+        // An s3:// endpoint has exactly one way in - the key pair - so the Entra choices
+        // vanish from the form and the mode snaps back rather than silently riding along on
+        // a container that can never use it (#51).
+        if (value == StorageProviderChoice.S3 && EditAuthMode != BlobAuthMode.SasToken)
+            EditAuthMode = BlobAuthMode.SasToken;
+
+        if (IsEditing) UpdateSasExpiryStatusForForm();
+        CheckForUnsavedChanges();
+    }
     partial void OnEditSasTokenChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditS3KeyIdChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditS3SecretKeyChanged(string value) => CheckForUnsavedChanges();
+    partial void OnEditS3RegionChanged(string value) => CheckForUnsavedChanges();
     partial void OnEditAuthModeChanged(BlobAuthMode value)
     {
         OnPropertyChanged(nameof(IsSasAuth));
@@ -228,14 +367,19 @@ public partial class BlobConfigViewModel : ViewModelBase
     private void CheckForUnsavedChanges()
     {
         if (!IsEditing) return;
+
+        // Whichever credential the form is collecting - the SAS box or the key-pair halves -
+        // counts the same way: against the stored sentinel, anything entered is a change.
+        var enteredSecret = EditIsS3 ? ComposedS3Pair : EditSasToken;
         var sasChanged = _originalSas == StoredSasSentinel
-            ? !string.IsNullOrEmpty(EditSasToken)
-            : EditSasToken != _originalSas;
+            ? !string.IsNullOrEmpty(enteredSecret)
+            : enteredSecret != _originalSas;
         HasUnsavedChanges =
             EditName != _originalName ||
             EditContainerUrl != _originalUrl ||
             EditAuthMode != _originalAuthMode ||
             sasChanged ||
+            EditS3Region != _originalS3Region ||
             EditPathPattern != _originalPattern ||
             EditBackupSourceType != _originalBackupSourceType ||
             EditAgPathPattern != _originalAgPathPattern ||
@@ -252,6 +396,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         var name = container.Name;
         var url = container.ContainerUrl;
         var authMode = container.AuthMode;
+        var s3Region = container.S3Region;
         var pattern = container.PathPattern;
         var sourceType = container.BackupSourceType;
         var agPattern = container.AgPathPattern;
@@ -263,6 +408,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             container.Name = name;
             container.ContainerUrl = url;
             container.AuthMode = authMode;
+            container.S3Region = s3Region;
             container.PathPattern = pattern;
             container.BackupSourceType = sourceType;
             container.AgPathPattern = agPattern;
@@ -277,6 +423,7 @@ public partial class BlobConfigViewModel : ViewModelBase
         _originalUrl = EditContainerUrl;
         _originalAuthMode = EditAuthMode;
         _originalSas = HasStoredSasToken ? StoredSasSentinel : EditSasToken;
+        _originalS3Region = EditS3Region;
         _originalPattern = EditPathPattern;
         _originalBackupSourceType = EditBackupSourceType;
         _originalAgPathPattern = EditAgPathPattern;
@@ -285,8 +432,33 @@ public partial class BlobConfigViewModel : ViewModelBase
         HasUnsavedChanges = false;
     }
 
+    /// <summary>Re-reads the expiry line from what the form currently says, for the edits that
+    /// change what kind of credential is even in play.</summary>
+    private void UpdateSasExpiryStatusForForm()
+    {
+        if (EditIsS3)
+        {
+            SasExpiryText = string.Empty;
+            IsSasExpired = false;
+        }
+        else if (SelectedContainer != null)
+        {
+            UpdateSasExpiryStatus(SelectedContainer);
+        }
+    }
+
     private void UpdateSasExpiryStatus(BlobContainerConfig container)
     {
+        // A key pair has no se= to read: it does not expire on a schedule the app can see, and
+        // an expiry line against it would send someone hunting for a token that does not exist
+        // (#51). Same reasoning as Entra below.
+        if ((IsEditing && EditIsS3) || (!IsEditing && container.IsS3))
+        {
+            SasExpiryText = string.Empty;
+            IsSasExpired = false;
+            return;
+        }
+
         // Entra has no token of ours to expire. Reporting "expired" against a container that never
         // had a SAS would send someone hunting for a token that is not the problem.
         if (EditAuthMode.IsEntra() || (!IsEditing && container.AuthMode.IsEntra()))
@@ -451,8 +623,12 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = string.Empty;
         EditTags = string.Empty;
         EditContainerUrl = string.Empty;
+        EditProvider = StorageProviderChoice.Azure;
         EditAuthMode = BlobAuthMode.SasToken;
         EditSasToken = string.Empty;
+        EditS3KeyId = string.Empty;
+        EditS3SecretKey = string.Empty;
+        EditS3Region = string.Empty;
         EditPathPattern = BlobContainerConfig.DefaultPathPattern;
         EditBackupSourceType = BackupSourceType.Standalone;
         EditAgPathPattern = null;
@@ -475,10 +651,14 @@ public partial class BlobConfigViewModel : ViewModelBase
         EditName = SelectedContainer.Name;
         EditTags = TagPalette.FormatTags(SelectedContainer.Tags);
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        EditProvider = SelectedContainer.IsS3 ? StorageProviderChoice.S3 : StorageProviderChoice.Azure;
         EditAuthMode = SelectedContainer.AuthMode;
         var storedToken = _credentialStore.GetSasToken(SelectedContainer);
         HasStoredSasToken = !string.IsNullOrEmpty(storedToken);
         EditSasToken = string.Empty; // Never show stored token; user can only replace it
+        EditS3KeyId = string.Empty; // The pair is stored, never displayed - same rule as the SAS
+        EditS3SecretKey = string.Empty;
+        EditS3Region = SelectedContainer.S3Region ?? string.Empty;
         EditPathPattern = SelectedContainer.PathPattern;
         EditBackupSourceType = SelectedContainer.BackupSourceType;
         EditBackupServerTimeZone = TimeZoneOption.For(SelectedContainer.BackupServerTimeZoneId, TimeZones);
@@ -509,12 +689,68 @@ public partial class BlobConfigViewModel : ViewModelBase
             return;
         }
 
-        bool haveTokenToSave = IsSasAuth && !string.IsNullOrWhiteSpace(EditSasToken);
-        if (IsNew && IsSasAuth && !haveTokenToSave)
+        bool haveTokenToSave;
+        if (EditIsS3)
         {
-            SetError("SAS Token is required.");
-            return;
+            // The URL and the pair are both shape-checked here, at entry - a malformed one
+            // refused now is an authentication failure that never happens later (#51). The
+            // saved truth is the URL's scheme, so the provider choice and the URL must agree
+            // before anything persists.
+            if (!IsS3Url)
+            {
+                SetError("S3-compatible storage is selected, but the URL is not an s3:// one. "
+                    + "An S3 container URL is s3://endpoint[:port]/bucket.");
+                return;
+            }
+            if (S3Url.TryParse(EditContainerUrl.TrimEnd('/')) == null)
+            {
+                SetError("An s3:// container URL is s3://endpoint[:port]/bucket - the endpoint "
+                    + "is the provider's host name, and the first path segment is the bucket.");
+                return;
+            }
+
+            var hasEither = !string.IsNullOrWhiteSpace(EditS3KeyId)
+                || !string.IsNullOrWhiteSpace(EditS3SecretKey);
+            haveTokenToSave = ComposedS3Pair.Length > 0;
+            if (hasEither && !haveTokenToSave)
+            {
+                SetError("Both halves of the key pair are needed - the access key id and the "
+                    + "secret key.");
+                return;
+            }
+            if (haveTokenToSave && S3Credentials.Validate(ComposedS3Pair) is { } why)
+            {
+                SetError(why);
+                return;
+            }
+            if (IsNew && !haveTokenToSave)
+            {
+                SetError("The access key pair is required.");
+                return;
+            }
         }
+        else
+        {
+            // The mirror of the check above: an s3:// URL with Azure selected is a mismatch
+            // someone should resolve, not a guess the save should make.
+            if (IsS3Url)
+            {
+                SetError("This URL is s3:// - S3-compatible storage. Select that above, or "
+                    + "paste an https:// Azure container URL.");
+                return;
+            }
+            haveTokenToSave = IsSasAuth && !string.IsNullOrWhiteSpace(EditSasToken);
+            if (IsNew && IsSasAuth && !haveTokenToSave)
+            {
+                SetError("SAS Token is required.");
+                return;
+            }
+        }
+
+        // Addressing, not a secret - and null clears a stale region when the URL stops being s3.
+        var s3Region = EditIsS3 && !string.IsNullOrWhiteSpace(EditS3Region)
+            ? EditS3Region.Trim()
+            : null;
 
         BlobContainerConfig container;
 
@@ -537,6 +773,7 @@ public partial class BlobConfigViewModel : ViewModelBase
                 Name = EditName,
                 ContainerUrl = EditContainerUrl.TrimEnd('/'),
                 AuthMode = EditAuthMode,
+                S3Region = s3Region,
                 PathPattern = EditPathPattern,
                 BackupSourceType = EditBackupSourceType,
                 AgPathPattern = string.IsNullOrWhiteSpace(agPattern) ? null : agPattern.Trim(),
@@ -559,6 +796,7 @@ public partial class BlobConfigViewModel : ViewModelBase
             ReplaceTags(container.Tags, TagPalette.ParseTags(EditTags));
             container.ContainerUrl = EditContainerUrl.TrimEnd('/');
             container.AuthMode = EditAuthMode;
+            container.S3Region = s3Region;
             container.PathPattern = EditPathPattern;
             container.BackupSourceType = EditBackupSourceType;
             container.BackupServerTimeZoneId = EditBackupServerTimeZone?.Id;
@@ -588,7 +826,9 @@ public partial class BlobConfigViewModel : ViewModelBase
         {
             try
             {
-                _credentialStore.SaveSasToken(container, EditSasToken);
+                // For an s3:// container the two halves leave the form as the one string the
+                // engine's CREATE CREDENTIAL wants - the same slot the SAS occupies (#51).
+                _credentialStore.SaveSasToken(container, EditIsS3 ? ComposedS3Pair : EditSasToken);
             }
             catch (Exception ex)
             {
@@ -625,9 +865,10 @@ public partial class BlobConfigViewModel : ViewModelBase
         // question rather than a single click (#42).
         var confirm = MessageBox.Show(
             $"Remove the container \"{SelectedContainer.Name}\"?\n\n" +
-            "Its stored SAS token will be deleted from Windows Credential Manager. The app never " +
-            "displays stored tokens, so if this is the only copy you will need to obtain a new one.\n\n" +
-            "Nothing in Azure is affected - no backups are deleted.",
+            "Its stored credential - the SAS token or access key pair - will be deleted from " +
+            "Windows Credential Manager. The app never displays stored credentials, so if this " +
+            "is the only copy you will need to obtain a new one.\n\n" +
+            "Nothing in the container itself is affected - no backups are deleted.",
             "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
 
         if (confirm != MessageBoxResult.Yes) return;
@@ -637,9 +878,11 @@ public partial class BlobConfigViewModel : ViewModelBase
         // container in config.json pointing at a credential that no longer exists.
         var removed = SelectedContainer;
         Containers.Remove(removed);
+        if (removed.Id != null) _pendingDeletes.Add(removed.Id);
         if (!SaveContainers())
         {
             Containers.Add(removed);
+            if (removed.Id != null) _pendingDeletes.Remove(removed.Id);
             SelectedContainer = removed;
             return;
         }
@@ -655,8 +898,12 @@ public partial class BlobConfigViewModel : ViewModelBase
         if (SelectedContainer == null) return;
         EditName = SelectedContainer.Name;
         EditContainerUrl = SelectedContainer.ContainerUrl;
+        EditProvider = SelectedContainer.IsS3 ? StorageProviderChoice.S3 : StorageProviderChoice.Azure;
         HasStoredSasToken = true; // Still have a token; user will replace it
         EditSasToken = string.Empty;
+        EditS3KeyId = string.Empty;
+        EditS3SecretKey = string.Empty;
+        EditS3Region = SelectedContainer.S3Region ?? string.Empty;
         EditPathPattern = SelectedContainer.PathPattern;
         EditBackupServerTimeZone = TimeZoneOption.For(SelectedContainer.BackupServerTimeZoneId, TimeZones);
         EditBackupSourceType = SelectedContainer.BackupSourceType;
@@ -682,7 +929,40 @@ public partial class BlobConfigViewModel : ViewModelBase
         BlobContainerConfig? config;
         if (IsEditing)
         {
-            if (IsEntraAuth)
+            if (EditIsS3)
+            {
+                // Built from the form, so what is tested is exactly what is on screen - the
+                // URL and region included, which matters when the region is the thing being
+                // fixed. The pair comes from the form when entered, else the stored one; in
+                // memory only either way, same rule as the SAS below (#12).
+                if (S3Url.TryParse(EditContainerUrl.TrimEnd('/')) == null)
+                {
+                    TestSuccess = false;
+                    TestResult = "An s3:// container URL is s3://endpoint[:port]/bucket - "
+                        + "fix the URL and test again.";
+                    return;
+                }
+
+                var pair = ComposedS3Pair.Length > 0
+                    ? ComposedS3Pair
+                    : SelectedContainer != null ? _credentialStore.GetSasToken(SelectedContainer) : null;
+
+                if (ComposedS3Pair.Length > 0 && S3Credentials.Validate(ComposedS3Pair) is { } why)
+                {
+                    TestSuccess = false;
+                    TestResult = why;
+                    return;
+                }
+
+                config = new BlobContainerConfig
+                {
+                    Name = EditName,
+                    ContainerUrl = EditContainerUrl,
+                    UnsavedSasToken = string.IsNullOrEmpty(pair) ? null : pair,
+                    S3Region = string.IsNullOrWhiteSpace(EditS3Region) ? null : EditS3Region.Trim()
+                };
+            }
+            else if (IsEntraAuth)
             {
                 // Nothing stored to fall back on, and nothing needed - the token comes from the
                 // signed-in account. Built from the form, so what is tested is the URL on screen.

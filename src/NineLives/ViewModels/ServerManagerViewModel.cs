@@ -89,6 +89,13 @@ public partial class ServerManagerViewModel : ViewModelBase
     [ObservableProperty]
     private string _connectedServerDisplay = string.Empty;
 
+    /// <summary>
+    /// Servers deleted on THIS screen since the last successful save (#276). The save merges
+    /// with the config on disk rather than replacing it, and a merge with no memory of local
+    /// deletions would resurrect every one of them from the fresh copy.
+    /// </summary>
+    private readonly HashSet<string> _pendingDeletes = [];
+
     public ServerManagerViewModel(ICredentialStore credentialStore, ISqlServerService sqlService)
     {
         _credentialStore = credentialStore;
@@ -100,6 +107,25 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         var config = _credentialStore.LoadConfig();
         Servers = new ObservableCollection<ServerConnection>(config.Servers);
+    }
+
+    /// <summary>
+    /// Catches the list up with entries added elsewhere - Settings' import, the CLI's
+    /// add-server - since this screen loaded (#276). Called on navigation, like every other
+    /// screen's refresh. Skipped mid-edit: replacing the list under an open editor would
+    /// reset the selection the editor belongs to.
+    /// </summary>
+    public void RefreshFromConfig()
+    {
+        if (IsEditing || IsBusy) return;
+
+        var config = _credentialStore.LoadConfig();
+        var onDisk = config.Servers.Select(s => s.Id).ToHashSet();
+        if (onDisk.SetEquals(Servers.Select(s => s.Id))) return;
+
+        var selectedId = SelectedServer?.Id;
+        Servers = new ObservableCollection<ServerConnection>(config.Servers);
+        SelectedServer = Servers.FirstOrDefault(s => s.Id == selectedId) ?? Servers.FirstOrDefault();
     }
 
     /// <summary>
@@ -140,8 +166,29 @@ public partial class ServerManagerViewModel : ViewModelBase
         try
         {
             var config = _credentialStore.LoadConfig();
-            config.Servers = [.. Servers];
+
+            // Merge, never replace (#276). This screen's list was loaded when the screen was;
+            // Settings' import or the CLI's add-server may have written entries since, and
+            // assigning [.. Servers] silently deleted every one of them. Entries this screen
+            // knows are taken from this screen, edits included; entries it has never seen are
+            // kept; only entries deleted HERE - the ledger - are dropped.
+            var mine = Servers.Where(s => s.Id != null).ToDictionary(s => s.Id!);
+            var merged = new List<ServerConnection>();
+            foreach (var existing in config.Servers)
+            {
+                if (existing.Id != null && _pendingDeletes.Contains(existing.Id)) continue;
+                merged.Add(existing.Id != null && mine.TryGetValue(existing.Id, out var ours)
+                    ? ours
+                    : existing);
+            }
+
+            foreach (var server in Servers)
+                if (!merged.Any(m => ReferenceEquals(m, server)))
+                    merged.Add(server);
+
+            config.Servers = merged;
             _credentialStore.SaveConfig(config);
+            _pendingDeletes.Clear();
             return true;
         }
         catch (Exception ex)
@@ -267,10 +314,27 @@ public partial class ServerManagerViewModel : ViewModelBase
         {
             server = SelectedServer!;
 
+            // The same rule the new path enforces, excluding self (#291): a rename onto an
+            // existing name was allowed, after which every display-text comparison anywhere
+            // in the app was ambiguous between the two.
+            if (Servers.Any(x => !ReferenceEquals(x, server) &&
+                                 x.Name.Equals(EditName, StringComparison.OrdinalIgnoreCase)))
+            {
+                SetError("A server with this name already exists.");
+                return;
+            }
+
             // Snapshot before mutating, so a refused save can put the model back rather than
             // leaving it showing values that were never persisted.
             restore = Snapshot(server);
         }
+
+        // What the connection was proven against, before the mutation below (#291). A changed
+        // address, auth mode, login, or encryption setting makes the proven connection a claim
+        // about settings that no longer exist.
+        var editingConnected = !IsNew && _connected != null && ReferenceEquals(server, _connected);
+        var beforeConnection = (server.ServerName, server.AuthMode, server.Username,
+                                server.Encrypt, server.TrustServerCertificate);
 
         server.Name = EditName;
         // Mutate in place - assigning a new collection raises no notification on a POCO, so the
@@ -330,8 +394,46 @@ public partial class ServerManagerViewModel : ViewModelBase
 
         SelectedServer = server;
         IsEditing = false;
+
+        if (editingConnected)
+        {
+            var afterConnection = (server.ServerName, server.AuthMode, server.Username,
+                                   server.Encrypt, server.TrustServerCertificate);
+            var passwordReplaced = server.AuthMode.NeedsStoredPassword() &&
+                                   !string.IsNullOrWhiteSpace(EditPassword);
+
+            if (beforeConnection != afterConnection || passwordReplaced)
+            {
+                // The old settings were proven; these are not. Silently repointing the SAME
+                // object at untested settings left every screen reporting a connection nobody
+                // had tested (#291).
+                IsConnected = false;
+                MarkConnected(null);
+                ConnectedServerDisplay = string.Empty;
+                ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
+                {
+                    IsConnected = false,
+                    ServerName = string.Empty
+                });
+                SetStatus("Server saved. Its connection settings changed, so the previous " +
+                          "connection no longer stands - connect again to prove the new ones.");
+                return;
+            }
+
+            // A rename keeps the proven connection - the caption follows the new name.
+            ConnectedServerDisplay = server.DisplayText;
+        }
+
         SetStatus("Server saved successfully.");
     }
+
+    /// <summary>
+    /// The delete confirmation, injectable because the dialog is the one step a headless
+    /// test cannot click - the lifecycle around it is what needs the pins (#291).
+    /// </summary>
+    internal Func<string, bool> ConfirmDelete { get; set; } = message =>
+        MessageBox.Show(message, "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
 
     [RelayCommand]
     private void Delete()
@@ -344,12 +446,9 @@ public partial class ServerManagerViewModel : ViewModelBase
             ? "\n\nIts stored SQL password will be deleted from Windows Credential Manager."
             : string.Empty;
 
-        var confirm = MessageBox.Show(
+        if (!ConfirmDelete(
             $"Remove the server \"{SelectedServer.Name}\"?{secretNote}\n\n" +
-            "Nothing on the SQL Server itself is affected.",
-            "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-
-        if (confirm != MessageBoxResult.Yes) return;
+            "Nothing on the SQL Server itself is affected.")) return;
 
         // Take the server out of the config first and only destroy its stored password once that
         // write has landed. The other order threw the password away and then, if the save failed,
@@ -357,9 +456,11 @@ public partial class ServerManagerViewModel : ViewModelBase
         var removed = SelectedServer;
         var index = Servers.IndexOf(removed);
         Servers.Remove(removed);
+        if (removed.Id != null) _pendingDeletes.Add(removed.Id);
         if (!SaveServers())
         {
             Servers.Insert(Math.Clamp(index, 0, Servers.Count), removed);
+            if (removed.Id != null) _pendingDeletes.Remove(removed.Id);
             SelectedServer = removed;
             return;
         }
@@ -367,7 +468,11 @@ public partial class ServerManagerViewModel : ViewModelBase
         if (removed.AuthMode.NeedsStoredPassword())
             _credentialStore.DeleteSecret(removed.CredentialKey);
 
-        if (IsConnected && ConnectedServerDisplay == removed.DisplayText)
+        // By identity, not caption (#291): Save mutates Name in place, so after a rename the
+        // display text never matched - the status bar kept saying "Connected to X" while the
+        // restore screen still held the deleted object as its target.
+        if (IsConnected && _connected != null &&
+            (ReferenceEquals(removed, _connected) || removed.Id == _connected.Id))
         {
             IsConnected = false;
             MarkConnected(null);
@@ -479,11 +584,15 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
     }
 
+    /// <summary>The entry the live connection was proven against - by object, not by caption.</summary>
+    private ServerConnection? _connected;
+
     /// <summary>
     /// Exactly one server carries the connected marker, so the list can never show two.
     /// </summary>
     private void MarkConnected(ServerConnection? connected)
     {
+        _connected = connected;
         foreach (var server in Servers)
             server.IsConnectedServer = ReferenceEquals(server, connected);
     }

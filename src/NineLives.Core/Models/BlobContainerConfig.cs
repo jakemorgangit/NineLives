@@ -1,0 +1,430 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Globalization;
+using System.Text.Json.Serialization;
+using System.Web;
+
+using Blackcat.NineLives.Services;
+
+namespace Blackcat.NineLives.Models;
+
+/// <summary>
+/// Indicates what type of backups are stored in the container:
+/// Standalone = path-based structure only; AG = Ola default AG naming (flat filenames);
+/// Mixed = both, with separate path patterns for each.
+/// </summary>
+public enum BackupSourceType
+{
+    Standalone,
+    AvailabilityGroup,
+    Mixed
+}
+
+/// <summary>
+/// How the app authenticates to the container when listing backups (#29).
+///
+/// Many organisations now prohibit long-lived SAS tokens outright, which made the tool unusable for
+/// them regardless of its merits. The Entra modes hold no secret at all - the token is acquired and
+/// refreshed by Azure.Identity and never touches the credential store.
+///
+/// The numbers are pinned. These are serialised into config.json, so reordering would silently
+/// repoint every saved container at a different authentication mode.
+/// </summary>
+public enum BlobAuthMode
+{
+    /// <summary>A stored SAS token. The original mode, and still the default.</summary>
+    SasToken = 0,
+
+    /// <summary>
+    /// Entra ID with a browser sign-in, which is the mode that satisfies MFA. The sign-in is
+    /// remembered for the life of the process and written nowhere.
+    /// </summary>
+    EntraInteractive = 1,
+
+    /// <summary>
+    /// Entra ID letting Azure.Identity choose - environment variables, then a managed identity,
+    /// then the Azure CLI or Visual Studio sign-in, then a browser prompt. The mode to pick when
+    /// the app runs on an Azure VM with a managed identity assigned.
+    /// </summary>
+    EntraDefault = 2
+}
+
+/// <summary>Things every blob authentication mode has to answer.</summary>
+public static class BlobAuthModes
+{
+    /// <summary>Whether the app has to hold a SAS token for this mode.</summary>
+    public static bool NeedsSasToken(this BlobAuthMode mode) => mode == BlobAuthMode.SasToken;
+
+    public static bool IsEntra(this BlobAuthMode mode) => mode != BlobAuthMode.SasToken;
+
+    public static string Describe(this BlobAuthMode mode) => mode switch
+    {
+        BlobAuthMode.SasToken => "SAS token",
+        BlobAuthMode.EntraInteractive => "Entra ID (interactive)",
+        BlobAuthMode.EntraDefault => "Entra ID (default)",
+        _ => "Unknown"
+    };
+}
+
+/// <summary>
+/// A saved blob container. Implements INotifyPropertyChanged so the derived TagChips member
+/// notifies when Tags changes - see the note on Tags.
+/// </summary>
+public class BlobContainerConfig : INotifyPropertyChanged
+{
+    /// <summary>
+    /// Stable identity for the stored SAS token, assigned once and never changed.
+    ///
+    /// The credential key used to derive from Name, so renaming a container pointed it at a key
+    /// that did not exist and the working token was stranded under the old one with no way to get
+    /// it back (#8).
+    ///
+    /// Null on entries written before this existed. It is deliberately NOT defaulted to a new Guid:
+    /// an absent value in JSON leaves the property at its initialiser, so defaulting would hand
+    /// every legacy entry a fresh id on load and lose its secret immediately. ConfigMigrator
+    /// assigns ids and moves the secrets; NewId() is what callers creating a container use.
+    /// </summary>
+    public string? Id { get; set; }
+
+    public static string NewId() => Guid.NewGuid().ToString("n");
+
+    public string Name { get; set; } = string.Empty;
+    public string ContainerUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether this container is S3-compatible object storage (#51). Derived from the URL's
+    /// own scheme - an s3:// endpoint IS the provider answer, there is no second field to
+    /// keep in sync, and every existing config migrates by doing nothing.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsS3 => ContainerUrl.StartsWith("s3://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The bucket's region, for providers that need one (#51). Addressing, not a secret - it
+    /// rides in the config and in exports. Null means the provider's default (the engine
+    /// assumes us-east-1); AWS-style endpoints usually carry the region in the host name and
+    /// need nothing here.
+    /// </summary>
+    public string? S3Region { get; set; }
+
+    /// <summary>
+    /// How the app signs in to this container (#29). Absent from config files written before this
+    /// existed, which deserialise to <see cref="BlobAuthMode.SasToken"/> - the behaviour they
+    /// already had, so no migration is needed.
+    /// </summary>
+    public BlobAuthMode AuthMode { get; set; } = BlobAuthMode.SasToken;
+
+    /// <summary>
+    /// Whether backups are from standalone instances, AG (Ola default naming), or both.
+    /// </summary>
+    public BackupSourceType BackupSourceType { get; set; } = BackupSourceType.Standalone;
+
+    /// <summary>
+    /// Pattern describing the blob path structure (standalone, or when Mixed this is the standalone pattern).
+    /// Supported tokens: {BackupType}, {ServerName}, {InstanceName}, {DatabaseName}, {FileName}
+    /// Default: {BackupType}/{ServerName}/{DatabaseName}/{FileName}
+    /// </summary>
+    public string PathPattern { get; set; } = DefaultPathPattern;
+
+    /// <summary>
+    /// The layout the app assumes when nobody has said otherwise - Ola Hallengren's, which is what
+    /// most containers this points at were written by.
+    ///
+    /// One constant rather than five copies of the literal (#42). It was written out separately in
+    /// the config default, the edit form's initial value, the reset-to-default, the AG fallback and
+    /// the "new container" default - so changing the app's idea of a default meant finding all five,
+    /// and a container created from one path could disagree with the pattern used to read it back.
+    /// </summary>
+    public const string DefaultPathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}";
+
+    /// <summary>
+    /// When BackupSourceType is Mixed or AvailabilityGroup, optional path pattern for AG backups.
+    /// If null/empty, AG backups are assumed to use Ola default flat naming and are parsed from the filename.
+    /// </summary>
+    public string? AgPathPattern { get; set; }
+
+    /// <summary>
+    /// The time zone the backup SERVER runs in, if known (#102).
+    ///
+    /// A backup's time comes from either its filename - which the backup job wrote in the server's
+    /// local time - or the blob's LastModified, which is UTC. Without this they cannot be put on
+    /// one clock, only labelled; with it, the UTC readings convert and sort correctly against the
+    /// rest.
+    ///
+    /// Stored as a system id (Windows or IANA - .NET accepts both since 6.0). Null means unknown,
+    /// which is the default and behaves exactly as before. An id this machine does not recognise
+    /// is treated as unknown rather than as an error: someone browsing a container should not be
+    /// stopped by a setting that only affects how a few timestamps are displayed.
+    /// </summary>
+    public string? BackupServerTimeZoneId { get; set; }
+
+    private ObservableCollection<string> _tags = [];
+
+    /// <summary>
+    /// Free-text labels shown as coloured pills. Absent from older config files, which
+    /// deserialise to an empty collection - no migration needed.
+    ///
+    /// Editing in place or replacing wholesale both work: the setter re-subscribes, and the
+    /// collection's own changes are forwarded to the derived TagChips so the pill list refreshes
+    /// on save rather than when the row is next rebuilt.
+    /// </summary>
+    public ObservableCollection<string> Tags
+    {
+        get => _tags;
+        set
+        {
+            if (ReferenceEquals(_tags, value)) return;
+            _tags.CollectionChanged -= OnTagsCollectionChanged;
+            _tags = value ?? [];
+            _tags.CollectionChanged += OnTagsCollectionChanged;
+            RaiseTagMembersChanged();
+        }
+    }
+
+    public BlobContainerConfig()
+    {
+        _tags.CollectionChanged += OnTagsCollectionChanged;
+    }
+
+    /// <summary>
+    /// Tags as chips, matching the server list. Containers have no automatic tags yet, but going
+    /// through the same shape keeps one rendering path.
+    ///
+    /// Alphabetical. Sorted here as well as in ParseTags so containers saved before this change
+    /// display in order straight away, rather than waiting to be edited and re-saved.
+    /// </summary>
+    [JsonIgnore]
+    public IEnumerable<TagChip> TagChips => TagPalette.Sort(Tags).Select(TagChip.Manual);
+
+    private void OnTagsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => RaiseTagMembersChanged();
+
+    private void RaiseTagMembersChanged()
+    {
+        OnPropertyChanged(nameof(Tags));
+        OnPropertyChanged(nameof(TagChips));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    /// <summary>
+    /// Key used to look up the SAS token in Windows Credential Manager. Keyed on the immutable
+    /// <see cref="Id"/> so renaming the container does not strand its token; falls back to the
+    /// old name-derived key only for entries that have not been migrated yet.
+    /// </summary>
+    [JsonIgnore]
+    public string CredentialKey =>
+        string.IsNullOrEmpty(Id) ? LegacyCredentialKey : $"NineLives:Blob:{Id}";
+
+    /// <summary>The pre-#8 name-derived key. Only ConfigMigrator should need this.</summary>
+    [JsonIgnore]
+    public string LegacyCredentialKey => $"NineLives:Blob:{Name}";
+
+    /// <summary>
+    /// A SAS token held in memory for this object only, never written anywhere. When set, the
+    /// blob service uses it in place of the stored one.
+    ///
+    /// This exists for Test Connection (#12). Testing a newly typed token used to persist it to
+    /// Credential Manager first - so pasting a typo'd or expired token, testing it, watching it
+    /// fail and clicking Cancel destroyed the working token that was there before, with no way
+    /// to get it back because the form never displays stored tokens.
+    /// </summary>
+    [JsonIgnore]
+    public string? UnsavedSasToken { get; set; }
+
+    /// <summary>
+    /// Whether the stored SAS token has passed its expiry. Always false under Entra, which has no
+    /// token of ours to expire - the whole reason an organisation switches to it.
+    /// </summary>
+    public bool IsExpired => AuthMode.NeedsSasToken() && ReadSasExpiry().IsExpired;
+
+    public DateTime? SasExpiry => GetSasExpiry();
+
+    public string? StorageAccountName
+    {
+        get
+        {
+            if (!Uri.TryCreate(ContainerUrl, UriKind.Absolute, out var uri))
+                return null;
+            var host = uri.Host;
+            var dotIndex = host.IndexOf('.');
+            return dotIndex > 0 ? host[..dotIndex] : host;
+        }
+    }
+
+    public string? ContainerName
+    {
+        get
+        {
+            if (!Uri.TryCreate(ContainerUrl, UriKind.Absolute, out var uri))
+                return null;
+            return uri.AbsolutePath.Trim('/');
+        }
+    }
+
+    /// <summary>
+    /// What to call the thing this container lives in (#345). Azure has a storage account -
+    /// the first label of the host name - and a bucket does not: an S3 URL's host is the
+    /// provider's endpoint, whole.
+    /// </summary>
+    [JsonIgnore]
+    public string LocationLabel => IsS3 ? "ENDPOINT" : "STORAGE ACCOUNT";
+
+    /// <summary>
+    /// The value for <see cref="LocationLabel"/>. Reported "s3" for every AWS bucket before
+    /// this existed, because <see cref="StorageAccountName"/> splits the host on its first dot
+    /// - which is the storage account for an Azure URL and the first label of an endpoint for
+    /// an S3 one. The authority rather than the bare host, so an endpoint given with a port
+    /// still describes itself completely.
+    /// </summary>
+    [JsonIgnore]
+    public string? LocationDisplay =>
+        IsS3 ? S3Url.TryParse(ContainerUrl)?.Authority : StorageAccountName;
+
+    public string DisplayText
+    {
+        get
+        {
+            var status = IsExpired ? " [EXPIRED]" : "";
+            return $"{Name}{status}";
+        }
+    }
+
+    /// <summary>
+    /// What to call the way this container authenticates. An s3:// container reuses
+    /// <see cref="BlobAuthMode.SasToken"/> as its storage slot (#51), but showing "SAS token"
+    /// for it would send someone reading Azure documentation for a bucket.
+    /// </summary>
+    [JsonIgnore]
+    public string AuthDisplay => IsS3 ? "S3 access key pair" : AuthMode.Describe();
+
+    private string? _cachedSasTokenValue;
+
+    public DateTime? GetSasExpiry(string? sasToken = null) => ReadSasExpiry(sasToken).ExpiresAt;
+
+    /// <summary>
+    /// Reads the SAS <c>se=</c> expiry, distinguishing "there isn't one" from "there is one and it
+    /// is not readable" (#21).
+    ///
+    /// That distinction is the point. The old version parsed with the ambient culture and returned
+    /// null on any failure, and every caller reads null as "not expired" - so on a non-invariant
+    /// locale an expired token could be presented as perfectly fine, and the user found out when
+    /// the restore failed. An se= that will not parse now counts as expired, because the honest
+    /// answer is "this token cannot be trusted to be valid".
+    ///
+    /// A token with no se= at all is a different case and stays "unknown, not expired": a SAS
+    /// built on a stored access policy legitimately has no expiry of its own.
+    /// </summary>
+    public SasExpiryInfo ReadSasExpiry(string? sasToken = null)
+    {
+        var token = sasToken ?? _cachedSasTokenValue;
+        if (string.IsNullOrEmpty(token))
+            return SasExpiryInfo.None;
+
+        string? se;
+        try
+        {
+            var query = token.StartsWith("?") ? token : "?" + token;
+            se = HttpUtility.ParseQueryString(query)["se"];
+        }
+        catch
+        {
+            return SasExpiryInfo.Unreadable;
+        }
+
+        // No se= at all is "this token does not state an expiry". An se= that is present but empty
+        // is a different thing: it claims one and supplies nothing, which is unreadable, not absent.
+        if (se == null)
+            return SasExpiryInfo.None;
+
+        if (string.IsNullOrWhiteSpace(se))
+            return SasExpiryInfo.Unreadable;
+
+        // Invariant, and treating the value as UTC whether or not it carries a zone. Azure writes
+        // ISO-8601 here; the ambient culture has no business interpreting it.
+        var parsed = DateTime.TryParse(
+            se,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out var expiry);
+
+        return parsed ? new SasExpiryInfo(expiry, false) : SasExpiryInfo.Unreadable;
+    }
+
+    public void CacheSasToken(string sasToken)
+    {
+        _cachedSasTokenValue = sasToken;
+    }
+
+    public override string ToString() => DisplayText;
+}
+
+/// <summary>
+/// What a SAS token says about its own expiry. Three states rather than a nullable DateTime,
+/// because "no expiry stated" and "expiry stated but unreadable" mean opposite things and both
+/// used to come back as null (#21).
+/// </summary>
+/// <param name="ExpiresAt">When the token expires, in UTC. Null if it does not say.</param>
+/// <param name="CouldNotParse">The token carries an se= value that could not be read.</param>
+public readonly record struct SasExpiryInfo(DateTime? ExpiresAt, bool CouldNotParse)
+{
+    /// <summary>No se= parameter. Legitimate for a SAS built on a stored access policy.</summary>
+    public static SasExpiryInfo None => new(null, false);
+
+    /// <summary>There is an se=, and it is not readable. Treated as expired.</summary>
+    public static SasExpiryInfo Unreadable => new(null, true);
+
+    /// <summary>
+    /// Unreadable counts as expired. The alternative is presenting a token we cannot vouch for as
+    /// valid, and finding out mid-restore.
+    /// </summary>
+    public bool IsExpired =>
+        CouldNotParse || (ExpiresAt.HasValue && ExpiresAt.Value < DateTime.UtcNow);
+}
+
+/// <summary>
+/// Represents a single token element in the blob path structure builder.
+/// </summary>
+public class PathElement
+{
+    public string Token { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string HexColor { get; set; } = "#4A90D9";
+
+    public static readonly List<PathElement> AllElements =
+    [
+        new() { Token = "BackupType", DisplayName = "Backup Type", HexColor = "#4A90D9" },
+        new() { Token = "ServerName", DisplayName = "Server Name", HexColor = "#F39C12" },
+        new() { Token = "InstanceName", DisplayName = "Instance Name", HexColor = "#9B59B6" },
+        new() { Token = "DatabaseName", DisplayName = "Database Name", HexColor = "#27AE60" },
+        new() { Token = "FileName", DisplayName = "File Name", HexColor = "#8890A4" },
+        // AG-specific: cluster name, AG name, or single segment (with $ or _)
+        new() { Token = "ClusterName", DisplayName = "Cluster Name", HexColor = "#E67E22" },
+        new() { Token = "AgName", DisplayName = "AG Name", HexColor = "#1ABC9C" },
+        new() { Token = "ClusterName$AgName", DisplayName = "Cluster $ AG", HexColor = "#8E44AD" },
+        new() { Token = "ClusterName_AgName", DisplayName = "Cluster _ AG", HexColor = "#3498DB" },
+    ];
+
+    public static PathElement? FromToken(string token)
+        => AllElements.FirstOrDefault(e => e.Token.Equals(token, StringComparison.OrdinalIgnoreCase));
+
+    public static List<PathElement> ParsePattern(string pattern)
+    {
+        var result = new List<PathElement>();
+        var parts = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            var trimmed = part.Trim().Trim('{', '}');
+            var elem = FromToken(trimmed);
+            if (elem != null) result.Add(elem);
+        }
+        return result;
+    }
+
+    public static string BuildPattern(IEnumerable<PathElement> elements)
+        => string.Join("/", elements.Select(e => $"{{{e.Token}}}"));
+}

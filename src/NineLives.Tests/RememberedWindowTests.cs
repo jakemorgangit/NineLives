@@ -78,35 +78,39 @@ public class RememberedWindowTests
         Assert.Same(main.History, main.CurrentView);
     }
 
-    /// <summary>Nothing recorded still lands on Restore, the app's centre (#209).</summary>
+    /// <summary>
+    /// Nothing recorded lands on the front door (#343). It used to be Restore, the app's
+    /// centre (#209) - but the only people with nothing recorded are the ones who have never
+    /// been anywhere, and they are exactly who the introduction exists for.
+    /// </summary>
     [Fact]
-    public void NothingRecordedLandsOnRestore()
+    public void NothingRecordedLandsOnTheFrontDoor()
     {
         var main = Shell();
 
         main.ModeSelection.CancelCommand.Execute(null);
 
-        Assert.Same(main.Restore, main.CurrentView);
+        Assert.Same(main.Home, main.CurrentView);
     }
 
     /// <summary>
-    /// A screen the current mode no longer offers falls back to Restore - a guess at the nearest
-    /// cousin would be worse than the app's centre.
+    /// A screen the current mode no longer offers falls back to the front door - a guess at
+    /// the nearest cousin would be worse than the screen that shows the mode's actual shape.
     /// </summary>
     [Fact]
-    public void AScreenTheModeDoesNotOfferFallsBackToRestore()
+    public void AScreenTheModeDoesNotOfferFallsBackToTheFrontDoor()
     {
         var main = Shell(AppMode.Basic, MainViewModel.Nav.CopyDatabase);
 
         main.ModeSelection.CancelCommand.Execute(null);
 
-        Assert.Same(main.Restore, main.CurrentView);
+        Assert.Same(main.Home, main.CurrentView);
     }
 
     [Fact]
-    public void GarbageInTheConfigFallsBackToRestore()
+    public void GarbageInTheConfigFallsBackToTheFrontDoor()
     {
-        Assert.Equal(MainViewModel.Nav.Restore, Shell().LandingScreen("No Such Screen"));
+        Assert.Equal(MainViewModel.Nav.Home, Shell().LandingScreen("No Such Screen"));
     }
 
     // ── saving at shutdown ──────────────────────────────────────────────────────
@@ -128,11 +132,14 @@ public class RememberedWindowTests
     }
 
     /// <summary>
-    /// Closing from the launch cards records no screen - the cards are a question, not a place,
-    /// and recording them would land the next session on a screen that is not one.
+    /// Closing from the launch cards keeps the remembered screen (#290). The cards are a
+    /// question, not a place - which is exactly why they must not be RECORDED and equally
+    /// why closing on them must not ERASE the real place already remembered. This pin used
+    /// to assert null here, and since the cards show at every start, that wiped the memory
+    /// for anyone who opened the app and closed it without clicking through.
     /// </summary>
     [Fact]
-    public void ClosingFromTheCardsRecordsNoScreen()
+    public void ClosingFromTheCardsKeepsTheRememberedScreen()
     {
         var store = new FakeCredentialStore();
         store.Config.Mode = AppMode.Pro;
@@ -143,7 +150,7 @@ public class RememberedWindowTests
 
         main.SaveShutdownState(At(0, 0));
 
-        Assert.Null(store.Config.LastScreen);
+        Assert.Equal(MainViewModel.Nav.History, store.Config.LastScreen);
     }
 
     /// <summary>A config that would not load is not written back (#7's rule, respected here too).</summary>

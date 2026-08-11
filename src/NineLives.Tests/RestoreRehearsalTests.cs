@@ -61,6 +61,31 @@ public class RestoreRehearsalTests
         Assert.Contains("retained as the evidence", script);
     }
 
+    // ── the scheduled variant (#259) ────────────────────────────────────────────
+
+    /// <summary>
+    /// A job runs the same text weekly, so the scheduled name is STABLE and each run clears its
+    /// own leftover first - which by then has been seen in the job history.
+    /// </summary>
+    [Fact]
+    public void TheScheduledScriptClearsItsOwnLeftoverBeforeRestoring()
+    {
+        var scratch = RehearsalPlanner.ScheduledScratchName("MyDb");
+        Assert.Equal("MyDb_rehearsal_scheduled", scratch);
+
+        var script = RehearsalPlanner.BuildScheduledScript(
+            $"RESTORE DATABASE [{scratch}] FROM DISK = N'D:/b.bak' WITH RECOVERY;", scratch);
+
+        var preDrop = script.IndexOf("DROP DATABASE", StringComparison.Ordinal);
+        var restore = script.IndexOf("RESTORE DATABASE", StringComparison.Ordinal);
+        var checkdb = script.IndexOf("DBCC CHECKDB", StringComparison.Ordinal);
+        var postDrop = script.LastIndexOf("DROP DATABASE", StringComparison.Ordinal);
+
+        Assert.True(preDrop < restore && restore < checkdb && checkdb < postDrop,
+            "order must be pre-drop, restore, CHECKDB, post-drop");
+        Assert.Contains("safe by construction", script);
+    }
+
     // ── the command's construction promises ─────────────────────────────────────
 
     private static ServerConnection Server() =>
@@ -146,8 +171,10 @@ public class RestoreRehearsalTests
         Assert.Contains("DBCC CHECKDB", script);
         Assert.Contains("DROP DATABASE", script);
 
-        // The receipt and the announcement both say what this was.
-        Assert.Contains(notifier.Sent, n => n.Operation == "Rehearsal" && n.Phase == RunPhase.Succeeded);
+        // The receipt and the announcement both say what this was - and the announcement names
+        // the database being PROVEN, not the scratch copy it was proven on.
+        var done = notifier.Sent.Single(n => n.Operation == "Rehearsal" && n.Phase == RunPhase.Succeeded);
+        Assert.Equal("MyDb", done.Subject);
     }
 
     /// <summary>The whole design promise: a name that exists refuses, before anything runs.</summary>

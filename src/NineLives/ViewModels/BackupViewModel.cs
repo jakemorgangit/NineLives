@@ -24,7 +24,13 @@ public partial class BackupViewModel : ViewModelBase
     private readonly ICredentialStore _store;
     private readonly ISqlServerService _sql;
     private readonly BackupScriptGenerator _generator = new();
-    private readonly OperationCancellation _cancellation = new();
+    // One instance PER OPERATION (#281), the rule RestoreExecutionViewModel already keeps:
+    // with a single shared instance, the List button's Begin() silently cancelled a running
+    // backup, and the backup's End() then disposed the listing's token. The Stop button
+    // belongs to the run; the list and the verify each own their overlap story.
+    private readonly OperationCancellation _listCancellation = new();
+    private readonly OperationCancellation _runCancellation = new();
+    private readonly OperationCancellation _verifyCancellation = new();
     private readonly OperationLog _log;
 
     public BackupViewModel(
@@ -141,8 +147,11 @@ public partial class BackupViewModel : ViewModelBase
         foreach (var pick in DatabasePicks) pick.IsPicked = false;
     }
 
+    /// <summary>The list is not fetchable mid-run: it can wait; the backup cannot re-run (#281).</summary>
+    public bool CanLoadDatabases => !IsRunning;
+
     /// <summary>Asks the chosen instance what it has, rather than making somebody type a name.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanLoadDatabases))]
     private async Task LoadDatabasesAsync()
     {
         if (Server == null)
@@ -151,7 +160,7 @@ public partial class BackupViewModel : ViewModelBase
             return;
         }
 
-        var ct = _cancellation.Begin();
+        var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
@@ -192,7 +201,7 @@ public partial class BackupViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _listCancellation.End();
             IsBusy = false;
         }
     }
@@ -200,9 +209,15 @@ public partial class BackupViewModel : ViewModelBase
     partial void OnServerChanged(ServerConnection? value)
     {
         // The database list belonged to the previous instance. Leaving it up invites somebody to
-        // back up a name that exists on both and mean the other one.
+        // back up a name that exists on both and mean the other one - and the multi-select
+        // ticks and certificate list are the same hazard with the same fix (#278): stale ticks
+        // satisfied CanGenerate, so the regenerated statements named the OLD server's databases
+        // with destinations claiming the new one, encrypted by a certificate it does not hold.
         Databases = [];
         SelectedDatabase = null;
+        DatabasePicks = [];
+        EncryptionCertificates = [];
+        SelectedEncryptionCertificate = null;
         Invalidate();
     }
 
@@ -307,7 +322,15 @@ public partial class BackupViewModel : ViewModelBase
     partial void OnCopyOnlyChanged(bool value) => Invalidate();
     partial void OnCompressionChanged(bool value) => Invalidate();
     partial void OnChecksumChanged(bool value) => Invalidate();
-    partial void OnStripesChanged(int value) => Invalidate();
+    partial void OnStripesChanged(int value)
+    {
+        // SQL Server allows at most 64 backup devices; below 1 means nothing. Clamped here
+        // rather than refused at run time - the free-text box accepts any int, and 640 used
+        // to become a statement the server rejects after the arm-and-confirm (#293).
+        var clamped = Math.Clamp(value, 1, 64);
+        if (clamped != value) { Stripes = clamped; return; }
+        Invalidate();
+    }
     partial void OnDescriptionChanged(string value) => Invalidate();
 
     /// <summary>True when the differential base on a production database is about to move.</summary>
@@ -354,7 +377,22 @@ public partial class BackupViewModel : ViewModelBase
         // Disarm: an armed button that survives an option change is armed for something else.
         IsArmed = false;
 
-        if (HasScript) Generate();
+        if (!HasScript) return;
+
+        // Regenerate - or, when the inputs no longer support generating, CLEAR. Leaving the
+        // old script standing kept the Run button live: generate for a database on one server,
+        // switch the server box, and two presses executed the old statements against the new
+        // instance (#278). An empty screen is the truthful one here.
+        if (CanGenerate) Generate();
+        else ClearGenerated();
+    }
+
+    /// <summary>Removes every trace of the last generation, so nothing stale can run.</summary>
+    private void ClearGenerated()
+    {
+        _generated = [];
+        GeneratedScript = string.Empty;
+        Destinations = [];
     }
 
     /// <summary>
@@ -383,7 +421,12 @@ public partial class BackupViewModel : ViewModelBase
             Compression = Compression,
             Checksum = Checksum,
             EncryptionCertificate = Encrypt ? SelectedEncryptionCertificate : null,
-            Description = string.IsNullOrWhiteSpace(Description) ? null : Description
+            Description = string.IsNullOrWhiteSpace(Description) ? null : Description,
+
+            // The bucket's region, or the statement is signed for the wrong one (#361). Only
+            // the restore path was setting this, so a backup TO a bucket whose region is not
+            // in its host name failed after the container had tested perfectly.
+            S3Region = MediumIsBlob ? Container?.S3Region : null
         });
 
         return (script, destinations);
@@ -412,6 +455,14 @@ public partial class BackupViewModel : ViewModelBase
         GeneratedScript = string.Join(Environment.NewLine + Environment.NewLine,
             _generated.Select(g => g.Script));
         Destinations = new ObservableCollection<string>(_generated.SelectMany(g => g.Destinations));
+
+        // Said at generate time, while the script is on screen and the settings that made it
+        // long are still to hand (#346). The server would refuse this mid-backup.
+        if (BackupDestinationBuilder.DescribeTooLong([.. Destinations]) is { } tooLong)
+        {
+            SetError(tooLong);
+            return;
+        }
 
         SetStatus(_generated.Count == 1
             ? "Script generated."
@@ -448,6 +499,8 @@ public partial class BackupViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ButtonText));
         ExecuteCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanLoadDatabases));
+        LoadDatabasesCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>SQL Server's own words as it goes, in the order it said them.</summary>
@@ -471,8 +524,33 @@ public partial class BackupViewModel : ViewModelBase
         ClearStatus();
         Console.Clear();
 
-        var ct = _cancellation.Begin();
+        var ct = _runCancellation.Begin();
         var started = DateTime.Now;
+
+        // Captured with the run (#293): Verify must test WITH CHECKSUM exactly when the
+        // statements said it - the checkbox is live, and reading it later failed a fine
+        // no-checksum backup (or silently degraded a checksum one).
+        var ranWithChecksum = Checksum;
+
+        // BACKUP TO URL needs the credential on THIS instance (#284) - asked before the first
+        // statement, because Msg 3201 after the arm-and-confirm is the class of late refusal
+        // this screen exists to kill.
+        if (MediumIsBlob && Container != null)
+        {
+            var preflight = await BlobCredentialPreflight.EnsureAsync(
+                _store, _sql, _log, Container, Server, Append);
+            if (!preflight.CanProceed)
+            {
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Backup",
+                    MultiSelect ? $"{PickedDatabases.Count} database(s)" : SelectedDatabase ?? "backup",
+                    Server.ServerName, preflight.Refusal));
+                SetError(preflight.Refusal!);
+                _runCancellation.End();
+                IsRunning = false;
+                return;
+            }
+        }
 
         // Database-at-a-time, deliberately (#208): a failure on the sixth database names the
         // sixth database and the rest still run - the patch-night semantics. One database is the
@@ -552,6 +630,13 @@ public partial class BackupViewModel : ViewModelBase
                 // One database keeps the direct report - "1 of 1" and "the others finished" would
                 // be the multi-run's phrasing wearing the wrong trousers.
                 SetError($"The backup did not complete: {lastFailureMessage}");
+
+                // The close of the run, with its duration, exactly as the multi path sends it
+                // (#295). The per-database problem already fired as it happened; without this
+                // the channel heard the run start and never heard it END.
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Backup", run[0].Database, Server.ServerName,
+                    $"The backup did not complete: {lastFailureMessage}", elapsed));
             }
             else
             {
@@ -569,6 +654,7 @@ public partial class BackupViewModel : ViewModelBase
             // What was just written is the thing to verify (#207) - only what actually succeeded,
             // captured from the statements' own devices.
             _lastWrittenDevices = succeededDevices;
+            _lastWrittenWithChecksum = ranWithChecksum;
             CanVerifyLastBackup = succeededDevices.Count > 0;
         }
         catch (OperationCanceledException)
@@ -587,21 +673,26 @@ public partial class BackupViewModel : ViewModelBase
 
             // What finished before the stop is still real.
             _lastWrittenDevices = succeededDevices;
+            _lastWrittenWithChecksum = ranWithChecksum;
             CanVerifyLastBackup = succeededDevices.Count > 0;
         }
         finally
         {
-            _cancellation.End();
+            _runCancellation.End();
             IsRunning = false;
+
+            // Told, not interrupted (#289): the restore already flashes the taskbar when it
+            // finishes behind another window, and a backup is exactly as worth coming back to.
+            WindowAttention.FlashIfInBackground();
         }
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        if (!_cancellation.CanCancel) return;
+        if (!_runCancellation.CanCancel) return;
 
-        _cancellation.Cancel();
+        _runCancellation.Cancel();
         SetStatus("Stopping...");
     }
 
@@ -625,10 +716,14 @@ public partial class BackupViewModel : ViewModelBase
     {
         if (!HasScript) return;
 
+        // A BACKUP job called "NineLives restore" was a bad first impression on the exact
+        // artefact that outlives the app session - and in multi-select the single-database
+        // fields are empty, so the name and description degrade to nonsense (#293).
+        var subject = MultiSelect ? $"{PickedDatabases.Count} databases" : SelectedDatabase;
         var job = SqlAgentJobScript.Wrap(
             GeneratedScript,
-            SqlAgentJobScript.SuggestName(SelectedDatabase, DateTime.Now),
-            $"Back up {SelectedDatabase}, generated by Nine Lives on {DateTime.Now:yyyy-MM-dd HH:mm}.");
+            SqlAgentJobScript.SuggestName("backup", subject, DateTime.Now),
+            $"Back up {subject}, generated by Nine Lives on {DateTime.Now:yyyy-MM-dd HH:mm}.");
 
         TryCopyToClipboard(job,
             "Agent job script copied to clipboard. The job is created disabled and unscheduled - " +
@@ -639,6 +734,9 @@ public partial class BackupViewModel : ViewModelBase
 
     /// <summary>The devices the last successful backup wrote, exactly as the statement named them.</summary>
     private List<string> _lastWrittenDevices = [];
+
+    /// <summary>Whether those statements said WITH CHECKSUM - captured with the run (#293).</summary>
+    private bool _lastWrittenWithChecksum;
 
     /// <summary>Whether the last run finished and left something to verify.</summary>
     [ObservableProperty]
@@ -662,13 +760,14 @@ public partial class BackupViewModel : ViewModelBase
     {
         if (Server == null || _lastWrittenDevices.Count == 0) return;
 
-        var ct = _cancellation.Begin();
+        var ct = _verifyCancellation.Begin();
         IsVerifying = true;
         Append($"Verifying {_lastWrittenDevices.Count} file(s) with RESTORE VERIFYONLY...");
 
         try
         {
-            var result = await _sql.RestoreVerifyOnlyAsync(Server, _lastWrittenDevices, Checksum, null, ct);
+            var result = await _sql.RestoreVerifyOnlyAsync(
+                Server, _lastWrittenDevices, _lastWrittenWithChecksum, null, ct);
 
             if (result.IsValid)
             {
@@ -692,7 +791,7 @@ public partial class BackupViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _verifyCancellation.End();
             IsVerifying = false;
         }
     }

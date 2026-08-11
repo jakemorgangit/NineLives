@@ -24,7 +24,7 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
             <TextBlock Text="Browse Backups"
                        Style="{StaticResource HeaderText}" />
-            <TextBlock Text="Look at what is in a blob container, or at what a SQL Server has recorded backing up."
+            <TextBlock Text="Look at what is in a storage container, or at what a SQL Server has recorded backing up."
                        Style="{StaticResource SecondaryText}"
                        Margin="0,4,0,0" />
         </StackPanel>
@@ -36,12 +36,12 @@
                      order and with the same radio pair, because it is the same choice. -->
                 <TextBlock Text="WHERE TO LOOK" Style="{StaticResource LabelText}" Margin="0,0,0,6" />
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                    <RadioButton Content="Azure Blob Storage"
+                    <RadioButton Content="Cloud storage"
                                  GroupName="BrowseMedium"
                                  Style="{StaticResource DarkRadioButton}"
                                  IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
                                  Margin="0,0,20,0"
-                                 ToolTip="Lists the container. Everything about each backup is inferred from its path and filename." />
+                                 ToolTip="A saved container - Azure Blob Storage or an S3-compatible bucket. Everything about each backup is inferred from its path and filename." />
                     <!-- Not "a path both servers can see": nothing is being restored here, so there
                          is no second server. What is read is one instance's own record. -->
                     <RadioButton Content="A server's backup history"

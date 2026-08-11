@@ -32,7 +32,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     private readonly ISqlServerService _sql;
     private readonly BackupScriptGenerator _backupGenerator = new();
     private readonly RestoreScriptGenerator _restoreGenerator = new();
-    private readonly OperationCancellation _cancellation = new();
+    // One instance per operation (#281): the List button's Begin() used to cancel a running
+    // copy, and the copy's End() then disposed the listing's token. Stop belongs to the run.
+    private readonly OperationCancellation _listCancellation = new();
+    private readonly OperationCancellation _runCancellation = new();
     private readonly OperationLog _log;
 
     public CopyDatabaseViewModel(
@@ -129,7 +132,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
+    /// <summary>The list is not fetchable mid-run: it can wait; the copy cannot re-run (#281).</summary>
+    public bool CanLoadSourceDatabases => !IsRunning;
+
+    [RelayCommand(CanExecute = nameof(CanLoadSourceDatabases))]
     private async Task LoadSourceDatabasesAsync()
     {
         if (SourceServer == null)
@@ -138,7 +144,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             return;
         }
 
-        var ct = _cancellation.Begin();
+        var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
@@ -163,7 +169,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
         finally
         {
-            _cancellation.End();
+            _listCancellation.End();
             IsBusy = false;
         }
     }
@@ -220,6 +226,18 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             if (sameInstance && sameName)
                 return $"That would restore {SourceDatabase} over itself on {SourceServer.ServerName}. " +
                        "Give the copy a different name, or choose a different server to restore onto.";
+
+            // Same instance, new name: the copy's restore carries no MOVE clauses (the paths
+            // the source recorded are what a DIFFERENT server needs), so on the same instance
+            // the files land on top of the live source's and the restore fails with Msg 1834 -
+            // after the backup half has already run. Refusing beats failing late (#282); the
+            // restore screen has full WITH MOVE control for exactly this shape.
+            if (sameInstance)
+                return $"A copy onto the same instance would restore {TargetDatabaseName}'s files " +
+                       $"onto {SourceDatabase}'s own paths - SQL Server refuses that (Msg 1834) " +
+                       "after the backup half has already run. Copy onto a different server, or " +
+                       "take the backup and restore it on the Restore screen, where the files " +
+                       "can be relocated (WITH MOVE).";
 
             return string.Empty;
         }
@@ -282,7 +300,24 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         // An armed run that survives a change is armed for something else.
         IsArmed = false;
 
-        if (HasScripts) Generate();
+        if (!HasScripts) return;
+
+        // Regenerate - or, when the inputs no longer support generating, CLEAR (#278).
+        // Blanking the target name left the previous scripts standing and CanRun true: the
+        // Refusal getter answers nothing for incomplete input, so the screen showed runnable
+        // statements naming a target nobody was asking for any more.
+        if (CanGenerate) Generate();
+        else ClearGenerated();
+    }
+
+    /// <summary>Removes every trace of the last generation, so nothing stale can run.</summary>
+    private void ClearGenerated()
+    {
+        BackupScript = string.Empty;
+        RestoreScript = string.Empty;
+        Destinations = [];
+        OnPropertyChanged(nameof(CanRun));
+        RunCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>
@@ -307,6 +342,13 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         Destinations = new ObservableCollection<string>(destinations);
 
+        // The same length the server will refuse, said while it can still be changed (#346).
+        if (BackupDestinationBuilder.DescribeTooLong(destinations) is { } tooLong)
+        {
+            SetError(tooLong);
+            return;
+        }
+
         BackupScript = _backupGenerator.Generate(new BackupOptions
         {
             DatabaseName = SourceDatabase!,
@@ -315,7 +357,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             CopyOnly = CopyOnly,
             Compression = Compression,
             Description = $"Copy of {SourceDatabase} from {SourceServer!.ServerName} " +
-                          $"to {TargetServer!.ServerName} as {TargetDatabaseName}"
+                          $"to {TargetServer!.ServerName} as {TargetDatabaseName}",
+
+            // Same as the backup screen (#361): the region has to reach the statement.
+            S3Region = MediumIsBlob ? Container?.S3Region : null
         });
 
         RestoreScript = _restoreGenerator.Generate(ChainForWhatWasWritten(destinations, takenAt),
@@ -328,11 +373,106 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         SetStatus("Scripts generated.");
 
-        // Fire and forget: the scripts are usable immediately, and the answers arrive when the
-        // two instances have answered. A generation that had to wait on them would make the whole
-        // screen feel slower for checks that usually say "fine".
-        _ = CheckSpaceAsync();
-        _ = CheckEncryptionAsync();
+        // The checks depend on the SERVERS and the SOURCE database - not on the target
+        // name or any other keystroke-speed field. Re-asking two production instances six
+        // round trips per character typed was the disease (#285); racing sweeps whose
+        // leading clears could erase a fresher sweep's warning was its complication. One
+        // serialised sweep per input change, previous sweep cancelled, answers still
+        // arriving without the generation waiting on them.
+        var inputs = string.Join("|",
+            SourceServer?.Id, TargetServer?.Id, SourceDatabase,
+            MediumIsBlob ? Container?.Id : SharedPathRoot);
+        if (inputs != _lastCheckedInputs)
+        {
+            _lastCheckedInputs = inputs;
+            _checksTask = RunGenerationChecksAsync();
+        }
+    }
+
+    /// <summary>The inputs the last check sweep was answering for.</summary>
+    private string? _lastCheckedInputs;
+
+    /// <summary>The in-flight sweep, so the run can refuse to start before the verdicts are in.</summary>
+    private Task _checksTask = Task.CompletedTask;
+
+    private readonly OperationCancellation _checksCancellation = new();
+
+    /// <summary>
+    /// The three generation-time checks as one serialised sweep (#285): warnings cleared once
+    /// up front, verdicts in a fixed order (version - the hardest refusal - first), previous
+    /// sweep cancelled on re-entry so a stale answer can never clear or overwrite a fresh one.
+    /// </summary>
+    private async Task RunGenerationChecksAsync()
+    {
+        var ct = _checksCancellation.Begin();
+        try
+        {
+            VersionWarning = string.Empty;
+            EncryptionWarning = string.Empty;
+            SpaceWarning = string.Empty;
+            VolumeSpace = [];
+
+            await CheckVersionAsync(ct);
+            await CheckEncryptionAsync(ct);
+            await CheckSpaceAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer sweep took over; its answers are the ones that matter.
+        }
+        finally
+        {
+            _checksCancellation.End();
+        }
+    }
+
+    // ── can the target even accept it (#210's law, on the copy screen) ─────────
+
+    [ObservableProperty]
+    private string _versionWarning = string.Empty;
+
+    public bool HasVersionWarning => VersionWarning.Length > 0;
+
+    partial void OnVersionWarningChanged(string value) => OnPropertyChanged(nameof(HasVersionWarning));
+
+    /// <summary>
+    /// The one-directional law of RESTORE, asked at generation time: a backup taken on a newer
+    /// major version can never be restored onto an older one - error 3169, no exceptions. The
+    /// restore screen has refused this since #210; the copy screen ran its restore half OUTSIDE
+    /// those preflights, so the refusal arrived from the server after the backup half had
+    /// already run. Both versions are one SERVERPROPERTY away, and the copy knows both servers
+    /// before anything starts.
+    ///
+    /// A warning rather than a block, like the screen's other checks - but a warning in the
+    /// STRONGEST terms, because unlike disk space nothing can change between generating and
+    /// running that makes this legal.
+    /// </summary>
+    private async Task CheckVersionAsync(CancellationToken ct)
+    {
+        if (SourceServer == null || TargetServer == null) return;
+
+        try
+        {
+            var source = await _sql.GetProductMajorVersionAsync(SourceServer, ct);
+            var target = await _sql.GetProductMajorVersionAsync(TargetServer, ct);
+
+            if (VersionCompatibility.Check(source, target) == VersionVerdict.Refuse)
+            {
+                VersionWarning =
+                    $"This copy cannot work: {SourceServer.ServerName} is " +
+                    $"{VersionCompatibility.Describe(source!.Value)} and {TargetServer.ServerName} " +
+                    $"is {VersionCompatibility.Describe(target!.Value)}, and SQL Server can never " +
+                    "restore a newer version's backup onto an older server - error 3169, with no " +
+                    "exceptions. The backup half would run and the restore half would fail. Copy " +
+                    "the other way, or onto a newer target.";
+
+                _log.Warn($"[version] copy: {VersionWarning}");
+            }
+        }
+        catch
+        {
+            // An instance that will not say its version has not said the copy is illegal.
+        }
     }
 
     // ── will the target be able to READ it (#222) ───────────────────────────────
@@ -357,16 +497,14 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// between generating and running, and this app is not the authority on somebody else's
     /// security estate. Failing to answer raises nothing - warn on evidence, not on silence.
     /// </summary>
-    private async Task CheckEncryptionAsync()
+    private async Task CheckEncryptionAsync(CancellationToken ct)
     {
-        EncryptionWarning = string.Empty;
-
         if (SourceServer == null || TargetServer == null || string.IsNullOrWhiteSpace(SourceDatabase))
             return;
 
         try
         {
-            var (isEncrypted, certName) = await _sql.GetDatabaseTdeInfoAsync(SourceServer, SourceDatabase!);
+            var (isEncrypted, certName) = await _sql.GetDatabaseTdeInfoAsync(SourceServer, SourceDatabase!, ct);
             if (!isEncrypted) return;
 
             // The certificate itself, by thumbprint, when the source will say which it is - the
@@ -426,18 +564,15 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// Failing to answer is not a warning, same stance as the restore screen: this is a courtesy
     /// check over somebody else's storage.
     /// </summary>
-    private async Task CheckSpaceAsync()
+    private async Task CheckSpaceAsync(CancellationToken ct)
     {
-        VolumeSpace = [];
-        SpaceWarning = string.Empty;
-
         if (SourceServer == null || TargetServer == null || string.IsNullOrWhiteSpace(SourceDatabase))
             return;
 
         try
         {
-            var files = await _sql.GetDatabaseFilesAsync(SourceServer, SourceDatabase!);
-            var free = await _sql.GetVolumeFreeSpaceAsync(TargetServer);
+            var files = await _sql.GetDatabaseFilesAsync(SourceServer, SourceDatabase!, ct);
+            var free = await _sql.GetVolumeFreeSpaceAsync(TargetServer, ct);
             var volumes = RestoreSpaceCheck.Check(files, free);
 
             VolumeSpace = new ObservableCollection<VolumeSpace>(volumes);
@@ -547,6 +682,8 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(ButtonText));
         RunCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanLoadSourceDatabases));
+        LoadSourceDatabasesCommand.NotifyCanExecuteChanged();
     }
 
     public bool CanRun => HasScripts && !IsRunning && !IsRefused;
@@ -569,17 +706,33 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         Outcome = CopyOutcome.NotStarted;
         OutcomeText = string.Empty;
 
-        var ct = _cancellation.Begin();
+        // The warnings the confirmation shows must be the CURRENT answers (#285): a quick
+        // Confirm used to run with the panels still blank while the checks were in flight.
+        await _checksTask;
+
+        var ct = _runCancellation.Begin();
+
+        // The run executes what was SHOWN, not what is on screen later (#280): these
+        // properties are live, the view stays editable while the halves run, and Generate
+        // stamps a fresh timestamp into the destinations - so one keystroke mid-backup used
+        // to point the restore half at a file that was never written. Same medicine as the
+        // restore screen's immutable run record: snapshot at the moment of consent.
+        var run = (Backup: BackupScript, Restore: RestoreScript,
+                   Destinations: (IReadOnlyList<string>)Destinations.ToList());
 
         try
         {
-            await RunBothHalvesAsync(ct);
+            await RunBothHalvesAsync(run.Backup, run.Restore, run.Destinations, ct);
         }
         finally
         {
-            _cancellation.End();
+            _runCancellation.End();
             IsRunning = false;
-            OutcomeText = CopyOutcomeText.Describe(Outcome, Destinations.FirstOrDefault());
+            OutcomeText = CopyOutcomeText.Describe(Outcome, run.Destinations.FirstOrDefault());
+
+            // Told, not interrupted (#289): same taskbar flash as the restore and the backup
+            // when the copy finishes while the app is behind another window.
+            WindowAttention.FlashIfInBackground();
 
             if (Outcome == CopyOutcome.Copied)
                 SetStatus($"Copied {SourceDatabase} to {TargetServer.ServerName} as {TargetDatabaseName}.");
@@ -588,7 +741,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
     }
 
-    private async Task RunBothHalvesAsync(CancellationToken ct)
+    private async Task RunBothHalvesAsync(
+        string backupScript, string restoreScript, IReadOnlyList<string> destinations,
+        CancellationToken ct)
     {
         // ── the source half ─────────────────────────────────────────────────────
         Append($"Backing up {SourceDatabase} on {SourceServer!.ServerName}...");
@@ -601,12 +756,33 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         var copyStartedAt = DateTime.Now;
         var copyRoute = $"{SourceServer.ServerName} \u2192 {TargetServer.ServerName}";
 
+        // Blob needs the credential on BOTH ends (#284) - the source to write, the target to
+        // read - and both are checkable before the source is read at full speed. Refusing
+        // here beats Msg 3201 after the backup half ran.
+        if (MediumIsBlob && Container != null)
+        {
+            foreach (var end in new[] { SourceServer, TargetServer })
+            {
+                var preflight = await BlobCredentialPreflight.EnsureAsync(
+                    _store, _sql, _log, Container, end, Append);
+                if (!preflight.CanProceed)
+                {
+                    Outcome = CopyOutcome.StoppedBeforeAnythingHappened;
+                    _notifier.Notify(new RunNotification(
+                        RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                        preflight.Refusal));
+                    SetError(preflight.Refusal!);
+                    return;
+                }
+            }
+        }
+
         _notifier.Notify(new RunNotification(
             RunPhase.Started, "Copy", SourceDatabase!, copyRoute, $"as {TargetDatabaseName}"));
 
         try
         {
-            await _sql.ExecuteWithProgressAsync(SourceServer, BackupScript, Append, ct);
+            await _sql.ExecuteWithProgressAsync(SourceServer, backupScript, Append, ct);
         }
         catch (OperationCanceledException)
         {
@@ -637,14 +813,36 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         // SOURCE wrote the file as its service account, and the TARGET has to read it as a
         // different one. The two are routinely not the same account, and nothing before this point
         // would have noticed.
-        if (MediumIsSharedPath && !await TargetCanReadAsync(ct))
+        if (MediumIsSharedPath)
         {
-            Outcome = CopyOutcome.BackupTakenRestoreFailed;
-            _notifier.Notify(new RunNotification(
-                RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
-                "The backup was taken, but the target cannot read it - usually a share " +
-                "permission for the target's service account.", DateTime.Now - copyStartedAt));
-            return;
+            bool targetCanRead;
+            try
+            {
+                targetCanRead = await TargetCanReadAsync(destinations, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Stop pressed between the halves (#283). This used to fall into the
+                // readability check's catch-all and report a share-permission failure -
+                // sending the DBA to chase an ACL that is fine.
+                Append("Cancelled before the restore half began.");
+                Outcome = CopyOutcome.BackupTakenRestoreFailed;
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                    "Cancelled between the halves - the backup exists and is usable; " +
+                    "nothing was restored.", DateTime.Now - copyStartedAt));
+                return;
+            }
+
+            if (!targetCanRead)
+            {
+                Outcome = CopyOutcome.BackupTakenRestoreFailed;
+                _notifier.Notify(new RunNotification(
+                    RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
+                    "The backup was taken, but the target cannot read it - usually a share " +
+                    "permission for the target's service account.", DateTime.Now - copyStartedAt));
+                return;
+            }
         }
 
         // ── the target half ─────────────────────────────────────────────────────
@@ -652,7 +850,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         try
         {
-            await _sql.ExecuteWithProgressAsync(TargetServer, RestoreScript, Append, ct);
+            await _sql.ExecuteWithProgressAsync(TargetServer, restoreScript, Append, ct);
         }
         catch (OperationCanceledException)
         {
@@ -662,6 +860,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
                 RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
                 "Cancelled during the restore half - the backup exists, the target is mid-restore.",
                 DateTime.Now - copyStartedAt));
+            await DescribeTargetStateAsync();
             return;
         }
         catch (Exception ex)
@@ -672,10 +871,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             _notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Copy", SourceDatabase!, copyRoute,
                 $"The restore half failed: {ex.Message}", DateTime.Now - copyStartedAt));
+            await DescribeTargetStateAsync();
             return;
         }
 
         Append("Restore complete.");
+        await ReportOrphansAsync();
         Outcome = CopyOutcome.Copied;
         _log.Info($"Copy finished: {TargetDatabaseName} on {TargetServer.ServerName}");
 
@@ -686,19 +887,69 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// What state did the failed restore half leave the target in, and what gets it out (#283)
+    /// - the same questions the restore screen answers, told through this screen's console.
+    /// Best effort: the restore failure is the news, and failing to describe the aftermath
+    /// must not replace the error the user needs to read.
+    /// </summary>
+    private async Task DescribeTargetStateAsync()
+    {
+        try
+        {
+            var state = await _sql.GetDatabaseRecoveryStateAsync(TargetServer!, TargetDatabaseName!);
+            if (!state.NeedsAttention)
+            {
+                if (!state.Exists)
+                    Append($"[{TargetDatabaseName}] is not on {TargetServer!.ServerName} - " +
+                           "nothing was left behind.");
+                return;
+            }
+
+            Append(state.Explain(TargetDatabaseName!));
+            foreach (var action in state.SuggestedActions(TargetDatabaseName!))
+                Append($"  {action.Title}:  {action.Sql}");
+        }
+        catch (Exception ex)
+        {
+            Append($"Could not check the state of [{TargetDatabaseName}]: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The orphaned-user scan on the copy that WORKED (#283): a copy to a DIFFERENT server is
+    /// the canonical orphaned-login scenario - login succeeds, database access fails, and
+    /// nothing says why. One cheap query; console-only, best effort.
+    /// </summary>
+    private async Task ReportOrphansAsync()
+    {
+        try
+        {
+            var orphans = await _sql.FindOrphanedUsersAsync(TargetServer!, TargetDatabaseName!);
+            Append(PostRestoreAdvice.DescribeOrphans(orphans));
+            foreach (var orphan in orphans.Where(o => o.HasSameNamedLogin))
+                Append($"  {PostRestoreAdvice.FixOrphan(TargetDatabaseName!, orphan).Sql}");
+        }
+        catch (Exception ex)
+        {
+            Append($"Could not check [{TargetDatabaseName}] for orphaned users: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Asks the target instance whether it can read the file the source just wrote.
     ///
     /// A failure here is the most recoverable state this screen produces and the most confusing to
     /// read: the backup is real and fine, and the only thing wrong is a permission on a share. So
     /// it is reported in those terms rather than as a restore that failed.
     /// </summary>
-    private async Task<bool> TargetCanReadAsync(CancellationToken ct)
+    private async Task<bool> TargetCanReadAsync(
+        IReadOnlyList<string> destinations, CancellationToken ct)
     {
         Append($"Checking {TargetServer!.ServerName} can read the backup...");
 
         try
         {
-            var checks = await _sql.CheckBackupFilesAsync(TargetServer, Destinations, ct);
+            var checks = await _sql.CheckBackupFilesAsync(TargetServer, destinations, ct);
             var failed = checks.FirstOrDefault(c => !c.CanBeRestored);
 
             if (failed == null)
@@ -709,6 +960,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
             Append(failed.Explain(TargetServer.ServerName));
             return false;
+        }
+        catch (OperationCanceledException)
+        {
+            // The Stop button's cancellation is the caller's story to tell (#283) - swallowing
+            // it here is how a pressed Stop got reported as a share-permission failure.
+            throw;
         }
         catch (Exception ex)
         {
@@ -722,9 +979,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     [RelayCommand]
     private void Cancel()
     {
-        if (!_cancellation.CanCancel) return;
+        if (!_runCancellation.CanCancel) return;
 
-        _cancellation.Cancel();
+        _runCancellation.Cancel();
         SetStatus("Stopping...");
     }
 

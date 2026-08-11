@@ -12,6 +12,8 @@
         <converters:EnumToBoolConverter x:Key="EnumToBool" />
         <converters:BlobAuthModeToDisplayConverter x:Key="BlobAuthModeDisplay" />
         <converters:BlobAuthModeIsSasConverter x:Key="BlobAuthModeIsSas" />
+        <converters:StringToVisibilityConverter x:Key="StringToVis" />
+        <converters:InverseBoolConverter x:Key="InverseBool" />
     </UserControl.Resources>
 
     <Grid>
@@ -24,7 +26,7 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,20">
             <TextBlock Text="Blob Storage Configuration"
                        Style="{StaticResource HeaderText}" />
-            <TextBlock Text="Configure Azure Blob Storage containers and SAS tokens for backup access."
+            <TextBlock Text="Configure the containers holding your backups - Azure Blob Storage, or any S3-compatible bucket."
                        Style="{StaticResource SecondaryText}"
                        Margin="0,4,0,0" />
         </StackPanel>
@@ -53,7 +55,12 @@
                                 HorizontalAlignment="Stretch" />
                     </StackPanel>
 
+                    <!-- Not selectable mid-edit (#354). The form writes to whichever container
+                         is SELECTED when Save runs, so clicking another one while editing saved
+                         this container's name, URL, credential and tags over that one - silently,
+                         with the original left untouched and two containers left sharing a name. -->
                     <ListBox ItemsSource="{Binding Containers}"
+                             IsEnabled="{Binding IsEditing, Converter={StaticResource InverseBool}}"
                              SelectedItem="{Binding SelectedContainer}"
                              Background="Transparent"
                              BorderThickness="0"
@@ -214,23 +221,30 @@
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,12" />
 
-                                <TextBlock Text="STORAGE ACCOUNT" Style="{StaticResource LabelText}" />
-                                <TextBlock Text="{Binding SelectedContainer.StorageAccountName}"
+                                <!-- Label and value both from the container (#345): a bucket has
+                                     an endpoint, not a storage account, and the old value read
+                                     the first label of the host - "s3" for every AWS bucket. -->
+                                <TextBlock Text="{Binding SelectedContainer.LocationLabel}" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="{Binding SelectedContainer.LocationDisplay}"
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
 
                                 <TextBlock Text="AUTHENTICATION" Style="{StaticResource LabelText}" />
-                                <TextBlock Text="{Binding SelectedContainer.AuthMode, Converter={StaticResource BlobAuthModeDisplay}}"
+                                <TextBlock Text="{Binding SelectedContainer.AuthDisplay}"
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
 
-                                <!-- Only under SAS. An expiry line against a container that has no
-                                     token of ours would send someone hunting for the wrong thing. -->
+                                <!-- Only under SAS, and only when there is something to say. An
+                                     expiry line against a container that has no token of ours -
+                                     Entra, or an S3 key pair, which has no readable expiry -
+                                     would send someone hunting for the wrong thing. -->
                                 <StackPanel Visibility="{Binding SelectedContainer.AuthMode, Converter={StaticResource BlobAuthModeIsSas}}">
-                                    <TextBlock Text="SAS TOKEN STATUS" Style="{StaticResource LabelText}" />
-                                    <TextBlock Text="{Binding SasExpiryText}"
-                                               Style="{StaticResource BodyText}"
-                                               Margin="0,0,0,12" />
+                                    <StackPanel Visibility="{Binding SasExpiryText, Converter={StaticResource StringToVis}}">
+                                        <TextBlock Text="SAS TOKEN STATUS" Style="{StaticResource LabelText}" />
+                                        <TextBlock Text="{Binding SasExpiryText}"
+                                                   Style="{StaticResource BodyText}"
+                                                   Margin="0,0,0,12" />
+                                    </StackPanel>
                                 </StackPanel>
 
                                 <TextBlock Text="BACKUPS AT THIS LOCATION" Style="{StaticResource LabelText}" />
@@ -240,7 +254,7 @@
                                     </TextBlock.Text>
                                 </TextBlock>
 
-                                <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="PATH STRUCTURE" Style="{StaticResource LabelText}" />
                                 <TextBlock Text="{Binding SelectedContainer.PathPattern}"
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
@@ -365,14 +379,43 @@
                                           Style="{StaticResource TagPillList}"
                                           Margin="0,0,0,16" />
 
+                            <!-- Asked up front so the right sections show before a URL exists -
+                                 the scheme alone made S3 invisible on an empty form. What is
+                                 SAVED still carries no provider field: the URL's scheme is the
+                                 truth, a typed scheme snaps this choice, and Save refuses a
+                                 mismatch left standing. -->
+                            <TextBlock Text="STORAGE PROVIDER" Style="{StaticResource LabelText}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,16">
+                                <RadioButton Content="Azure Blob Storage"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditProvider, Converter={StaticResource EnumToBool}, ConverterParameter=Azure}"
+                                             GroupName="StorageProvider"
+                                             Margin="0,0,24,0"
+                                             ToolTip="An https:// container URL, reached with a SAS token or an Entra ID sign-in." />
+                                <RadioButton Content="S3-compatible"
+                                             Style="{StaticResource DarkRadioButton}"
+                                             IsChecked="{Binding EditProvider, Converter={StaticResource EnumToBool}, ConverterParameter=S3}"
+                                             GroupName="StorageProvider"
+                                             ToolTip="AWS S3, Wasabi, Backblaze B2, Cloudflare R2 or a storage appliance speaking the S3 API. An s3:// URL, reached with an access key pair. Restoring from it needs SQL Server 2022+ (not Express)." />
+                            </StackPanel>
+
                             <TextBlock Text="CONTAINER URL" Style="{StaticResource LabelText}" />
                             <TextBlock Text="e.g. https://myaccount.blob.core.windows.net/backups"
                                        Style="{StaticResource SecondaryText}"
-                                       FontSize="11" Margin="0,0,0,4" />
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                       Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                            <TextBlock Text="s3://endpoint[:port]/bucket - e.g. s3://s3.eu-west-2.amazonaws.com/backups"
+                                       Style="{StaticResource SecondaryText}"
+                                       FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                       Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}}" />
                             <TextBox Text="{Binding EditContainerUrl, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource DarkTextBox}"
                                      Margin="0,0,0,16" />
 
+                            <!-- An s3:// container has nothing to choose here: the pair is the
+                                 one way in, and the Entra options would be noise against a
+                                 bucket (#51). -->
+                            <StackPanel Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                             <TextBlock Text="AUTHENTICATION" Style="{StaticResource LabelText}" />
                             <StackPanel Margin="0,4,0,16">
                                 <RadioButton Content="SAS token"
@@ -393,6 +436,7 @@
                                              GroupName="BlobAuthMode"
                                              ToolTip="Environment, then managed identity, then the Azure CLI or Visual Studio sign-in, then a prompt. The one to pick when this app runs on an Azure VM." />
                             </StackPanel>
+                            </StackPanel>
 
                             <!-- Untested against a real tenant - see the note in the README. Said
                                  here rather than only in the docs, because the person who finds out
@@ -410,6 +454,55 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- The key pair, two boxes combining into the one string the
+                                 engine's CREATE CREDENTIAL wants (#51). Stored together in the
+                                 SAS slot; like the SAS, never displayed once stored. -->
+                            <StackPanel Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="ACCESS KEY PAIR" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="A key pair is stored securely and cannot be displayed. Enter a new pair below to replace it."
+                                           Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                           Visibility="{Binding HasStoredSasToken, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="The access key id and its secret key, as the provider issued them. Stored together in Windows Credential Manager."
+                                           Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"
+                                           Visibility="{Binding HasStoredSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+
+                                <TextBlock Text="Access key id" Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,4,0,2" />
+                                <TextBox Text="{Binding EditS3KeyId, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Text="Secret key" Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,2" />
+                                <Grid Margin="0,0,0,8">
+                                    <TextBox Text="{Binding EditS3SecretKey, UpdateSourceTrigger=PropertyChanged}"
+                                             Style="{StaticResource DarkTextBox}"
+                                             Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}}" />
+                                    <Border Background="{DynamicResource InputBackgroundBrush}"
+                                            CornerRadius="4" Padding="10,8"
+                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                            BorderThickness="1" MinHeight="36"
+                                            Visibility="{Binding ShowSasToken, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
+                                        <TextBlock Text="••••••••••••••••••••••••••••••••"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center" FontSize="14" />
+                                    </Border>
+                                    <Button Content="{Binding ShowSasToken, Converter={StaticResource BoolToEyeIcon}}"
+                                            Command="{Binding ToggleShowSasTokenCommand}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                                            Margin="0,4,4,0" Padding="6,2" FontSize="14"
+                                            Background="Transparent" BorderThickness="0"
+                                            Foreground="{DynamicResource SecondaryTextBrush}"
+                                            Cursor="Hand" ToolTip="Show/hide secret key" />
+                                </Grid>
+
+                                <TextBlock Text="REGION" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="Only when the provider needs one said - AWS-style endpoints carry it in the host name, and the engine assumes us-east-1 otherwise."
+                                           Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" />
+                                <TextBox Text="{Binding EditS3Region, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}"
+                                         Margin="0,0,0,16" />
+                            </StackPanel>
+
+                            <StackPanel Visibility="{Binding EditIsS3, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
                             <StackPanel Visibility="{Binding IsSasAuth, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="SAS TOKEN" Style="{StaticResource LabelText}" />
                             <TextBlock Text="Token is stored securely and cannot be displayed. Enter a new token below to replace it."
@@ -451,6 +544,7 @@
                                 </Grid>
                             </Grid>
                             </StackPanel>
+                            </StackPanel>
 
                             <TextBlock Text="BACKUPS AT THIS LOCATION" Style="{StaticResource LabelText}" />
                             <TextBlock Text="Choose whether this container holds standalone instance backups, Availability Group backups (Ola default naming), or both."
@@ -484,7 +578,7 @@
                             <TextBlock>
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource LabelText}">
-                                        <Setter Property="Text" Value="BLOB PATH STRUCTURE" />
+                                        <Setter Property="Text" Value="PATH STRUCTURE" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsMixedSourceType}" Value="True">
                                                 <Setter Property="Text" Value="STANDALONE PATH STRUCTURE" />
@@ -493,7 +587,7 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <TextBlock Text="Drag the coloured elements below to define how blob paths are structured. Each colour represents a path component. Add or remove elements as needed. FileName must always be last."
+                            <TextBlock Text="Drag the coloured elements below to define how the paths in this container are structured. Each colour represents a path component. Add or remove elements as needed. FileName must always be last."
                                        Style="{StaticResource SecondaryText}"
                                        FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
 

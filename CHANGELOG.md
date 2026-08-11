@@ -8,6 +8,521 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+## [1.6.0] - 2026-08-11
+
+### Added
+
+- **A front door** (#343). Choosing a mode now lands on Home: what Nine Lives is in a
+  paragraph, the three get-going steps - add your storage, add a SQL Server, restore -
+  as buttons that go to the right screens, and pointers to the rest of what the chosen
+  mode offers, mirroring the sidebar exactly. Reachable any time from the sidebar
+  (Ctrl+0). The launch-time carry-on still goes to wherever work was left - the front
+  door greets arrivals, it does not toll returns - and only somebody with no recorded
+  screen at all lands there by default, which is exactly who the introduction is for.
+
+- **The Add Container form asks the provider question up front** (#51). A Storage
+  Provider choice - Azure Blob Storage or S3-compatible - sits above the URL, so the
+  key-pair and region fields are on screen before any URL has been typed; the
+  scheme-driven swap alone left S3 invisible on an empty form. Nothing new is stored:
+  the URL's scheme stays the truth, a typed scheme still snaps the choice to match,
+  and a mismatch left standing is refused at save with the fix named.
+
+- **S3-compatible object storage, the screen half** (#51). The Blob Storage screen reads the
+  URL's scheme the way everything else does: type an `s3://` URL and the SAS section becomes
+  the key-pair boxes - access key id and secret key, combined on save into the engine's own
+  `AccessKeyId:SecretKey` secret format, shape-checked at entry - plus a Region field for the
+  providers that need one said. The Entra choices vanish (a bucket has exactly one way in),
+  no SAS expiry line appears against a credential that has none, and Test Connection tests
+  exactly what is on screen - stored secret with the on-screen region, when the region is the
+  thing being fixed. A refused listing now explains itself: AccessDenied, InvalidAccessKeyId,
+  SignatureDoesNotMatch, RequestTimeTooSkewed, NoSuchBucket and wrong-region redirects each
+  turn into the next move, not just the provider's sentence.
+
+- **S3-compatible object storage, the listing half** (#51). The app can now browse an
+  `s3://` container: a hand-rolled SigV4 signer and a minimal ListObjectsV2 client - one
+  signed GET, paged, path-style over TLS - behind the same storage interface Azure listings
+  use, so discovery, set grouping, chain building and the restore screens neither know nor
+  care which provider answered. No SDK: the signer is pinned stage by stage against AWS's
+  published test vectors. The region resolves configured, then host name, then us-east-1
+  (the engine's own default); Test Connection and `add-container` validation now genuinely
+  prove an S3 key pair reaches its bucket; and a refusal surfaces the provider's own error
+  sentence (AccessDenied and friends explain themselves). The storage-screen surfaces
+  follow next.
+
+- **S3-compatible object storage, the engine half** (#51). An `s3://` container is just
+  another entry in the list - the URL's own scheme picks the provider, so existing configs
+  migrate by doing nothing. The credential is the pair `AccessKeyId:SecretKey`, which is the
+  engine's own secret format, so it rides the whole existing SAS pipeline unchanged (vault
+  slot, in-memory member, export-strips-secrets, environment variable) with a shape check at
+  entry. The server-side credential branches to `IDENTITY = 'S3 Access Key'`; backups
+  overwrite with `FORMAT` (the S3 connector has no append), and both generators emit the
+  optional region as `BACKUP_OPTIONS`/`RESTORE_OPTIONS` JSON on every statement. A hard
+  preflight refuses an S3 restore below SQL Server 2022 or on Express - a capability `--force`
+  cannot conjure - before `WITH REPLACE` drops anything. `add-container` and `--ephemeral`
+  take S3 endpoints.
+
+- **The execution verbs end as data, and receipts know their origin** (#303). `--json` on
+  restore, rehearse and backup puts the ending on stdout machine-shaped: outcome, chain,
+  point reached, measured duration - the rehearsal's proof carrying the real RTO number -
+  warnings, refusals and the history id, while the prose stays on stderr. A pipeline
+  archives the artefact instead of parsing sentences. And every receipt now records which
+  front end acted: History rows say "via CLI", because a 3am scripted restore reads
+  differently in an incident review than a clicked one
+- **Ephemeral mode: an estate defined only in the environment** (#302). `--ephemeral` on
+  any verb resolves server and container names against zero-persistence definitions from
+  NINELIVES_SERVER, NINELIVES_SQL_USER/PASSWORD, NINELIVES_CONTAINER_URL and NINELIVES_SAS -
+  consulted before the profile's config and written nowhere, secrets held in process memory
+  only. For the locked-down service account that must not own vault state and the CI agent
+  where nothing may outlive the job. History receipts still write and webhooks still fire -
+  they are the point. Documented on the overview help page
+- **The exposure sweep can speak** (#301): `9lives exposure --notify` pushes the sweep's
+  verdict through the configured webhooks - ONE message per sweep, the worst offenders
+  named worst first, into the same channel the runs already report to. Warning level and
+  above by default; `--notify-always` adds the all-clear heartbeat. Endpoint subscriptions
+  apply, the exit code is unaffected, and Task Scheduler plus this flag is backup
+  monitoring for an entire estate with no agent, no dashboard and no PowerShell module
+- **9lives backup: the other half of the orchestrator** (#300). The CLI could restore,
+  rehearse and judge but not take a backup - and the scriptable case is everywhere: the
+  pre-change safety snapshot with the restore in the same tool, the copy-away before risky
+  maintenance, the nightly extra full to a second container. Full, differential and log
+  (`--type`), striping (`--stripes`), blob container or share, and the app's rules travel:
+  COPY_ONLY by default and LOUD in stderr AND the script header when disabled, destinations
+  from the same layout rules every browser reads, the blob credential preflight before the
+  first statement, generate-only without `--execute`, and the same history receipts and
+  webhooks as every other execution verb
+- **The CLI restore relocates** (#299): `--relocate` moves every file to the target's own
+  default data and log directories keeping its original name, and `--data-path` /
+  `--log-path` place them explicitly - mirroring the app's WITH MOVE control. The freshly
+  provisioned VM rarely has the source server's drive layout, and the recorded paths used
+  to fail with directory-not-found mid-run, after WITH REPLACE had already dropped the
+  target. With relocation in play the disk-space preflight judges the volumes the files
+  actually LAND on. The three-line Terraform template now survives any VM shape
+
+- Rehearsal notifications now name the database being PROVEN rather than the scratch copy it
+  was proven on - "Rehearsal MyDb", not "Rehearsal MyDb_rehearsal_20260810_0930"
+- The Exposure dashboard sweeps itself on first visit - arriving at an empty screen that needs a
+  button press first is the screen failing its own question. Refresh stays deliberate after that
+- The copy screen now checks the version direction at script generation - its restore half runs
+  outside the restore preflights, so a 2025 source aimed at a 2022 target used to fail with
+  error 3169 only AFTER the backup half had run. The warning says plainly that the copy cannot
+  work and which way it can
+- **The Proven column now carries the measured RTO** - "Proven: 08-09 21:30 (took 14m 00s)".
+  The rehearsal times the real restore plus CHECKDB, which is the number RTO conversations are
+  otherwise made up from, and the dashboard shows it beside the exposure it answers
+- **The exposure dashboard's rows act, not just alarm** - "Open in Restore" on every reachable
+  row jumps to the restore screen with that server's backup history loaded and the database
+  selected, one click from seeing to acting. From there, Rehearse proves it. A red row's
+  distance to being acted on should be one click, or the dashboard is a wall of guilt rather
+  than a to-do list
+- **Scheduled rehearsals: the proof renews itself.** The rehearsal wrapped as a disabled,
+  unscheduled Agent job - add a weekly schedule and every run restores the chain to a stable
+  scratch name, proves it with CHECKDB, and drops it, receipts accumulating in the job history.
+  Each run clears its own previous leftover first, which is safe precisely because the name
+  belongs to the rehearsal alone; a failed run still retains its scratch copy as evidence until
+  the next run has been seen (#259)
+
+
+- **The CLI: 9lives.exe** (#63). The restore engine from a terminal - the same chain
+  calculation, striped-set grouping and script generation the app runs, against the same
+  configured containers, servers and credentials. Five read-only verbs: `list` (what a source
+  holds), `points` (the timeline as text or JSON), `script` (validated restore T-SQL to
+  stdout, STOPAT and marked-transaction targets included), `validate` (is every chain intact -
+  the exit code is the answer), and `exposure` (the dashboard's sweep with the worst level as
+  the exit code, so a scheduled task turns quiet log-backup silence into a red pipeline).
+  Distinct exit codes for warn, broken, could-not-answer and usage, because a pipeline
+  branches on numbers, not prose
+- **The CLI executes - carefully.** `9lives restore` and `9lives rehearse` run against a
+  target server, behind the safety defaults the CLI was designed around: nothing runs without
+  `--execute`; overwriting an existing database is said with `--with-replace`, its own flag
+  that `--force` cannot substitute for; and the same preflights the app fires - can the target
+  read the files, does the version direction work (error 3169), is the TDE certificate there
+  (error 33111) - refuse before anything is dropped, with `--force` as the deliberate,
+  evidence-only override. A generate-only invocation still runs the preflights and carries
+  their verdict in its exit code, so a pipeline can rehearse its own DR step for free.
+  Executed runs land in the same History the app lists and notify the same webhooks -
+  `9lives rehearse --execute` on a schedule is nightly proof with receipts, no SQL Agent
+  required
+- **The CLI documents itself**: `9lives help` for the overview, `9lives help restore` (or
+  any verb, or `--help` after one) for the full page - every option explained, the behaviour,
+  the per-verb exit codes, worked examples. The reference lives inside the exe, where it
+  cannot drift from the parser it describes, and a test holds each page to the verb's own
+  option list - an undocumented flag or a documented-but-refused one both fail the build
+- **Provisioning from nothing**: `add-server` and `add-container` create the configuration
+  from the command line on a machine the app has never run on - a Terraform clone, a DR
+  bubble. Validated by default (the server asked its version, the container asked to answer
+  with exactly the recorded SAS - a SAS looks right for weeks after it expired), converging
+  on re-run, secrets in the Credential Manager and never echoed, with
+  `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` as the script-friendly alternative to flags.
+  A point-in-time clone is three chained lines whose only variable is the moment
+
+- **Webhook deliveries can take a route** (#316): the machine's own proxy settings (the
+  default, and what always happened), no proxy at all, or an explicit proxy URL with
+  credentials - the password in Windows Credential Manager like every secret. One setting
+  beside the webhook list, used by every send: the app's runs, the test button, and the
+  CLI's alike. The route travels in an export as addressing only; the secret asks again on
+  the new machine
+- **Webhook URLs get the secret treatment** (#317): pasted, then committed with an explicit
+  Save - and from that moment obfuscated, stored in Windows Credential Manager, out of
+  config.json, and never displayed again. Replacing one means saving a new one. Deliveries
+  hydrate the URL at send time on clones; existing configs keep working from their in-file
+  URL until the row is next saved, which migrates it
+- **The restore workflow asks WHERE, as a step** (#318): step 2 is SELECT TARGET, offering
+  the saved server list right in the flow. Connecting on the SQL Servers screen first shows
+  the step already answered - and still changeable - instead of asking again; with nothing
+  connected, the answer no longer waits to surface as an execute-time error. Changing the
+  source keeps the target: it is an independent decision, and it survives backtracking
+- **The database list waits for an instance** (#319): with several instances in the loaded
+  backups, the DATABASE dropdown stays empty and disabled until the instance is chosen -
+  two servers both backing up a database called Sales are the everyday DR pair, and a mixed
+  list meant guessing whose history the timeline would show. One instance answers its own
+  filter automatically; the database choice itself always stays with the user
+
+### Changed
+
+- **The screens stopped assuming Azure** (#51). "Azure Blob Storage" as a backup
+  source, destination or browse medium now reads "Cloud storage" - a saved container,
+  whichever provider answers it - across Restore, Back Up, Copy Database and Browse
+  Backups, with labels, empty-states and the delete-container dialog following. The
+  genuinely Azure-specific texts (Entra guidance, SAS specifics) still say Azure,
+  because there they mean it.
+
+- The engine - every service and model - now lives in NineLives.Core, a library with no UI
+  framework behind it. Nothing a user can see is different; this is the load-bearing wall for
+  the command-line front end (#63), where the same chain calculation, the same preflights and
+  the same script generation must run without a window ever existing
+
+### Fixed
+
+- **The CLI says what it does** (#370). A scripted restore always issued
+  `ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE` and never mentioned it -
+  a capability the app presents as a tick box was invisible and unrefusable from a
+  script, and since MULTI_USER is only restored after the whole chain succeeds, a chain
+  that failed part way left the database single-user. There is now `--keep-sessions`,
+  and the default behaviour is documented on the verb's own page. A refusal under
+  `--json` now answers in JSON rather than putting a page of T-SQL on stdout, or nothing
+  at all - which was the one path a wrapper most needs to read. And `--ephemeral` is
+  matched without regard to case like every other option, with `NINELIVES_S3_REGION`
+  named in the help that had always omitted it.
+
+- **Three places the app said nothing, or the wrong thing** (#370). The Exposure
+  dashboard's "Open in Restore" button was live on unreachable rows and silently did
+  nothing when pressed - and those are the rows that sort to the top, because they are
+  the alarms; it is now replaced on those rows by the actual next step, which is fixing
+  the connection. The explanation for an empty script pane lived INSIDE that pane, and
+  the two states are mutually exclusive, so every reason it could give - the STANDBY undo
+  file, a log mark on a chain with no logs - was unreachable; it now sits above the pane
+  where it can be read. And a database with no restore points at all was reported as a
+  filter problem, advising somebody to widen filters that the timeline had just reset to
+  fully open - it now says what is actually wrong, which is that a restore has to start
+  from a full backup.
+
+- **The CLI's exit codes stopped contradicting themselves** (#370). Two ways they lied to
+  a pipeline. Adding `--json` to `list` changed the VERDICT: the JSON branch returned 0
+  on a source holding nothing, while the same command without it returned 2 and the spec
+  documented 2 - so putting `--json` on a monitoring check turned a container that had
+  silently stopped receiving backups into a pass, and the pipeline piped an empty array
+  into jq and did nothing. An output format must never change the answer.
+
+  And a finding wore a usage error's clothes: "this source has no backups for a database
+  called Sales" came back as 64, indistinguishable from a malformed command line, so a
+  pipeline branching on the documented contract logged and aborted rather than paging -
+  when that is precisely the alarm `validate` is watched for. The loader now says which
+  kind of failure it had, and a genuinely malformed invocation still exits 64.
+
+- **A rehearsal blocked by its own host says so, instead of blaming the backup** (#359).
+  `rehearse` ran no preflights at all - no space check, no version direction, no TDE
+  certificate, no S3 capability - so a scratch volume too small, a certificate missing
+  from the rehearsal target, or an engine that cannot read the storage all died inside
+  the restore and came back as NOT PROVEN, exit 2, with the scratch copy retained as
+  evidence. That reads as "this backup is bad", when the backup was never in question
+  and the host was. It now runs the same preflights the restore verb does, and a refusal
+  is its own outcome and its own exit code - could not be proven, which is a different
+  answer from proven false, and a proof loop that conflates them is worse at 3am than one
+  that does not run.
+
+- **A failure in the early restore steps is actually shown** (#355). The screen's only
+  error banner sat inside step 5, which is not on screen until step 4 has been confirmed -
+  so everything that can go wrong before that had no banner at all. An expired container,
+  a chain that will not build, a header that will not read: each reached only the status
+  line, in grey, at the foot of a two-thousand-line page, indistinguishable from "Script
+  copied to clipboard", and with no way to dismiss it. The banner is now docked above the
+  scroll beside the summary of what the restore will do.
+
+- **Editing a container can no longer save over a different one** (#354). The list stayed
+  clickable while the edit form was open, and Save writes to whichever container is
+  SELECTED - so starting an edit, clicking another container to check something, then
+  saving wrote the first one's name, URL, credential and tags over the second. Silently,
+  leaving the original untouched and two containers sharing a name. The list is now
+  disabled while an edit is open.
+
+- **A chain can no longer take one server's full and another's logs** (#362). Restore
+  points were computed by partitioning the sets on backup TYPE alone. Set grouping goes to
+  real trouble to keep two servers' same-named databases apart - a container holding Sales
+  from SRV01 and SRV02 is the everyday DR pair - and the pairing then discarded the
+  distinction. The app never showed it, because its inventory screen filters to one
+  instance first; the CLI has no such filter and a container source cannot narrow to a
+  server at all, so `9lives script --container backups --database Sales` produced exactly
+  that mixture, and nothing downstream caught it because the identity check compares
+  database names and both are Sales. Chains are now built per database-and-instance and
+  the results concatenated: nothing is dropped and nothing is refused, each server's
+  points are offered and each is internally consistent.
+
+- **A bucket path recorded in msdb restores from a URL, not from a disk** (#375). Whether
+  a device is a path or a URL was answered two different ways: the inspection statements
+  read the device string, and the restore generator read which FIELD of the file held it.
+  Those agree for anything discovered by listing a container, and disagree for a backup
+  written to a bucket and later read back from the instance's own history - that arrives
+  with its `s3://` URL in the local-path field, so the generated statement said
+  `DISK = N's3://...'`, which SQL Server cannot open, and the region was stripped off it
+  as well. There is now one rule, in one place, and it asks the device: a UNC prefix or a
+  drive letter is a path and everything else is a URL, so a provider whose scheme nobody
+  has thought of yet is still addressed correctly.
+
+- **A scripted restore creates the credential it authenticates with** (#353). RESTORE
+  FROM URL needs a credential on the TARGET instance for the container's URL, and the
+  generated script deliberately never carries one - the app writes it from its credential
+  panel, and nothing in the CLI did. So the provisioning template the README leads with,
+  add-server then add-container then `restore --execute` on a freshly built VM, died on
+  its last line with Msg 3201, after both provisioning verbs had validated green.
+  `rehearse` gets it too, and gets it before the file list rather than before the
+  restore: FILELISTONLY reads the backup itself, so a scheduled rehearsal without the
+  credential failed at the read and reported NOT PROVEN - blaming the backup for a host
+  that had never been told how to reach it. The README's own list of restore preflights
+  was missing the credential too, which is how the gap stayed invisible.
+
+- **The bucket's region reaches the statement, not just the listing** (#361). The region
+  was stored, used when the app listed a container, and understood by both generators -
+  but only the app's restore path ever put it on the options object. Every other path
+  left it null, so the statement went to SQL Server signed for the provider's default
+  region. The failure shape was the nasty one: the container tests perfectly and `list`
+  works, because listing is signed by this app, and then the backup or restore fails,
+  because the statement is signed by the engine. It bit exactly the providers the feature
+  exists for - AWS-style hosts carry their region in the name, and Wasabi, Backblaze B2,
+  R2 and storage appliances generally do not. Now threaded through the Back Up screen,
+  Copy Database, and the CLI's backup, restore, rehearse and script verbs.
+
+- **A striped backup read from an instance's own history is no longer called corrupt**
+  (#351). msdb records a backup's size once for the whole set rather than per stripe, so
+  every stripe after the first was left at zero - and zero already meant something here,
+  an interrupted or failed upload, which the validator raises as an Error that disables
+  the restore. So every striped backup discovered through the shared-path route was
+  declared damaged and refused, at DR time, on exactly the large databases that get
+  striped in the first place. A file whose size nobody could state now says so, which is
+  a different thing from being empty - and a genuinely zero-byte stripe in a container,
+  where every size IS known, is still caught.
+
+- **A backup set id cannot break out of the comment naming it** (#352). The header was
+  escaped in #294 and the three per-statement comments were not, so a set id carrying a
+  line break - and for a set read from msdb the id is built from the database name, which
+  is sysname and permits one - ended its comment and left the rest standing as a live
+  statement, in a script the app executes and `9lives script --out` hands to a pipeline.
+
+- **A restore receipt can no longer destroy the receipt beside it** (#371). When two
+  writers went for the history file at once - a scheduled `9lives rehearse` while the app
+  is open, which is what #298 added the cross-process lock for - a writer that could not
+  take the lock within its retry budget went ahead and wrote anyway. That is a
+  read-modify-write with no exclusion: it does not risk the entry being written, it
+  silently drops whatever the other writer added in between. CI caught it losing four
+  receipts out of fifty on a loaded runner. A writer that cannot take the lock now writes
+  nothing, and the backoff starts short and jitters so it very rarely comes to that.
+
+- **The app refuses an S3 restore its engine cannot run** (#349). The SQL Server 2022+
+  and non-Express check shipped in the CLI's preflights alone, so the app - which is what
+  most restores are run from - promised a safety net in the README that only the other
+  front end provided. The gate now lives in the engine library and both front ends call
+  it, so a 2019 or Express target is refused before anything runs rather than erroring on
+  the server afterwards. It reads the whole chain rather than just the full backup - a
+  full on Azure carried forward by logs in a bucket still needs the connector - and it
+  asks the device the RESTORE will actually name, so a set read back from an instance's
+  own history is judged the same as one discovered by listing.
+
+- **A bucket has an endpoint, not a storage account** (#345). The container details pane
+  read the first label of the host name into a row labelled STORAGE ACCOUNT - correct for
+  Azure, and "s3" for every AWS bucket. Both the label and the value now follow the
+  provider, and an endpoint given with a port keeps it.
+
+- **A backup destination too long for SQL Server is refused before the run, not during it**
+  (#346). The engine caps a backup device URL at 259 characters; past that BACKUP TO URL
+  fails on the server, mid-backup, with a message about devices rather than lengths. The
+  destination is now measured where it is built, so the Back Up screen, Copy Database and
+  the CLI's backup verb all refuse it up front - naming the offending URL and its length,
+  because the fix is always in one of its parts. Easy to reach with a long endpoint, a base
+  path and the default four-segment pattern; striping makes every stripe carry it.
+
+
+- **Two processes cannot lose each other's receipts** (#298). The restore history's
+  read-modify-write was serialised in-process only - and the CLI made it two processes: a
+  scheduled 9lives rehearse writing its receipt while the app is open was a race where the
+  last writer silently dropped the other's entry, and the receipt that vanished is the
+  proof the rehearsal existed - the exact thing the Proven column reads. Writers now hold a
+  sidecar lock file across the read-modify-write, queueing in a short retry loop instead of
+  clobbering; the lock deletes itself on close, so a crash cannot orphan it
+- **The CLI checks the restore fits before anything is dropped** (#297). The preflight
+  ladder's fifth rung: FILELISTONLY sizes against the target's own free space, per volume,
+  judged by the same check the app uses - including the volume the target does not have at
+  all, which is a MOVE problem rather than a free-space problem. Space is evidence, so
+  --force downgrades the refusal to a loud warning; the shortfall is named either way. The
+  CLI is the front end most often aimed at a freshly provisioned VM with small disks, and a
+  restore that runs out of disk fails AFTER WITH REPLACE has dropped what it was replacing
+- **Every run closes on the channel** (#295). A failed SINGLE-database backup now sends the
+  close of the run with its duration, exactly as the multi-database path always has - the
+  channel used to hear "Started" and then silence forever, which teaches people the channel
+  is unreliable. The copy's six-notification lifecycle is pinned end to end: started,
+  succeeded with duration, each half's failure named, and a refused copy never claims to
+  have started
+- **Names cannot smuggle statements past the person reading the script** (#294). sysname
+  permits control characters and line breaks, and the restore target is free text - a name
+  containing a newline used to terminate the generated script's header comment and hand the
+  remainder to the server as executable text. Header comments now flatten control
+  characters; everywhere else the name already travels as data. And names that came FROM
+  the server - the backup's database, the encryption certificate, an orphaned user - are
+  quoted exactly: a database genuinely named [Archive] stays [Archive] instead of
+  round-tripping through the typed-name unwrapping into a different database
+- **Three truths on the backup screen** (#293). The Agent-job handover names a backup job
+  "NineLives backup ..." instead of introducing itself as a restore, and multi-select names
+  all of it - "NineLives backup 3 databases" rather than an empty database in the
+  description. Verify now proves the run that happened: WITH CHECKSUM exactly when the
+  statements said it, captured with the run, so ticking the box after a no-checksum backup
+  no longer fails a perfectly fine backup (and unticking no longer silently degrades the
+  verify). And stripes is clamped to SQL Server's own 1-64 device range, so a typo of 640
+  cannot become a statement the server rejects after the arm-and-confirm
+- **The webhook settings tell the truth** (#292). The Test button on an endpoint with all
+  three moments unticked - the natural way to pause one - now says it is subscribed to
+  nothing and will never fire during a run, instead of promising a channel that stays
+  silent forever. A URL typo is refused at Save with the reason on the row - it used to be
+  accepted and then fail on every run, with the failures visible only in the operation log.
+  And every delivery attempt, test or real, stamps the endpoint with when and how it went:
+  "Last delivery 2026-08-10 21:14: FAILED - 404" on the row is the difference between a
+  webhook that works and one that broke weeks ago and looked identical
+- **The connected server survives its own lifecycle honestly** (#291). Deleting it is
+  recognised by identity, not by a caption captured at connect time - renaming the connected
+  server and then deleting it used to leave the status bar claiming "Connected to X" while
+  the restore screen still held the deleted object as its target. Editing the connected
+  entry's address, auth mode, login, encryption or password now DROPS the connection with an
+  explanation - the old settings were proven, the new ones are not - while a rename alone
+  keeps it. And renaming onto an existing name is refused, exactly as creating one is, so no
+  two entries can share a caption
+- **The busy strip and the taskbar flash treat all three runs alike** (#289). The global
+  busy indicator - which exists so "is it doing something?" does not depend on scroll
+  position - now lights for backups and copies, the two longest-running screens it ignored.
+  And the taskbar attention flash on finishing behind another window, written for exactly
+  the alt-tabbed-away case, now fires for a finished backup and a finished copy as it always
+  did for a restore
+- **The handoff tells the truth** (#288). Clicking "Open in Restore" while a restore is
+  RUNNING is refused with an explanation instead of wiping the run's chain and timeline off
+  the screen - the handoff may not do what the regenerate button already refuses. What
+  arrives is exactly what the browser showed: extra containers ticked on an earlier visit
+  are unticked, so the chain cannot assemble from backups nobody looked at. And the instance
+  filter matches by identity the way every other server comparison does - a case or naming
+  difference between msdb's name and a path-inferred one no longer silently drops the
+  filter, and a filter that genuinely cannot apply is SAID on the status line rather than
+  quietly answering a different question
+- **The exposure sweep answers to the user** (#287). It can be STOPPED - a Stop button while
+  it runs, and Esc reaches it - where a dozen servers with several unreachable used to mean
+  minutes of timeouts with no exit; stopping keeps the previous sweep's rows, and is never
+  dressed up as a server failure. A sweep that fails says so on the dashboard instead of
+  dying unobserved behind the first-visit auto-sweep, and that auto-sweep now runs once per
+  session as promised: "has swept" is a real flag, no longer inferred from an empty row list
+  that re-triggered a full estate sweep on every visit whenever the answer WAS empty. The
+  "as of" clock carries the date, an unreachable row is a property rather than a magic
+  caption, and the one-click handoff hands the restore screen the exact connection whose
+  sweep produced the row - two entries for the same instance with different credentials no
+  longer collapse into whichever came first
+- **The browser no longer mixes two sources' answers** (#286). Changing the container,
+  medium or source server mid-listing cancels the in-flight load instead of letting the
+  stale result land under the new source's name - and the set grouping runs with the
+  container that was ASKED, not a re-read of the selection, so a mid-flight switch can no
+  longer skew filename-less timestamps by the other container's time zone. A round trip to
+  another screen and back keeps the listing (the refresh compares identities before
+  reassigning selections), F5 now RELOADS the listing instead of emptying it, a cancelled
+  reload keeps the previous complete answer whole - rows and restore button in agreement -
+  the remembered container survives a rename by matching on Id, and both media report the
+  same thing in the status line: the source's total databases
+- The SQL Servers and Blob Storage screens now MERGE their saves into the configuration on
+  disk instead of replacing it wholesale. Importing a config (or adding entries with the CLI)
+  and then saving anything on either screen used to silently delete everything added since
+  the screen loaded - the worst case being import, then Connect, and every imported server
+  gone. Both screens also catch up with outside additions on navigation, and only deletions
+  made on the screen itself delete (#276)
+- The CLI's endings are trustworthy now (#296). Completion webhooks no longer race process
+  exit - the execution verbs drain pending deliveries (bounded, ten seconds) before
+  returning, so the success and problem messages actually arrive from a process that exits
+  the moment the run ends. And Ctrl+C mid-run is a story, not a kill: the receipt says
+  Cancelled, the channel is told, and the exit code is the conventional 130 so a wrapping
+  script can tell an operator's interruption from a failure
+- The copy's generation-time checks answer for their inputs, not for keystrokes (#285).
+  Typing in the target-name box used to launch six round trips across BOTH production
+  instances per character, the racing sweeps could clear each other's warnings, and a quick
+  Confirm ran with the panels still blank. One serialised sweep per input change now -
+  version first, previous sweep cancelled on re-entry so a stale answer can never erase a
+  fresh warning - and the run waits for the verdicts before anything executes. A credential
+  refusal before the run also finally uses the outcome the enum always had for it
+- Closing the app on the launch mode-cards no longer erases the remembered screen (#290).
+  The cards show at every start, so opening the app and closing it without clicking through
+  wiped the last-screen memory and the next launch forgot where its owner works. No choice
+  made now means nothing recorded - not "record nothing"
+- BACKUP TO URL and the copy now ask the credential question the restore always asked
+  (#284): the backup checks the source instance before its first statement, the copy checks
+  BOTH ends before the source is read at full speed - a missing credential is created, an
+  existing usable one (managed identity included) is left strictly alone, and an existing
+  unusable one refuses with the way out named, instead of Msg 3201 after the arm-and-confirm.
+  The decision now lives in one Core service all three screens share
+- Copy failures get the restore screen's follow-through (#283): a Stop pressed between the
+  halves is reported as the cancellation it is - not as a share-permission failure sending
+  somebody to chase an ACL that is fine; a failed restore half now says what state the
+  target is in (RESTORING, RECOVERY_PENDING, single-user) with the statements that get it
+  out; and a copy that worked runs the orphaned-user scan - a copy to a different server
+  being the canonical orphaned-login scenario. The copy's notification lifecycle gains its
+  first tests while here
+- A copy onto the same instance is refused up front, with the way out named (#282). The
+  copy's restore carries no MOVE clauses - right for a different server, fatal on the same
+  one, where the files land on the live source's own paths and SQL Server fails with
+  Msg 1834 AFTER the backup half has run. The refusal points at the Restore screen's full
+  WITH MOVE control; automatic relocation for this shape rides with the generation-time
+  check rework (#285)
+- "All user databases" means it now (#279): the database list the backup screen ticks and
+  the copy screen offers is filtered to online user databases - no more tempdb (which cannot
+  be backed up at all), no master offered for copying, no RESTORING or OFFLINE databases
+  guaranteeing a red summary on the one-click patch-night path. Same predicate the exposure
+  query always used, now in one more place it belonged
+- Every long operation owns its cancellation (#281). Three screens shared one token across
+  operations that can overlap, so the List databases button silently cancelled a running
+  backup or copy, and a finished operation disposed the survivor's token - the container-wide
+  audit could die with "Cannot access a disposed object" while its Stop button vanished. One
+  instance per operation now (the rule the restore execution always kept), the list buttons
+  are dead while a run is in progress, and starting an inventory operation cancels the others
+  explicitly rather than through a shared disposal
+- The copy runs the scripts it showed, not the ones on screen later (#280). The view stayed
+  editable while the halves ran, and a keystroke in the target-name box mid-backup
+  regenerated the restore half with fresh timestamped destinations - so the copy then
+  restored from a file that was never written, and the outcome text pointed at the wrong
+  path. The run now snapshots both scripts and the destination list at the moment of
+  consent, the same immutable-run-record medicine the restore screen takes
+- A generated script no longer survives the change that invalidated it (#278). On the backup
+  and copy screens, an input change that makes regeneration impossible now CLEARS the script,
+  the destinations and the run button instead of leaving the old statements displayed and
+  runnable - switching servers after generating used to leave a script for one instance
+  executable against another, with the previous server's multi-select ticks and certificate
+  list still standing
+- Imports no longer destroy and no longer lie (#277): the webhook list refreshes immediately
+  after an import, so the next row edit cannot erase what was just imported; a matching
+  container keeps the SAS pasted into its local URL (the same protection webhook URLs always
+  had), unless the base URL changed - a SAS is scoped to what it was issued for; the summary
+  counts webhooks; and a file without a format version - an empty JSON object used to import
+  as "Nothing new" - is refused as not an export, as is a file from a newer format. Theme and
+  the update/log preferences are no longer exported, because the import never applied them -
+  a file must not carry what the import discards
+- Find marks now asks the SOURCE instance's msdb on shared-path and ad-hoc restores - marked
+  transactions are recorded where they ran, so asking the target answered "no marks" when the
+  truth was "wrong catalogue". Blob still asks the connected server, which is the only
+  catalogue that medium has (#268)
+- A combo's closed box now shows the same text as its open list. The custom combo template
+  dropped the template selector that DisplayMemberPath works through, so combos bound to
+  objects rendered their raw type name once closed - the marked-transactions picker being the
+  first to show it in daylight
+
 ## [1.5.0] - 2026-08-10
 
 ### Added

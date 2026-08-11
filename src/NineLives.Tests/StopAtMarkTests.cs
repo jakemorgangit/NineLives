@@ -1,5 +1,6 @@
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
+using Blackcat.NineLives.ViewModels;
 using Xunit;
 
 namespace Blackcat.NineLives.Tests;
@@ -107,5 +108,84 @@ public class StopAtMarkTests
         Assert.Contains("deploy_v2", mark.Display);
         Assert.Contains("2026-08-10 09:00:00", mark.Display);
         Assert.Contains("the v2 schema deployment", mark.Display);
+    }
+
+    // ── which catalogue gets asked (#268) ───────────────────────────────────────
+    //
+    // logmarkhistory is written where the marked transactions RAN. Ask the wrong instance and
+    // the answer is "no marks" - indistinguishable from there genuinely being none.
+
+    private static (RestoreViewModel vm, FakeSqlServerService sql,
+        ServerConnection source, ServerConnection target) TwoServers()
+    {
+        var store = new FakeCredentialStore();
+        var source = new ServerConnection
+        { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };
+        var target = new ServerConnection
+        { Id = ServerConnection.NewId(), Name = "SRV02", ServerName = "SRV02" };
+        store.Config.Servers.Add(source);
+        store.Config.Servers.Add(target);
+
+        var sql = new FakeSqlServerService();
+        sql.LogMarksByDatabase["MyDb"] = [new LogMark("deploy_v2", null, T0)];
+
+        var vm = new RestoreViewModel(
+            new FakeBlobStorageService(), sql, new BackupChainBuilder(),
+            new RestoreScriptGenerator(), store,
+            log: null, history: new FakeRestoreHistoryStore(), auditStore: TestAuditStores.Temp());
+        vm.RefreshContainers();
+
+        return (vm, sql, source, target);
+    }
+
+    /// <summary>
+    /// Restoring SRV01's backups onto SRV02: the marks live in SRV01's msdb, and SRV02's has
+    /// never heard of them. The connected (target) server must NOT be the one asked.
+    /// </summary>
+    [Fact]
+    public async Task SharedPathMarksComeFromTheSourceServersMsdb()
+    {
+        var (vm, sql, source, target) = TwoServers();
+        vm.SelectedMedium = BackupMedium.SharedPath;
+        vm.SourceServer = vm.SourceServers.Single(s => s.Id == source.Id);
+        vm.ConnectedServer = target;
+        vm.Inventory.SelectedDatabaseName = "MyDb";
+
+        await vm.LoadLogMarksCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "SRV01" }, sql.LogMarkServersAsked);
+        Assert.Single(vm.LogMarks);
+    }
+
+    /// <summary>
+    /// The shared-path flow chooses its source in step 1 and never needed the Servers screen's
+    /// connect - finding marks must not demand one.
+    /// </summary>
+    [Fact]
+    public async Task ASharedPathFindsMarksWithoutAServersScreenConnection()
+    {
+        var (vm, sql, source, _) = TwoServers();
+        vm.SelectedMedium = BackupMedium.SharedPath;
+        vm.SourceServer = vm.SourceServers.Single(s => s.Id == source.Id);
+        vm.Inventory.SelectedDatabaseName = "MyDb";
+
+        await vm.LoadLogMarksCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "SRV01" }, sql.LogMarkServersAsked);
+        Assert.Single(vm.LogMarks);
+    }
+
+    /// <summary>Blob has no source instance - the connected server is the only catalogue there is.</summary>
+    [Fact]
+    public async Task BlobMarksComeFromTheConnectedServer()
+    {
+        var (vm, sql, _, target) = TwoServers();
+        vm.ConnectedServer = target;
+        vm.Inventory.SelectedDatabaseName = "MyDb";
+
+        await vm.LoadLogMarksCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "SRV02" }, sql.LogMarkServersAsked);
+        Assert.Single(vm.LogMarks);
     }
 }

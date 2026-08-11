@@ -37,14 +37,70 @@ public partial class SettingsViewModel : ViewModelBase
     {
         Webhooks.Clear();
         foreach (var endpoint in config.Webhooks)
-            Webhooks.Add(new WebhookEndpointViewModel(endpoint, SaveWebhooks, TestWebhookAsync));
+            Webhooks.Add(new WebhookEndpointViewModel(
+                endpoint, _credentialStore, SaveWebhooks, TestWebhookAsync));
+
+        var proxy = config.WebhookProxy;
+        ProxyMode = proxy?.Mode ?? WebhookProxyMode.SystemDefault;
+        ProxyUrl = proxy?.Url ?? string.Empty;
+        ProxyUsername = proxy?.Username ?? string.Empty;
+    }
+
+    // ── how deliveries reach the network (#316) ────────────────────────────────
+
+    public IReadOnlyList<WebhookProxyMode> ProxyModes { get; } =
+        [WebhookProxyMode.SystemDefault, WebhookProxyMode.Direct, WebhookProxyMode.Custom];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsProxyDetails))]
+    private WebhookProxyMode _proxyMode = WebhookProxyMode.SystemDefault;
+
+    public bool ShowsProxyDetails => ProxyMode == WebhookProxyMode.Custom;
+
+    [ObservableProperty]
+    private string _proxyUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _proxyUsername = string.Empty;
+
+    /// <summary>Typed, saved, cleared - the password is never read back out of the vault.</summary>
+    [ObservableProperty]
+    private string _proxyPasswordInput = string.Empty;
+
+    /// <summary>
+    /// Commits the delivery route (#316). The password goes to Windows Credential Manager and
+    /// the input clears; the mode, URL and username go to the config file - they are
+    /// addressing, not secrets.
+    /// </summary>
+    [RelayCommand]
+    private void SaveProxy()
+    {
+        Save(config =>
+        {
+            config.WebhookProxy = new WebhookProxySettings
+            {
+                Mode = ProxyMode,
+                Url = string.IsNullOrWhiteSpace(ProxyUrl) ? null : ProxyUrl.Trim(),
+                Username = string.IsNullOrWhiteSpace(ProxyUsername) ? null : ProxyUsername.Trim()
+            };
+        }, "The delivery route could not be saved");
+
+        if (!string.IsNullOrWhiteSpace(ProxyPasswordInput))
+        {
+            _credentialStore.SaveSecret(
+                WebhookTransport.ProxyCredentialKey, ProxyUsername, ProxyPasswordInput);
+            ProxyPasswordInput = string.Empty;
+        }
+
+        WebhookTestResult = "Delivery route saved. The next send - test or real - uses it.";
     }
 
     [RelayCommand]
     private void AddWebhook()
     {
         var endpoint = new WebhookEndpoint { Name = $"Endpoint {Webhooks.Count + 1}" };
-        Webhooks.Add(new WebhookEndpointViewModel(endpoint, SaveWebhooks, TestWebhookAsync));
+        Webhooks.Add(new WebhookEndpointViewModel(
+            endpoint, _credentialStore, SaveWebhooks, TestWebhookAsync));
         SaveWebhooks();
     }
 
@@ -66,10 +122,39 @@ public partial class SettingsViewModel : ViewModelBase
     private async Task TestWebhookAsync(WebhookEndpointViewModel row)
     {
         WebhookTestResult = $"Sending a test to {row.Name}...";
-        var error = await new WebhookNotifier().SendTestAsync(row.Model);
-        WebhookTestResult = error == null
-            ? $"Test sent to {row.Name} - check the channel."
-            : $"{row.Name}: {error}";
+
+        // Same transport and same hydration as a real delivery (#316, #317): a test that
+        // bypasses the proxy or reads a different URL proves nothing about the run.
+        var url = WebhookTransport.ResolveUrl(row.Model, _credentialStore);
+        if (url == null)
+        {
+            WebhookTestResult = $"{row.Name}: no URL saved yet.";
+            return;
+        }
+
+        var hydrated = WebhookTransport.HydrateUsable([row.Model], _credentialStore).Single();
+        using var handler = WebhookTransport.BuildHandler(
+            _credentialStore.LoadConfig().WebhookProxy, _credentialStore);
+        var error = await new WebhookNotifier(handler).SendTestAsync(hydrated);
+        WebhookTransport.RecordDelivery(_credentialStore, row.Model.Id, error);
+        row.NoteDelivery(error);
+        WebhookTestResult = DescribeTestOutcome(row.Name, error, row.Model);
+    }
+
+    /// <summary>
+    /// The sentence the test button produces (#292). The natural way to pause an endpoint is
+    /// unticking all three moments - there is no Enabled flag - and a plain "test sent" then
+    /// promised a channel that would stay silent forever.
+    /// </summary>
+    internal static string DescribeTestOutcome(string name, string? error, WebhookEndpoint model)
+    {
+        if (error != null) return $"{name}: {error}";
+
+        var listens = model.NotifyStarted || model.NotifyFinished || model.NotifyProblems;
+        return listens
+            ? $"Test sent to {name} - check the channel."
+            : $"Test sent to {name} - but it is subscribed to nothing (Started, Finished and " +
+              "Problems are all off), so it will never fire during a run.";
     }
 
     // ── moving machines (#213) ──────────────────────────────────────────────────
@@ -127,27 +212,44 @@ public partial class SettingsViewModel : ViewModelBase
             var imported = ConfigPortability.Read(System.IO.File.ReadAllText(dialog.FileName));
             if (imported == null)
             {
-                SetError("That file is not a Nine Lives configuration export.");
+                SetError("That file is not a Nine Lives configuration export - or it came " +
+                         "from a newer version of the app than this one.");
                 return;
             }
 
-            var config = _credentialStore.LoadConfig();
-            if (config.LoadError != null)
-            {
-                SetError($"The local configuration could not be read, so nothing was imported: {config.LoadError}");
-                return;
-            }
+            var summary = ImportFrom(imported);
+            if (summary == null) return;
 
-            var summary = ConfigPortability.Merge(config, imported);
-            _credentialStore.SaveConfig(config);
-
-            SetStatus(summary.Describe() + " Restart screens that list servers or containers to see them.");
+            SetStatus(summary.Describe() + " Imported entries appear on the servers and " +
+                      "containers screens on their next visit.");
             _log.Info($"[config] imported from {dialog.FileName}: {summary.Describe()}");
         }
         catch (Exception ex)
         {
             SetError($"Import failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// The import minus the file dialog, so the merge-and-reload contract is testable (#277).
+    /// </summary>
+    internal ImportSummary? ImportFrom(ExportedConfig imported)
+    {
+        var config = _credentialStore.LoadConfig();
+        if (config.LoadError != null)
+        {
+            SetError($"The local configuration could not be read, so nothing was imported: {config.LoadError}");
+            return null;
+        }
+
+        var summary = ConfigPortability.Merge(config, imported);
+        _credentialStore.SaveConfig(config);
+
+        // The on-screen webhook list catches up NOW, not on restart: the next edit to any row
+        // rewrites the whole webhook list from screen state, and a stale list would erase
+        // exactly what was just imported (#277).
+        LoadWebhooks(config);
+        return summary;
     }
 
     /// <summary>True while the constructor is filling the properties from config.</summary>

@@ -89,6 +89,58 @@ public class EntraWindowHandleTests(WpfFixture wpf)
     }
 
     /// <summary>
+    /// The seam the Core extraction cut (#63): the engine registers through the PromptParent
+    /// hook, read at the moment a prompt needs parenting - NOT captured at registration. So a
+    /// front end may assign its resolver whenever it likes before the first sign-in, and the
+    /// provider still sees the current one.
+    /// </summary>
+    [Fact]
+    public void TheProviderReadsPromptParentAtPromptTimeNotRegistrationTime()
+    {
+        var original = EntraAuthentication.PromptParent;
+        try
+        {
+            EntraAuthentication.ResetForTests();
+            new SqlServerService(new FakeCredentialStore()).BuildConnectionString(
+                new ServerConnection
+                {
+                    Id = ServerConnection.NewId(),
+                    Name = "SRV01",
+                    ServerName = "srv01.database.windows.net",
+                    AuthMode = AuthMode.EntraInteractive
+                });
+
+            // Assigned AFTER registration - late binding is what makes this visible.
+            EntraAuthentication.PromptParent = static () => 777;
+
+            var provider = SqlAuthenticationProvider.GetProvider(
+                SqlAuthenticationMethod.ActiveDirectoryInteractive);
+            var field = provider!.GetType().GetField(
+                "_parentActivityOrWindowFunc",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var func = Assert.IsType<Func<object>>(field!.GetValue(provider), exactMatch: false);
+
+            Assert.Equal((nint)777, func());
+        }
+        finally
+        {
+            EntraAuthentication.PromptParent = original;
+        }
+    }
+
+    /// <summary>
+    /// The desktop app's half of that seam: constructing the App is what hands the WPF window
+    /// resolver to the engine. The fixture constructed a real App, so this asserts on exactly
+    /// what the running app does - a front end that forgets this wiring leaves prompts
+    /// parentless, and the broker refuses parentless prompts.
+    /// </summary>
+    [Fact]
+    public void TheDesktopAppWiresThePromptParentAtConstruction()
+        => Assert.Equal(
+            (Func<nint>)EntraPromptWindow.ActiveWindowHandle,
+            EntraAuthentication.PromptParent);
+
+    /// <summary>
     /// Registration is process-wide global state. Doing it twice would replace a provider that may
     /// already be mid-sign-in, so it happens once and later calls are no-ops.
     /// </summary>
@@ -125,7 +177,7 @@ public class EntraWindowHandleTests(WpfFixture wpf)
                 window.Show();
                 Application.Current.MainWindow = window;
 
-                var handle = EntraAuthentication.ActiveWindowHandle();
+                var handle = EntraPromptWindow.ActiveWindowHandle();
 
                 Assert.NotEqual(nint.Zero, handle);
                 Assert.Equal(new WindowInteropHelper(window).Handle, handle);
@@ -162,7 +214,7 @@ public class EntraWindowHandleTests(WpfFixture wpf)
                 if (!onTop.IsActive) return;
 
                 Assert.Equal(new WindowInteropHelper(onTop).Handle,
-                    EntraAuthentication.ActiveWindowHandle());
+                    EntraPromptWindow.ActiveWindowHandle());
             }
             finally
             {
@@ -185,7 +237,7 @@ public class EntraWindowHandleTests(WpfFixture wpf)
         {
             Application.Current.MainWindow = null;
 
-            var ex = Record.Exception(() => EntraAuthentication.ActiveWindowHandle());
+            var ex = Record.Exception(() => EntraPromptWindow.ActiveWindowHandle());
 
             Assert.Null(ex);
         });
@@ -209,7 +261,7 @@ public class EntraWindowHandleTests(WpfFixture wpf)
 
         try
         {
-            var handle = await Task.Run(EntraAuthentication.ActiveWindowHandle);
+            var handle = await Task.Run(EntraPromptWindow.ActiveWindowHandle);
 
             Assert.NotEqual(nint.Zero, handle);
         }

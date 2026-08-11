@@ -425,83 +425,11 @@ public partial class ServerCredentialViewModel : ObservableObject
     {
         if (Container == null) return CredentialPreflight.Proceed;
 
-        // No stored token means nothing this app could write anyway - an Entra container has none
-        // by design. Whatever is on the server is what the restore will use, and it is not this
-        // app's to guess at.
-        var sasToken = _store.GetSasToken(Container);
-        if (string.IsNullOrEmpty(sasToken)) return CredentialPreflight.Proceed;
-
-        // Only write when the credential is genuinely missing. This used to drop and recreate on
-        // every single execute, regardless of the status the panel was displaying, which
-        // contradicted the UI's own "creating it is optional" wording and briefly removed a
-        // credential that other sessions may have been using (#10).
-        //
-        // A credential that exists and is SAS is left alone. Its secret could still be a rotated
-        // SAS that no longer works - unknowable from here, since the secret cannot be read back -
-        // so the fix for that case is the explicit button, not rewriting server state on every run.
-        //
-        // A managed identity is left alone for a stronger reason: it restores perfectly well, this
-        // app cannot create one, and ALTER would reset the identity. Reading "not SAS" as "broken"
-        // is what silently converted somebody's working managed identity into a SAS token here,
-        // taking every other job on that container with it, under the log line "Credential updated
-        // on the server" (#145).
-        var credential = await _sql.CredentialExistsAsync(server, Name);
-
-        if (credential.CanRestoreFromUrl)
-        {
-            appendLog(credential.Kind == BlobCredentialIdentity.ManagedIdentity
-                ? $"Using the existing SQL credential [{Name}] (Managed Identity). Server state not modified."
-                : $"Using the existing SQL credential [{Name}]. Server state not modified.");
-            return CredentialPreflight.Proceed;
-        }
-
-        if (credential.Exists)
-        {
-            // Neither usable nor ours to reinterpret. Converting it is a real option - it is what
-            // the button on the panel does - but it must be a decision somebody made, not a side
-            // effect of pressing Execute. Stopping costs a restore that was about to fail on blob
-            // access anyway.
-            var refusal =
-                $"Credential [{Name}] exists with identity '{credential.Identity}', which a " +
-                "restore from URL cannot use. Left untouched: replacing it with the stored SAS " +
-                "token is what \"Create credential on server\" does, so that it is a deliberate change.";
-            appendLog(refusal);
-            return CredentialPreflight.Stop(refusal);
-        }
-
-        appendLog($"Credential [{Name}] is missing - creating it...");
-
-        // This statement carries the SAS token to the server. It is the one moment in a restore
-        // where a secret crosses the wire, so if the connection is encrypted but unverified, say so
-        // here rather than only in settings (#17).
-        if (server.TrustServerCertificate)
-            appendLog(
-                "  Note: this connection trusts the server certificate without validating it, " +
-                "and the SAS token is sent over it.");
-
-        var written = await _sql.EnsureCredentialExistsAsync(
-            server, Name, Container.ContainerUrl, sasToken);
-
-        appendLog(written == CredentialChange.Created
-            ? "Credential created on the server."
-            : "Credential updated on the server.");
-
-        // Changing a credential is a change to shared state on someone's instance. It belongs in
-        // the file, not only in a console that closes with the app.
-        _log.ServerChange(server.ServerName,
-            $"credential [{Name}] {written.ToString().ToLowerInvariant()}");
-
-        return CredentialPreflight.Proceed;
+        // The decision itself lives in Core now (#284), shared with the backup and copy
+        // screens - this panel remains the place a human sees and manages the credential.
+        return await BlobCredentialPreflight.EnsureAsync(
+            _store, _sql, _log, Container, server, appendLog);
     }
+
 }
 
-/// <summary>
-/// Whether a restore may start, and what to say when it may not. A refusal here has touched
-/// nothing, so the caller has nothing to unwind.
-/// </summary>
-public readonly record struct CredentialPreflight(bool CanProceed, string? Refusal)
-{
-    public static CredentialPreflight Proceed => new(true, null);
-
-    public static CredentialPreflight Stop(string reason) => new(false, reason);
-}

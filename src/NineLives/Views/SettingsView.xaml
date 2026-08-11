@@ -147,12 +147,39 @@
                                                       Style="{StaticResource DarkComboBox}"
                                                       MinWidth="110"
                                                       Margin="0,0,8,0" />
-                                            <TextBox Grid.Column="2"
-                                                     Text="{Binding Url, UpdateSourceTrigger=LostFocus}"
-                                                     Style="{StaticResource DarkTextBox}"
-                                                     Margin="0,0,8,0"
-                                                     FontFamily="Consolas"
-                                                     ToolTip="The webhook URL. Treated as a secret: never exported, only ever posted to." />
+                                            <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                                                <!-- The URL is a secret (#317): committed by an
+                                                     explicit Save, then never displayed again -
+                                                     the same treatment stored SAS tokens get. -->
+                                                <TextBlock Text="{Binding UrlDisplay}"
+                                                           Style="{StaticResource SecondaryText}"
+                                                           Margin="0,2,0,4" />
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Grid.Column="0"
+                                                             Text="{Binding UrlInput, UpdateSourceTrigger=PropertyChanged}"
+                                                             Style="{StaticResource DarkTextBox}"
+                                                             FontFamily="Consolas"
+                                                             ToolTip="Paste the webhook URL, then press Save. Once saved it is stored in Windows Credential Manager and never shown again." />
+                                                    <Button Grid.Column="1" Content="Save"
+                                                            Command="{Binding SaveUrlCommand}"
+                                                            Style="{StaticResource SecondaryButton}"
+                                                            Padding="10,5" Margin="6,0,0,0" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding UrlFeedback}"
+                                                           Foreground="{StaticResource ErrorBrush}"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"
+                                                           Visibility="{Binding UrlFeedback, Converter={StaticResource StringToVis}}" />
+                                                <TextBlock Text="{Binding LastDeliveryDisplay}"
+                                                           Style="{StaticResource SecondaryText}"
+                                                           FontSize="11"
+                                                           Margin="0,4,0,0" />
+                                            </StackPanel>
                                             <Button Grid.Column="3" Content="Test"
                                                     Command="{Binding TestCommand}"
                                                     Style="{StaticResource SecondaryButton}"
@@ -189,6 +216,47 @@
                                 Command="{Binding AddWebhookCommand}"
                                 Style="{StaticResource SecondaryButton}"
                                 Padding="14,7" />
+                    </StackPanel>
+
+                    <!-- How every delivery reaches the network (#316) - estate-level, because a
+                         corporate proxy is a property of the machine's network, not of any one
+                         channel. The password goes to Windows Credential Manager on Save. -->
+                    <TextBlock Text="DELIVERY ROUTE" Style="{StaticResource LabelText}" Margin="0,16,0,4" />
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox ItemsSource="{Binding ProxyModes}"
+                                  SelectedItem="{Binding ProxyMode}"
+                                  Style="{StaticResource DarkComboBox}"
+                                  MinWidth="150" Margin="0,0,8,0"
+                                  ToolTip="SystemDefault uses the machine's own proxy settings. Direct bypasses any proxy. Custom names one explicitly." />
+                        <Button Content="Save route"
+                                Command="{Binding SaveProxyCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="10,5" />
+                    </StackPanel>
+                    <StackPanel Visibility="{Binding ShowsProxyDetails, Converter={StaticResource BoolToVis}}"
+                                Margin="0,8,0,0">
+                        <TextBlock Text="PROXY URL" Style="{StaticResource LabelText}" />
+                        <TextBox Text="{Binding ProxyUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DarkTextBox}"
+                                 FontFamily="Consolas" Margin="0,2,0,8"
+                                 ToolTip="http://proxy.example.internal:8080" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                <TextBlock Text="USERNAME (OPTIONAL)" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding ProxyUsername, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="PASSWORD" Style="{StaticResource LabelText}" />
+                                <TextBox Text="{Binding ProxyPasswordInput, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource DarkTextBox}" Margin="0,2,0,0"
+                                         ToolTip="Stored in Windows Credential Manager on Save, then cleared here - it is never read back." />
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
 
                     <TextBlock Text="{Binding WebhookTestResult}"

@@ -262,6 +262,40 @@ public class EncryptionPreflightTests
         Assert.False(vm.HasEncryptionWarning);
     }
 
+    /// <summary>
+    /// #210's law on the copy screen: the restore half runs outside the restore preflights, so
+    /// without this the version refusal arrived AFTER the backup half had already run.
+    /// </summary>
+    [Fact]
+    public async Task CopyingOntoAnOlderServerWarnsThatItCannotWork()
+    {
+        var (vm, sql) = Copy();
+        sql.MajorVersionByServer["SRV01"] = 17;   // 2025 source
+        sql.MajorVersionByServer["SRV02"] = 16;   // 2022 target
+
+        vm.GenerateCommand.Execute(null);
+        await Task.Delay(50);
+
+        Assert.True(vm.HasVersionWarning);
+        Assert.Contains("cannot work", vm.VersionWarning);
+        Assert.Contains("SQL Server 2025 (17.x)", vm.VersionWarning);
+        Assert.Contains("SQL Server 2022 (16.x)", vm.VersionWarning);
+    }
+
+    /// <summary>The legal direction, and silence, both stay quiet.</summary>
+    [Fact]
+    public async Task ALegalCopyDirectionRaisesNoVersionAlarm()
+    {
+        var (vm, sql) = Copy();
+        sql.MajorVersionByServer["SRV01"] = 15;
+        sql.MajorVersionByServer["SRV02"] = 16;
+
+        vm.GenerateCommand.Execute(null);
+        await Task.Delay(50);
+
+        Assert.False(vm.HasVersionWarning);
+    }
+
     [Fact]
     public async Task CopyingAPlainDatabaseAsksNoCertificateQuestions()
     {

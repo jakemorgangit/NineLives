@@ -1424,7 +1424,7 @@ public class XamlLoadTests(WpfFixture wpf)
             var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
             Assert.Empty(vm.Containers);
-            Assert.DoesNotContain("No blob containers configured", shown);
+            Assert.DoesNotContain("No storage containers configured", shown);
         });
     }
 
@@ -1440,7 +1440,145 @@ public class XamlLoadTests(WpfFixture wpf)
 
             var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
 
-            Assert.Contains("No blob containers configured", shown);
+            Assert.Contains("No storage containers configured", shown);
+        });
+    }
+
+    // ── errors are visible where they happen (#354, #355) ───────────────────────
+
+    /// <summary>
+    /// A failure in the early steps is SEEN.
+    ///
+    /// The screen's only error banner used to live inside step 5, which is not visible until
+    /// step 4 has been confirmed - so loading an expired container, a chain that would not
+    /// build or a header that would not read produced no banner at all. The message reached
+    /// only the status line: grey, at the foot of a two-thousand-line page, indistinguishable
+    /// from "Script copied to clipboard".
+    /// </summary>
+    [Fact]
+    public void AnErrorBeforeStepFiveIsStillShown()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // Nothing confirmed, so step 5 is not on screen - the state every early failure
+            // happens in.
+            Assert.False(vm.Steps.Execute.IsVisible);
+
+            typeof(ViewModelBase).GetProperty("ErrorMessage")!
+                .SetValue(vm, "No valid restore points found. Ensure there is at least one full backup.");
+            typeof(ViewModelBase).GetProperty("HasError")!.SetValue(vm, true);
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("No valid restore points found"));
+        });
+    }
+
+    /// <summary>
+    /// The container list cannot be changed while the edit form is open.
+    ///
+    /// Save writes to whichever container is SELECTED, so clicking another one mid-edit wrote
+    /// this container's name, URL, credential and tags over that one - silently, leaving the
+    /// original untouched and two containers sharing a name.
+    /// </summary>
+    [Fact]
+    public void TheContainerListIsNotSelectableWhileEditing()
+    {
+        wpf.Invoke(() =>
+        {
+            var store = new FakeCredentialStore();
+            store.Config.BlobContainers.Add(new BlobContainerConfig
+            {
+                Id = "c1",
+                Name = "prod",
+                ContainerUrl = "https://acct.blob.core.windows.net/prod"
+            });
+            store.Config.BlobContainers.Add(new BlobContainerConfig
+            {
+                Id = "c2",
+                Name = "dr",
+                ContainerUrl = "https://acct.blob.core.windows.net/dr"
+            });
+
+            var vm = new BlobConfigViewModel(store, new FakeBlobStorageService());
+            var view = new BlobConfigView { DataContext = vm };
+            Realise(view);
+
+            var list = FindAll<System.Windows.Controls.ListBox>(view).First();
+            Assert.True(list.IsEnabled);
+
+            vm.SelectedContainer = vm.Containers.First();
+            vm.EditCommand.Execute(null);
+            Realise(view);
+
+            Assert.True(vm.IsEditing);
+            Assert.False(list.IsEnabled);
+        });
+    }
+
+    // ── the screen says the true thing (#370) ───────────────────────────────────
+
+    /// <summary>
+    /// The reason there is no script is SHOWN.
+    ///
+    /// It lived inside the pane that holds the script, and the two states are mutually
+    /// exclusive - a non-empty reason is exactly the case where HasScript is false and that
+    /// pane is collapsed. So every explanation it could give was unreachable, and the screen
+    /// showed an empty area and said nothing.
+    /// </summary>
+    [Fact]
+    public void WhyThereIsNoScriptIsActuallyRendered()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // The reason only arises once generation is being attempted, which is inside the
+            // execute step - so that is the state it has to be legible in.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
+
+            typeof(RestoreViewModel).GetProperty(nameof(vm.ScriptBlockedReason))!
+                .SetValue(vm, "STANDBY needs an undo file path.");
+            typeof(RestoreViewModel).GetProperty(nameof(vm.HasScript))!.SetValue(vm, false);
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("STANDBY needs an undo file path"));
+        });
+    }
+
+    /// <summary>
+    /// A database with no restore points at all is not a filter problem.
+    ///
+    /// Load resets every filter to open before reporting an empty set, so the "widen the
+    /// filters" text was shown against filters that were already fully open - at the moment
+    /// somebody needed to be told there is no full backup here.
+    /// </summary>
+    [Fact]
+    public void NoRestorePointsAtAllIsNotReportedAsAFilterProblem()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // Nothing loaded: no points, and none visible.
+            Assert.False(vm.Timeline.HasPoints);
+            Assert.False(vm.Timeline.HasVisiblePoints);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain(shown, t => t.Contains("Widen the range"));
         });
     }
 

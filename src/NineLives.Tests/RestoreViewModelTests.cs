@@ -90,7 +90,9 @@ public class RestoreViewModelTests
         Assert.True(vm.Inventory.BackupsLoaded);
         Assert.NotEmpty(vm.Inventory.DiscoveredDatabases);
 
-        Assert.Null(vm.Inventory.SelectedServerName);
+        // The instance FILTER auto-answers when it has exactly one answer (#319) - that
+        // selects nobody's database. The choices that matter stay unmade.
+        Assert.Equal("SRV01", vm.Inventory.SelectedServerName);
         Assert.Null(vm.Inventory.SelectedDatabaseName);
         Assert.Null(vm.Timeline.SelectedPoint);
 

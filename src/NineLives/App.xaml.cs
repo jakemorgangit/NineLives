@@ -15,6 +15,15 @@ public partial class App : Application
     /// </summary>
     public static OperationLog Log { get; } = new();
 
+    public App()
+    {
+        // The engine cannot know what a window is (#63) - which window an Entra prompt parents
+        // to is the desktop app's answer. In the constructor rather than OnStartup so anything
+        // that constructs an App - the test fixture included - composes the same way the
+        // running app does.
+        EntraAuthentication.PromptParent = EntraPromptWindow.ActiveWindowHandle;
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);

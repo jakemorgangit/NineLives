@@ -7,6 +7,7 @@
     <UserControl.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:StringToVisibilityConverter x:Key="StringToVis" />
         <converters:EnumToBoolConverter x:Key="EnumToBool" />
         <converters:BackupTypeToColorConverter x:Key="TypeToColor" />
         <converters:TimelinePositionConverter x:Key="TimelinePos" />
@@ -42,6 +43,15 @@
             </StackPanel>
         </Border>
 
+        <!-- Docked, not buried (#355).
+             This lived inside step 5, which only becomes visible once step 4 is confirmed - so
+             every failure before that point had no banner at all. Loading an expired container,
+             a chain that will not build, a header that will not read: each set an error that
+             appeared only as grey status text at the foot of a two-thousand-line page,
+             indistinguishable from "Script copied to clipboard". Up here it is above the scroll,
+             beside the summary of what the restore will do, and it can actually be dismissed. -->
+        <ContentControl DockPanel.Dock="Top" Style="{StaticResource ErrorBanner}" />
+
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
             <!-- Header -->
@@ -75,7 +85,7 @@
                     </Style>
                 </Border.Style>
                 <StackPanel>
-                    <TextBlock Text="No blob containers configured"
+                    <TextBlock Text="No storage containers configured"
                                Style="{StaticResource SubHeaderText}"
                                Margin="0,0,0,6" />
                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap">
@@ -102,12 +112,12 @@
                                 Visibility="{Binding ShowMediumChoice, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="WHERE THE BACKUPS LIVE" Style="{StaticResource LabelText}" />
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                            <RadioButton Content="Azure Blob Storage"
+                            <RadioButton Content="Cloud storage"
                                          GroupName="BackupMedium"
                                          Style="{StaticResource DarkRadioButton}"
                                          IsChecked="{Binding SelectedMedium, Converter={StaticResource EnumToBool}, ConverterParameter=AzureBlob}"
                                          Margin="0,0,20,0"
-                                         ToolTip="RESTORE FROM URL. Needs a server-side credential, and needs no network path between the two hosts." />
+                                         ToolTip="A saved container - Azure Blob Storage or an S3-compatible bucket. RESTORE FROM URL: needs a server-side credential, and no network path between the two hosts." />
                             <RadioButton Content="A path both servers can see"
                                          GroupName="BackupMedium"
                                          Style="{StaticResource DarkRadioButton}"
@@ -133,7 +143,7 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                            <TextBlock Text="BLOB CONTAINER" Style="{StaticResource LabelText}" />
+                            <TextBlock Text="STORAGE CONTAINER" Style="{StaticResource LabelText}" />
                             <!-- Tag pills here too, not only on the containers screen. This is the
                                  dropdown where "which of these is production" actually gets
                                  decided, and it was the one place the tags did not follow (#117
@@ -348,9 +358,14 @@
 
                         <StackPanel Grid.Column="1" Margin="0,0,12,0">
                             <TextBlock Text="DATABASE" Style="{StaticResource LabelText}" />
+                            <!-- Greyed until an instance is chosen (#319): a pre-filled list
+                                 mixed every server's databases, and picking from it meant
+                                 guessing whose history the timeline would show. -->
                             <ComboBox ItemsSource="{Binding Inventory.DiscoveredDatabases}"
                                       SelectedItem="{Binding Inventory.SelectedDatabaseName}"
-                                      Style="{StaticResource DarkComboBox}" />
+                                      IsEnabled="{Binding Inventory.HasDatabaseChoices}"
+                                      Style="{StaticResource DarkComboBox}"
+                                      ToolTip="Waits for the server/instance on the left - the databases listed are the chosen instance's own." />
                         </StackPanel>
                     </Grid>
 
@@ -614,7 +629,44 @@
                 </StackPanel>
             </Border>
 
-            <!-- Step 2: Restore Point Selection -->
+            <!-- Step 2: Target instance (#318). WHERE the restore runs used to be implicit -
+                 whatever the SQL Servers screen last connected to - and a missing answer only
+                 surfaced as an execute-time error. Now it is a step: pre-answered (and still
+                 changeable) when a connection already exists, asked outright when it does not. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                    Visibility="{Binding Steps.Target.IsVisible, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <Button Style="{StaticResource StepHeader}" DataContext="{Binding Steps.Target}" />
+                    <StackPanel Visibility="{Binding Steps.Target.IsExpanded, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="The instance the restore will run ON. Connecting on the SQL Servers screen answers this for you; otherwise pick a saved server here."
+                                   Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,12" />
+                        <TextBlock Text="TARGET SQL SERVER" Style="{StaticResource LabelText}" />
+                        <ComboBox ItemsSource="{Binding TargetServers}"
+                                  SelectedItem="{Binding SelectedTargetServer}"
+                                  Style="{StaticResource DarkComboBox}"
+                                  MinWidth="320"
+                                  MaxWidth="420"
+                                  HorizontalAlignment="Left"
+                                  ToolTip="The instance the restore runs on. The credential check below the script and the preflights all test this server.">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Style="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0"
+                                   Visibility="{Binding HasNoTargetServers, Converter={StaticResource BoolToVis}}">
+                            <Run Text="No saved servers yet. Add one on the SQL Servers screen and it will appear here." />
+                        </TextBlock>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Step 3: Restore Point Selection -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Steps.Point.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
@@ -686,12 +738,51 @@
                         </Grid>
                     </Border>
 
+                    <!-- Two different emptinesses, two different answers (#370).
+                         Both used to say "widen the filters" - including when there was nothing
+                         to filter, because Load resets every filter to open before it reports
+                         an empty set. That sent somebody to fiddle with checkboxes that were
+                         already fully open, at the moment they needed to be told there is no
+                         full backup here. HasPoints is what separates them. -->
                     <TextBlock Text="No restore point matches these filters. Widen the range or switch a type back on."
-                               Style="{StaticResource SecondaryText}"
                                Foreground="{DynamicResource WarningBrush}"
                                TextWrapping="Wrap"
-                               Margin="0,0,0,12"
-                               Visibility="{Binding Timeline.HasVisiblePoints, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                               Margin="0,0,0,12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Timeline.HasPoints}" Value="True" />
+                                            <Condition Binding="{Binding Timeline.HasVisiblePoints}" Value="False" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <TextBlock Text="This database has no restore points. A restore must start from a full backup - check retention, or whether the full backups sit under a different path than the container's pattern expects."
+                               Foreground="{DynamicResource WarningBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Timeline.HasPoints}" Value="False" />
+                                            <Condition Binding="{Binding Inventory.SelectedDatabaseName, Converter={StaticResource StringToVis}}" Value="Visible" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
 
                     <!-- ========== VISUAL TIMELINE ========== -->
                     <Border Background="{DynamicResource InputBackgroundBrush}"
@@ -1074,6 +1165,13 @@
                                 Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}"
                                 ToolTip="Restores this chain to a scratch database (MyDb_rehearsal_...), runs DBCC CHECKDB to prove the data, then drops the scratch copy. The real database is never touched: fresh name, no REPLACE, files relocated to the default directories. Takes as long as a real restore plus CHECKDB." />
 
+                        <Button Content="Rehearsal as Agent job"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CopyRehearsalAsAgentJobCommand}"
+                                Padding="12,6" Margin="0,0,8,0"
+                                Visibility="{Binding ShowVerifyAndAudit, Converter={StaticResource BoolToVis}}"
+                                ToolTip="The same rehearsal wrapped as a disabled, unscheduled SQL Server Agent job - add a weekly schedule and the proof renews itself, receipts accumulating in the job history. Uses a stable scratch name that clears its own leftover each run." />
+
                                                 <!-- A different question from Check chain: that one reads headers and
                              checks the LSNs line up, this one reads each backup end to end and
                              checks it is intact. A truncated blob passes the first and fails this.
@@ -1378,7 +1476,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- Step 3: Restore Options -->
+            <!-- Step 4: Restore Options -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Steps.Options.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
@@ -1899,7 +1997,7 @@
                                                 Content="{Binding Credential.CreateButtonText}"
                                                 Margin="0,0,0,0" Padding="10,6"
                                                 Style="{StaticResource SecondaryButton}"
-                                                ToolTip="Creates the SQL Server credential for this blob container URL, or updates an existing one, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. No secret is ever included in the generated script."
+                                                ToolTip="Creates the SQL Server credential for this container URL, or updates an existing one, so that RESTORE FROM URL can access the backups. An existing credential is altered in place, never dropped. No secret is ever included in the generated script."
                                                 HorizontalAlignment="Left" />
                                     </StackPanel>
                                 </StackPanel>
@@ -1925,7 +2023,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- Step 4: Generate + Execute -->
+            <!-- Step 5: Generate + Execute -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16"
                     Visibility="{Binding Steps.Execute.IsVisible, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
@@ -2035,7 +2133,21 @@
                         </TextBlock>
                     </Border>
 
-                    <ContentControl Style="{StaticResource ErrorBanner}" />
+                    <!-- Why there is no script, OUTSIDE the pane that holds the script (#370).
+                         This lived inside it, and the two states are mutually exclusive: a
+                         non-empty reason is exactly the case where HasScript is false and the
+                         pane is collapsed. So every explanation it could give - the STANDBY
+                         undo file, a log mark on a chain with no logs - was unreachable, and
+                         the screen showed an empty area and said nothing. -->
+                    <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource WarningBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4" Padding="12,10" Margin="0,0,0,12"
+                            Visibility="{Binding ScriptBlockedReason, Converter={StaticResource StringToVis}}">
+                        <TextBlock Text="{Binding ScriptBlockedReason}"
+                                   Style="{StaticResource BodyText}"
+                                   TextWrapping="Wrap" />
+                    </Border>
 
                     <!-- The generated script. Stays visible during and after execution: it used to
                          be hidden the moment Execute was pressed, so the script and the console
@@ -2047,14 +2159,6 @@
                             <Grid Margin="12,8,12,4">
                                 <TextBlock Text="GENERATED SCRIPT" Style="{StaticResource LabelText}" />
 
-                        <!-- Why the pane is empty, where the eye already is - the script builds
-                             itself live, so there is no button to press and no dialog to read. -->
-                        <TextBlock Text="{Binding ScriptBlockedReason}"
-                                   Style="{StaticResource SecondaryText}"
-                                   TextWrapping="Wrap"
-                                   Margin="0,6,0,0">
-                            <TextBlock.Resources />
-                        </TextBlock>
                                 <TextBlock Text="updates as you change options"
                                            Style="{StaticResource SecondaryText}"
                                            FontSize="11"

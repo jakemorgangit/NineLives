@@ -1,7 +1,7 @@
-<UserControl x:Class="Blackcat.NineLives.Views.ExposureView"
+﻿<UserControl x:Class="Blackcat.NineLives.Views.ExposureView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:svc="clr-namespace:Blackcat.NineLives.Services">
+             xmlns:svc="clr-namespace:Blackcat.NineLives.Services;assembly=NineLives.Core">
 
     <!-- The exposure dashboard (#239): how much data would be lost, right now, worst first.
          Read-only by design - the screen that answers "how exposed am I?" must not also be a
@@ -19,6 +19,12 @@
                         Command="{Binding RefreshCommand}"
                         Style="{StaticResource PrimaryButton}"
                         Padding="16,8" Margin="0,0,12,0" />
+                <Button Content="Stop"
+                        Command="{Binding StopSweepCommand}"
+                        Style="{StaticResource SecondaryButton}"
+                        Padding="16,8" Margin="0,0,12,0"
+                        Visibility="{Binding CanCancelSweep, Converter={StaticResource BoolToVis}}"
+                        ToolTip="Stops the sweep. Rows already on screen stay - they are the previous sweep's answer." />
                 <ContentControl Template="{StaticResource BusySpinner}"
                                 Width="16" Height="16" Margin="0,0,8,0"
                                 VerticalAlignment="Center"
@@ -106,8 +112,28 @@
                                     <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
                                                Text="{Binding LastLog, StringFormat='Log: {0:MM-dd HH:mm}', TargetNullValue='Log: never'}" />
                                     <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
-                                               Text="{Binding LastProven, StringFormat='Proven: {0:MM-dd HH:mm}', TargetNullValue='Proven: never rehearsed'}"
-                                               ToolTip="When a rehearsal (#238) last PROVED this database restores. Arithmetic says what could restore; only a rehearsal says it does." />
+                                               Text="{Binding ProvenDisplay}"
+                                               ToolTip="When a rehearsal (#238) last PROVED this database restores, and how long the restore plus CHECKDB took - the measured RTO. Arithmetic says what could restore; only a rehearsal says it does." />
+
+                                    <!-- Disabled on an unreachable row, and saying why (#370).
+                                         The handler already refused those with a bare return, so
+                                         the loudest rows on the screen - the ones that sort to the
+                                         top because they are alarms - carried a live button that
+                                         did nothing at all when pressed. -->
+                                    <Button Content="Open in Restore"
+                                            Command="{Binding DataContext.RestoreFromRowCommand,
+                                                      RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Padding="10,4" Margin="0,6,0,0"
+                                            HorizontalAlignment="Left"
+                                            Visibility="{Binding IsUnreachable, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                            ToolTip="Jumps to the Restore screen with this server's backup history loaded and this database selected - one click from seeing to acting. From there, Rehearse proves it." />
+
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
+                                               Margin="0,6,0,0" TextWrapping="Wrap"
+                                               Visibility="{Binding IsUnreachable, Converter={StaticResource BoolToVis}}"
+                                               Text="Nothing can be restored from here until this server answers - fix the connection on the SQL Servers screen." />
                                 </StackPanel>
                             </Grid>
                         </Border>

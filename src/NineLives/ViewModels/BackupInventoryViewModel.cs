@@ -31,7 +31,17 @@ public partial class BackupInventoryViewModel : ViewModelBase
     private readonly ISqlServerService _sql;
     private readonly OperationLog _log;
     private readonly IBackupAuditStore _auditStore;
+    // One instance per operation (#281): load, identify and the audit can overlap - the
+    // container-wide audit is the forty-minute one - and with a single shared instance a
+    // load's End() disposed the audit's token: the Stop button vanished and the audit died
+    // with "Cannot access a disposed object" instead of finishing or being stoppable.
+    private readonly OperationCancellation _auditCancellation = new();
+    private readonly OperationCancellation _identifyCancellation = new();
     private readonly OperationCancellation _loadCancellation = new();
+
+    private bool CanCancelAnything =>
+        _auditCancellation.CanCancel || _identifyCancellation.CanCancel
+                                     || _loadCancellation.CanCancel;
 
     /// <param name="log">
     /// Optional so a test can point it at a temp directory. Reaching for App.Log directly is what
@@ -230,7 +240,9 @@ public partial class BackupInventoryViewModel : ViewModelBase
     {
         var sets = AuditScope.ToList();
         if (sets.Count == 0) return;
-        var ct = _loadCancellation.Begin();
+        _identifyCancellation.Cancel();
+        _loadCancellation.Cancel();
+        var ct = _auditCancellation.Begin();
 
         IsAuditing = true;
         AuditProgress = 0;
@@ -276,7 +288,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
         }
         finally
         {
-            _loadCancellation.End();
+            _auditCancellation.End();
             IsAuditing = false;
             AuditProgressText = string.Empty;
             RaiseCancelStateChanged();
@@ -336,7 +348,9 @@ public partial class BackupInventoryViewModel : ViewModelBase
         var unidentified = _allBackups.Where(BackupHeaderIdentifier.NeedsIdentifying).ToList();
         if (unidentified.Count == 0) return;
 
-        var ct = _loadCancellation.Begin();
+        _auditCancellation.Cancel();
+        _loadCancellation.Cancel();
+        var ct = _identifyCancellation.Begin();
         IsBusy = true;
         ClearStatus();
         RaiseCancelStateChanged();
@@ -360,7 +374,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
             ApplyCachedAudit();
 
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(_allBackups));
-            DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(_allBackups));
+            OfferDatabasesForSelection();
 
             RefreshUnclassifiedCount();
             RebuildWorkingSet();
@@ -379,16 +393,65 @@ public partial class BackupInventoryViewModel : ViewModelBase
         }
         finally
         {
-            _loadCancellation.End();
+            _identifyCancellation.End();
             IsBusy = false;
             IdentifyProgressText = string.Empty;
             RaiseCancelStateChanged();
         }
     }
 
+
+    /// <summary>
+    /// The database list waits for an instance (#319). With several instances discovered, a
+    /// pre-filled list mixes every server's databases - two instances that both back up a
+    /// database called Sales is the everyday DR pair, and picking from the mixed list means
+    /// guessing whose history the timeline will show. So: no instance dimension at all -
+    /// offer everything; exactly one - choose it, since a question with a single answer
+    /// should not gate anything; several - the databases wait.
+    /// </summary>
+    private void OfferDatabasesForSelection()
+    {
+        if (DiscoveredServers.Count == 1)
+        {
+            SelectedServerName = DiscoveredServers[0];
+            return;
+        }
+
+        SelectedServerName = null;
+
+        if (DiscoveredServers.Count == 0)
+        {
+            DiscoveredDatabases = new ObservableCollection<string>(_allSets
+                .Where(x => !string.IsNullOrEmpty(x.DatabaseName))
+                .Select(x => x.DatabaseName!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            return;
+        }
+
+        DiscoveredDatabases = [];
+    }
+
+    /// <summary>Lets the view grey the database picker out while it is waiting (#319).</summary>
+    public bool HasDatabaseChoices => DiscoveredDatabases.Count > 0;
+
+    partial void OnDiscoveredDatabasesChanged(
+        System.Collections.ObjectModel.ObservableCollection<string> value)
+        => OnPropertyChanged(nameof(HasDatabaseChoices));
+
     partial void OnSelectedServerNameChanged(string? value)
     {
         if (_allSets.Count == 0) return;
+
+        // Deselecting the instance empties the list again (#319) - except when there was no
+        // instance dimension to begin with, where the guard in OfferDatabasesForSelection
+        // already offered everything.
+        if (string.IsNullOrEmpty(value) && DiscoveredServers.Count > 1)
+        {
+            DiscoveredDatabases = [];
+            RebuildWorkingSet();
+            return;
+        }
 
         // Compare the FULL server identity. Matching on the host alone made selecting
         // SQLHOST\PROD also match SQLHOST\TEST, so the database list offered databases that only
@@ -471,6 +534,8 @@ public partial class BackupInventoryViewModel : ViewModelBase
     /// </summary>
     public async Task LoadAsync(BackupLocation location)
     {
+        _auditCancellation.Cancel();
+        _identifyCancellation.Cancel();
         var ct = _loadCancellation.Begin();
         IsBusy = true;
         LoadProgressText = location.IsSharedPath
@@ -530,7 +595,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
             ApplyCachedAudit();
 
             DiscoveredServers = new ObservableCollection<string>(_blob.GetDiscoveredServers(files));
-            DiscoveredDatabases = new ObservableCollection<string>(_blob.GetDiscoveredDatabases(files));
+            OfferDatabasesForSelection();
             BackupsLoaded = files.Count > 0;
 
             RefreshUnclassifiedCount();
@@ -690,11 +755,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
 
-        DiscoveredDatabases = new ObservableCollection<string>(
-            sets.Select(s => s.DatabaseName)
-                .Where(n => !string.IsNullOrEmpty(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+        OfferDatabasesForSelection();
 
         BackupsLoaded = sets.Count > 0;
 
@@ -731,11 +792,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
 
-        DiscoveredDatabases = new ObservableCollection<string>(
-            sets.Select(s => s.DatabaseName)
-                .Where(n => !string.IsNullOrEmpty(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)!);
+        OfferDatabasesForSelection();
 
         BackupsLoaded = sets.Count > 0;
 
@@ -777,8 +834,10 @@ public partial class BackupInventoryViewModel : ViewModelBase
     [RelayCommand]
     private void CancelLoad()
     {
-        if (!_loadCancellation.CanCancel) return;
+        if (!CanCancelAnything) return;
 
+        _auditCancellation.Cancel();
+        _identifyCancellation.Cancel();
         _loadCancellation.Cancel();
         RaiseCancelStateChanged();
         SetStatus("Stopping the scan...");
@@ -811,7 +870,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
 
     private void RaiseCancelStateChanged()
     {
-        CanCancelLoad = _loadCancellation.CanCancel;
+        CanCancelLoad = CanCancelAnything;
         CancelStateChanged?.Invoke();
     }
 }

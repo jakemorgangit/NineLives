@@ -4,7 +4,7 @@
 
 **Every database deserves nine lives.**
 
-Nine Lives is a modern desktop application for **backing up and restoring SQL Server databases**, to and from either Azure Blob Storage or a file share both servers can see — point-in-time recovery with a visual timeline, intelligent backup chain detection, striped backup support, and secure credential management. Built with WPF on .NET 10, featuring a dark-mode UI.
+Nine Lives is a modern desktop application for **backing up, restoring, and PROVING SQL Server databases restore** — to and from Azure Blob Storage or a file share both servers can see. Point-in-time recovery with a visual timeline (down to a named marked transaction), intelligent chain detection from LSNs, striped backups, TDE awareness, restore rehearsals with receipts, an exposure dashboard, and run notifications to Teams or Slack. Built with WPF on .NET 10, featuring dark, light and high-contrast UIs.
 
 *A free tool from [Blackcat Data Solutions](https://blackcat.wales).*
 
@@ -38,6 +38,30 @@ Where a backup lives is a choice per operation, not a property of the tool:
 
 Neither is right in every estate. **Blob** needs no network path between the two hosts, which is often the real blocker when source and target sit in different environments. **A shared path** is faster, costs no egress, needs no SAS with write, and does not make the restore wait on an upload — where both instances can reach it.
 
+There is also a third source for the classic case neither medium covers: **a backup file somebody handed you** — a vendor's `.bak`, a file that outlived its server. Paste the path, and the file's own headers drive the same chain, options and execution as everything else.
+
+## Proof, not hope
+
+> The only tested backup is a restored backup.
+
+Everyone repeats it; almost nobody has evidence. Since v1.5, Nine Lives produces the evidence:
+
+- **Restore rehearsal** — one button restores the chosen chain to a scratch database, proves the data with `DBCC CHECKDB`, and drops the scratch copy. The History entry is the receipt an auditor asks for, and the duration is your *measured* RTO. Safety by construction: a generated name refused if it exists, never `WITH REPLACE`, every file relocated, and the cleanup runs last so any failure retains the evidence. Wrap it as an Agent job and the proof renews itself weekly.
+- **The Exposure dashboard** — *"if this server died now, everything after 14:32 is gone — up to 47m of work"*, per database, across every configured server, worst first. Never-backed-up databases, FULL recovery with no log backups, chains that stopped, servers that will not answer — silence made red. Each row shows when a rehearsal last proved it, and how long that took; each row is one click from the restore screen.
+- **Run notifications** — a message to Teams (incoming webhook or Power Automate), Slack, or any JSON endpoint when a backup, restore or copy starts, finishes, or hits a problem — including each database's failure in a multi-database backup at the moment it happens. For everyone whose focus is rightly *not* on the application while a 40-minute restore runs.
+- **The DR runbook** — one self-contained Markdown export per restore point: the chain file by file, the prerequisites in worst-day order (credential, TDE certificates by thumbprint, disk space), the exact script, what to do when it stops part-way, what finishes the job. For the change-board pack and the DR repo.
+- **The retention referee** — what a keep-N-days rule would actually do: what it keeps, what it can safely delete (with the bytes reclaimed), what must survive its own age because kept restores depend on it, and what is already broken. Report-only, deliberately: deleting stays a human act.
+
+## Safety nets
+
+Every one of these fires **before** `WITH REPLACE` drops anything:
+
+- **Disk space** — the restore's file sizes against the target's volumes, including a drive the target does not have at all.
+- **Version direction** — a newer version's backup aimed at an older server refuses by name (error 3169, caught before the run, not after the drop).
+- **TDE and encrypted backups** — the certificate question asked up front, with the missing certificate named and the export/import route spelled out, instead of error 33111 mid-DR.
+- **Chain truth** — chains build from LSNs wherever the source knows them; a differential with a missing base is not offered at all; an explicit audit verifies backups against their own headers.
+- **Readability** — shared-path and ad-hoc restores confirm the *target's service account* can actually open the files before anything runs.
+
 The whole workflow is the same either way: the same timeline, the same chain, the same options, the same script, the same execute path. Only two things ever differ — where the list of backups comes from, and how a `RESTORE` addresses a file.
 
 ### Restoring from a shared path
@@ -54,6 +78,34 @@ Two things it checks that are easy to get wrong by hand:
 `COPY_ONLY` is on by default, and turning it off is loud. A plain full backup resets the differential base on the source, so every differential that database's schedule takes afterwards depends on the file Nine Lives just wrote — which the person running the restore has never heard of. That warning appears on the screen, in the generated script, and in the console as the backup starts.
 
 Backups are written to the layout the container is configured with, so what Nine Lives writes is what Nine Lives can then find.
+
+## The CLI: 9lives.exe
+
+The same engine from a terminal - for the pipeline, the runbook step, the scheduled task. `9lives.exe` ships beside the app and reads the configuration the app maintains: its containers, its servers, its credentials. Configure once in the GUI, script against it here.
+
+```
+9lives exposure                          the estate, judged, in one exit code
+9lives list --container backups
+9lives points --container backups --database Sales
+9lives script --container backups --database Sales --at "2026-08-02 19:00" --out restore.sql
+9lives validate --server SRV01 --json
+```
+
+Five read-only verbs. `list` says what a source holds; `points` is the timeline as text or JSON; `script` emits the validated restore T-SQL for a moment - the same chain calculation, striped-set grouping and STOPAT/marked-transaction handling the GUI runs, which is why the script it emits actually works; `validate` checks every chain is intact and answers in the exit code; `exposure` sweeps every configured server and exits with the worst level it found, so a scheduled task turns quiet log-backup silence into a red pipeline.
+
+Exit codes are the contract: `0` fine, `1` warnings, `2` broken or unreachable-by-chain, `3` could not answer, `64` usage. `--json` on the read verbs makes the output composable with jq and friends.
+
+The full reference ships inside the exe: `9lives help` for the overview, `9lives help restore` (or any verb) for the complete page - every option, the behaviour, the exit codes, examples. Documentation that lives in the binary cannot drift from it, and a test holds every page to the parser's own option lists.
+
+**Provisioning from nothing.** A freshly built VM - a Terraform clone, a DR bubble, a scratch environment - has no app config and nobody at a screen. `add-server` and `add-container` create the configuration from the command line, validated by default: the server is asked its version (address, credentials and permissions proven in one round trip), the container is asked to answer with exactly the recorded credential - because a SAS is a string that looks right for weeks after it expired. An `s3://` URL works here too: the credential is then the pair `AccessKeyId:SecretKey`, and `--region` says the bucket's region when the provider needs one said. Both converge on re-run, secrets can ride in `NINELIVES_SQL_PASSWORD` / `NINELIVES_SAS` instead of flags, and a chained script stops at the first failed validation. The whole template is three lines, and the only variable is the moment:
+
+```
+9lives add-server --name target --address localhost --user svc_restore --password %SQL_PW%
+9lives add-container --name backups --url https://acct.blob.core.windows.net/sqlbackups --sas %SAS%
+9lives restore --container backups --database Sales --target target --at "%POINT_IN_TIME%" --execute
+```
+
+Two verbs execute, and they are built out of refusals: `restore` and `rehearse` run nothing without `--execute`; overwriting an existing database is said with `--with-replace`, its own flag that `--force` cannot substitute for; and the same preflights the app fires - the server-side credential the restore authenticates with, file readability, version direction (error 3169), the TDE certificate (error 33111) - refuse before anything is dropped, `--force` being the deliberate override for evidence only. Executed runs land in the app's History and notify the same webhooks, so `9lives rehearse --execute` on a schedule is nightly proof with receipts - no SQL Agent required.
 
 ## Features
 
@@ -79,6 +131,13 @@ Backups are written to the layout the container is configured with, so what Nine
 - Support for striped backup sets (multiple files per backup)
 - Availability Group backups using Ola Hallengren's default AG naming (`Cluster$AG_Database_FULL_yyyymmdd_hhmmss_n.bak`)
 - Secure SAS token storage using Windows Credential Manager
+
+### S3-Compatible Object Storage
+- An `s3://` container is just another entry in the list: AWS S3, Wasabi, Backblaze B2, Cloudflare R2 and storage appliances speaking the S3 API
+- The URL's own scheme picks the provider - `s3://endpoint/bucket` - so nothing else to configure, and a base path after the bucket scopes everything
+- Authenticates with the access key pair, stored together in Windows Credential Manager; the region is only needed when the endpoint's host name does not carry it
+- Browsing uses a built-in SigV4 listing client (no SDK), pinned against AWS's published signature test vectors
+- Restoring from S3 needs SQL Server 2022+ (not Express) - the app refuses earlier, before anything is dropped, because the S3 connector simply is not there
 
 ### SQL Server Connectivity
 - Windows Authentication and SQL Server Authentication support
@@ -126,7 +185,7 @@ Backups are written to the layout the container is configured with, so what Nine
 ### Blob Storage Configuration
 ![Screenshot - Blob Configuration](docs/screenshots/blob-config.png)
 
-*Configure Azure Blob Storage containers with SAS tokens. Drag-and-drop path pattern builder for custom folder structures.*
+*Configure the containers holding your backups - an Azure Blob container with a SAS token or an Entra sign-in, or an S3-compatible bucket with an access key pair. Drag-and-drop path pattern builder for custom folder structures.*
 
 ### Browse Backups
 ![Screenshot - Browse Backups](docs/screenshots/browse-backups.png)

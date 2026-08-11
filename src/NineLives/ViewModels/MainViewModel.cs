@@ -58,11 +58,13 @@ public partial class MainViewModel : ViewModelBase
 
         Restore.Mode = value;
         Backup.Mode = value;
+        Home.Mode = value;
         Settings.CurrentMode = value;
 
         // A screen that has just been hidden must not stay on display underneath a sidebar that no
-        // longer offers it - which is what changing mode from Settings would otherwise do.
-        if (!IsViewAvailable(CurrentViewName)) NavigateTo(Nav.Restore);
+        // longer offers it - which is what changing mode from Settings would otherwise do. Home,
+        // because it exists in every mode and its feature pointers SHOW the new shape (#343).
+        if (!IsViewAvailable(CurrentViewName)) NavigateTo(Nav.Home);
     }
 
     private void OnModeChosen(AppMode mode)
@@ -70,9 +72,10 @@ public partial class MainViewModel : ViewModelBase
         Mode = mode;
         IsChoosingMode = false;
 
-        // Restore rather than back to Settings, deliberately: the point of changing the mode is the
-        // shape of the app, and landing on the settings page you came from shows none of it.
-        NavigateTo(Nav.Restore);
+        // The front door, deliberately (#343): choosing a mode is choosing the shape of the app,
+        // and Home is the one screen that says what that shape contains - landing on Restore
+        // showed one room of it, and landing back on Settings showed none.
+        NavigateTo(Nav.Home);
     }
 
     /// <summary>
@@ -98,7 +101,7 @@ public partial class MainViewModel : ViewModelBase
     /// app. Sending somebody who has just started the app to the settings page would be a stranger
     /// place to land than the one they were heading for.
     /// </summary>
-    private string _modeCardsReturnTo = Nav.Restore;
+    private string _modeCardsReturnTo = Nav.Home;
 
     private void OnModeCardsCancelled()
     {
@@ -108,13 +111,15 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>
     /// Where carrying on from the launch cards lands (#211): the last session's screen when it is
-    /// still a screen this mode offers, Restore otherwise. Restore rather than the recorded
-    /// screen's nearest cousin, because a guess about intent is worse than the app's centre.
+    /// still a screen this mode offers, the front door otherwise (#343). Home rather than the
+    /// recorded screen's nearest cousin, because a guess about intent is worse than the one
+    /// screen that introduces all the others - and the only people who reach the fallback are
+    /// the ones with no recorded intent to guess at.
     /// </summary>
     internal string LandingScreen(string? lastScreen) =>
         lastScreen != null && Nav.Views.Contains(lastScreen) && IsViewAvailable(lastScreen)
             ? lastScreen
-            : Nav.Restore;
+            : Nav.Home;
 
     /// <summary>
     /// Files everything the next launch wants back: where the window was, and which screen was in
@@ -132,7 +137,11 @@ public partial class MainViewModel : ViewModelBase
             if (config.LoadError != null) return;
 
             config.Window = geometry;
-            config.LastScreen = IsChoosingMode ? null : CurrentViewName;
+            // Closing on the launch mode-cards leaves the remembered screen alone (#290): the
+            // cards are up at every start, so writing null here wiped #211's memory whenever
+            // the app was closed without clicking through - and the next launch forgot where
+            // its owner worked. No choice made means nothing to record, not "record nothing".
+            if (!IsChoosingMode) config.LastScreen = CurrentViewName;
             _credentialStore.SaveConfig(config);
         }
         catch
@@ -143,6 +152,21 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>The geometry the last session saved, for the window to apply before first paint.</summary>
     public WindowGeometry? SavedGeometry { get; private set; }
+
+    /// <summary>
+    /// The dashboard answers "how exposed am I?" - arriving at an empty screen that needs a
+    /// button press first is the screen failing its own question. First visit sweeps
+    /// automatically; after that Refresh is deliberate, because a sweep touches every server.
+    /// </summary>
+    private ExposureViewModel SweepExposureOnFirstVisit()
+    {
+        // Gated on a real has-swept flag (#287): inferring "never swept" from an empty rows
+        // list re-swept the whole estate on every visit whenever the answer WAS empty.
+        if (!Exposure.HasSwept && !Exposure.IsSweeping)
+            _ = Exposure.RefreshCommand.ExecuteAsync(null);
+
+        return Exposure;
+    }
 
     /// <summary>Whether a sidebar entry is offered in the current mode.</summary>
     public bool IsViewAvailable(string viewName) => viewName switch
@@ -179,6 +203,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public string VersionText => Services.AppVersion.Display;
 
+    public HomeViewModel Home { get; }
     public BlobConfigViewModel BlobConfig { get; }
     public ServerManagerViewModel ServerManager { get; }
     public BlobBrowserViewModel BlobBrowser { get; }
@@ -222,6 +247,10 @@ public partial class MainViewModel : ViewModelBase
         _chainBuilder = new BackupChainBuilder();
         _scriptGenerator = new RestoreScriptGenerator();
 
+        // The front door (#343). Navigation stays here; the screen only asks.
+        Home = new HomeViewModel();
+        Home.NavigateRequested += NavigateTo;
+
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
         BlobBrowser = new BlobBrowserViewModel(_blobService, _sqlService, _credentialStore);
@@ -258,6 +287,14 @@ public partial class MainViewModel : ViewModelBase
         // From looking to restoring in one move (#202). Navigation first, so the load's progress
         // happens on the screen the user is now watching rather than behind the one they left.
         BlobBrowser.RestoreRequested += handoff =>
+        {
+            NavigateTo(Nav.Restore);
+            _ = Restore.AcceptHandoffAsync(handoff);
+        };
+
+        // The dashboard's rows get the same one-click path (#202's pattern): a red row's
+        // distance to being acted on is one click, or the screen is guilt rather than a to-do.
+        Exposure.RestoreRequested += handoff =>
         {
             NavigateTo(Nav.Restore);
             _ = Restore.AcceptHandoffAsync(handoff);
@@ -339,8 +376,13 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void RefreshBusy()
     {
+        // Backup and copy are the two other screens that RUN something long (#289) - the
+        // indicator exists so "is it doing something?" does not depend on scroll position,
+        // and the two longest-running screens were the ones it ignored.
         var text =
             Restore.IsBusyWithAnything ? Restore.BusyDescription
+            : Backup.IsRunning ? "Running the backup..."
+            : CopyDatabase.IsRunning ? "Copying the database..."
             : BlobConfig.IsBusy ? "Testing the container connection..."
             : BlobBrowser.IsBusy ? "Listing the container..."
             : ServerManager.IsBusy ? "Connecting to SQL Server..."
@@ -487,7 +529,9 @@ public partial class MainViewModel : ViewModelBase
                 if (Restore.LoadBackupsCommand.CanExecute(null)) Restore.LoadBackupsCommand.Execute(null);
                 break;
             case Nav.BrowseBackups:
-                BlobBrowser.RefreshContainers();
+                // The full contract, not just the source lists: RefreshContainers alone left
+                // the screen to be emptied, which made F5 a wipe instead of a reload (#286).
+                if (BlobBrowser.RefreshCommand.CanExecute(null)) BlobBrowser.RefreshCommand.Execute(null);
                 break;
             case Nav.History:
                 History.Refresh();
@@ -509,7 +553,8 @@ public partial class MainViewModel : ViewModelBase
     {
         if (Restore.Execution.CancelCommand.CanExecute(null)) { Restore.Execution.CancelCommand.Execute(null); return; }
         if (Restore.CancelQueryCommand.CanExecute(null)) { Restore.CancelQueryCommand.Execute(null); return; }
-        if (Restore.CancelLoadCommand.CanExecute(null)) Restore.CancelLoadCommand.Execute(null);
+        if (Restore.CancelLoadCommand.CanExecute(null)) { Restore.CancelLoadCommand.Execute(null); return; }
+        if (Exposure.CanCancelSweep) Exposure.StopSweepCommand.Execute(null);
     }
 
     /// <summary>
@@ -522,6 +567,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public static class Nav
     {
+        public const string Home = "Home";
         public const string BlobStorage = "Blob Storage";
         public const string SqlServers = "SQL Servers";
         public const string BrowseBackups = "Browse Backups";
@@ -534,7 +580,7 @@ public partial class MainViewModel : ViewModelBase
         public const string About = "About";
 
         public static IReadOnlyList<string> Views =>
-            [BlobStorage, SqlServers, BrowseBackups, Exposure, Backup, Restore, CopyDatabase, History, Settings, About];
+            [Home, BlobStorage, SqlServers, BrowseBackups, Exposure, Backup, Restore, CopyDatabase, History, Settings, About];
     }
 
     [RelayCommand]
@@ -543,10 +589,11 @@ public partial class MainViewModel : ViewModelBase
         CurrentViewName = viewName;
         CurrentView = viewName switch
         {
+            Nav.Home => Home,
             Nav.BlobStorage => BlobConfig,
             Nav.SqlServers => ServerManager,
             Nav.BrowseBackups => BlobBrowser,
-            Nav.Exposure => Exposure,
+            Nav.Exposure => SweepExposureOnFirstVisit(),
             Nav.Backup => Backup,
             Nav.Restore => Restore,
             Nav.CopyDatabase => CopyDatabase,
@@ -574,6 +621,13 @@ public partial class MainViewModel : ViewModelBase
             // Re-read on every visit: a restore run since the last look must be here, and the
             // history is written by the Restore screen rather than by this one.
             History.Refresh();
+        else if (viewName is Nav.SqlServers)
+            // Catches up with servers the import or the CLI's add-server wrote since the last
+            // visit (#276) - without this, the screen's next save wrote its stale list over them.
+            ServerManager.RefreshFromConfig();
+        else if (viewName is Nav.BlobStorage)
+            // Same for containers, same reason (#276).
+            BlobConfig.RefreshFromConfig();
     }
 }
 

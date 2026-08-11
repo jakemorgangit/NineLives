@@ -98,10 +98,13 @@ public sealed class FakeBlobStorageService : IBlobStorageService
     /// </summary>
     public BlobContainerConfig? LastConfig { get; private set; }
 
+    /// <summary>What VerifyConnectionAsync answers - false plays a SAS that cannot reach the container.</summary>
+    public bool VerifyAnswer { get; set; } = true;
+
     public Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
         LastConfig = config;
-        return Task.FromResult(true);
+        return Task.FromResult(VerifyAnswer);
     }
 
     /// <summary>What DescribeSignedInIdentityAsync should answer.</summary>
@@ -117,7 +120,14 @@ public sealed class FakeBlobStorageService : IBlobStorageService
     public Task<List<BackupFileInfo>> ListBackupFilesAsync(BlobContainerConfig config, CancellationToken ct = default)
         => ListBackupFilesAsync(config, null, null, ct);
 
-    public Task<List<BackupFileInfo>> ListBackupFilesAsync(
+    /// <summary>
+    /// When set, the listing waits here before returning - and honours a cancellation that
+    /// arrived while it waited, as the real paged enumeration does. Lets a test hold a load
+    /// in flight, change the world, and only then let the result try to land.
+    /// </summary>
+    public TaskCompletionSource<bool>? BeforeListReturns { get; set; }
+
+    public async Task<List<BackupFileInfo>> ListBackupFilesAsync(
         BlobContainerConfig config, BlobListingScope? scope, IProgress<int>? progress, CancellationToken ct = default)
     {
         ListCalls++;
@@ -127,6 +137,12 @@ public sealed class FakeBlobStorageService : IBlobStorageService
         ct.ThrowIfCancellationRequested();
         if (ListThrows != null) throw ListThrows;
 
+        if (BeforeListReturns != null)
+        {
+            await BeforeListReturns.Task;
+            ct.ThrowIfCancellationRequested();
+        }
+
         var files = FilesByContainer.TryGetValue(config.Name, out var forContainer)
             ? forContainer
             : Files;
@@ -135,7 +151,7 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
         // A copy per call. The real service returns fresh objects each time, and handing the same
         // instances back twice would let one listing's ContainerId stamp overwrite another's.
-        return Task.FromResult(files.Select(Copy).ToList());
+        return files.Select(Copy).ToList();
     }
 
     /// <summary>
@@ -164,8 +180,14 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 
     public ContainerSummary GetContainerSummary(List<BackupFileInfo> files) => _real.GetContainerSummary(files);
     public ContainerSummary GetSetBasedSummary(List<BackupSet> sets) => _real.GetSetBasedSummary(sets);
+    /// <summary>The time zone the last grouping was handed - pins WHOSE zone was used (#286).</summary>
+    public string? LastGroupTimeZoneId { get; private set; }
+
     public List<BackupSet> GroupIntoBackupSets(List<BackupFileInfo> files, string? backupServerTimeZoneId = null)
-        => _real.GroupIntoBackupSets(files, backupServerTimeZoneId);
+    {
+        LastGroupTimeZoneId = backupServerTimeZoneId;
+        return _real.GroupIntoBackupSets(files, backupServerTimeZoneId);
+    }
     public List<string> GetDiscoveredDatabases(List<BackupFileInfo> files) => _real.GetDiscoveredDatabases(files);
     public List<string> GetDiscoveredServers(List<BackupFileInfo> files) => _real.GetDiscoveredServers(files);
 }
@@ -192,7 +214,16 @@ public sealed class FakeRunNotifier : IRunNotifier
 {
     public List<RunNotification> Sent { get; } = [];
 
+    /// <summary>How many times a caller drained - the CLI's exit path must, or deliveries die with the process (#296).</summary>
+    public int DrainCalls { get; private set; }
+
     public void Notify(RunNotification notification) => Sent.Add(notification);
+
+    public Task DrainAsync(TimeSpan timeout)
+    {
+        DrainCalls++;
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class FakeSqlServerService : ISqlServerService
@@ -229,6 +260,11 @@ public sealed class FakeSqlServerService : ISqlServerService
         => Task.FromResult("Microsoft SQL Server 2022");
 
     /// <summary>What the fake instance says it holds.</summary>
+    /// <summary>
+    /// Whatever a test puts here - which means the REAL query's user-databases-only filter
+    /// (#279) is invisible to the unit suite. The live pin in SqlExecutionFailureTests is
+    /// what proves the predicate; tests here should stock this with user databases only.
+    /// </summary>
     public List<string> DatabaseList { get; set; } = [];
 
     public Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
@@ -297,8 +333,31 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>What GetProductMajorVersionAsync answers - 16 is SQL Server 2022 (#210).</summary>
     public int? ProductMajorVersion { get; set; } = 16;
 
-    public Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(ProductMajorVersion);
+    /// <summary>What GetEngineEditionAsync answers - 4 is Express (#51). Default non-Express.</summary>
+    public int? EngineEdition { get; set; } = 3;
+
+    public Task<int?> GetEngineEditionAsync(ServerConnection server, CancellationToken ct = default)
+        => Task.FromResult(EngineEdition);
+
+    /// <summary>Per-server overrides, for the checks that compare two servers' versions.</summary>
+    public Dictionary<string, int?> MajorVersionByServer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Set to make the version ask throw - a server that does not answer at all (#63).</summary>
+    public Exception? ThrowOnMajorVersion { get; set; }
+
+    /// <summary>
+    /// Awaited before the version answer - a test gates this to hold a check sweep open and
+    /// prove the run waits for the verdicts (#285).
+    /// </summary>
+    public Func<Task>? BeforeMajorVersion { get; set; }
+
+    public async Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default)
+    {
+        if (BeforeMajorVersion != null) await BeforeMajorVersion();
+        if (ThrowOnMajorVersion != null) throw ThrowOnMajorVersion;
+        return MajorVersionByServer.TryGetValue(server.ServerName, out var v) ? v : ProductMajorVersion;
+    }
 
     /// <summary>What GetDatabaseOverviewAsync answers (#205).</summary>
     public DatabaseOverview? DatabaseOverview { get; set; } = new(150, "FULL", "sa");
@@ -437,12 +496,16 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>The MOVE clauses the last verification was given (#129).</summary>
     public List<FileMoveOption> VerifiedWithMoves { get; private set; } = [];
 
+    /// <summary>Whether each verification said WITH CHECKSUM - pins WHOSE setting was used (#293).</summary>
+    public List<bool> VerifiedWithChecksum { get; } = [];
+
     public Task<VerifyOnlyResult> RestoreVerifyOnlyAsync(
         ServerConnection server, IReadOnlyList<string> blobUrls, bool withChecksum = false,
         IReadOnlyList<FileMoveOption>? fileMoves = null, CancellationToken ct = default)
     {
         VerifiedUrls.AddRange(blobUrls);
         VerifiedWithMoves = fileMoves?.ToList() ?? [];
+        VerifiedWithChecksum.Add(withChecksum);
         VerifyTokens.Add(ct);
         OnVerify?.Invoke(ct);
 
@@ -469,11 +532,21 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// </summary>
     public int? FailOnExecuteNumber { get; set; }
 
+    /// <summary>
+    /// Runs inside each execute call, 1-based - lets a test change screen state MID-RUN, which
+    /// is how the edit-during-copy defect is reproduced deterministically (#280).
+    /// </summary>
+    public Action<int>? OnExecute { get; set; }
+
     public Task ExecuteWithProgressAsync(
         ServerConnection server, string sql, Action<string>? messageCallback = null, CancellationToken ct = default)
     {
+        // Same guard the VERIFYONLY fake carries, same reason: without it a test passes
+        // against a caller that ignores the token entirely (#296).
+        ct.ThrowIfCancellationRequested();
         ExecutedAgainst.Add(server);
         ExecutedScripts.Add(sql);
+        OnExecute?.Invoke(ExecutedScripts.Count);
         messageCallback?.Invoke("100 percent processed.");
 
         if (FailOnExecuteNumber == ExecutedScripts.Count)
@@ -504,10 +577,16 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Dictionary<string, List<LogMark>> LogMarksByDatabase { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Which instances were asked for marks, in order - the catalogue choice IS the bug surface (#268).</summary>
+    public List<string> LogMarkServersAsked { get; } = [];
+
     public Task<List<LogMark>> GetLogMarksAsync(
         ServerConnection server, string database, CancellationToken ct = default)
-        => Task.FromResult(
+    {
+        LogMarkServersAsked.Add(server.ServerName);
+        return Task.FromResult(
             LogMarksByDatabase.TryGetValue(database, out var marks) ? marks.ToList() : []);
+    }
 
     /// <summary>Percent values the polling execute reports before completing (#user CHECKDB feedback).</summary>
     public List<double> PollPercents { get; set; } = [50];
@@ -535,13 +614,38 @@ public sealed class FakeSqlServerService : ISqlServerService
     public Dictionary<string, List<ExposureRow>> ExposureByServer { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public Task<List<ExposureRow>> GetBackupExposureAsync(
+    /// <summary>When set, the sweep waits here per server - and honours a cancellation that
+    /// arrived while it waited, as the real query does (#287).</summary>
+    public TaskCompletionSource<bool>? BeforeExposureReturns { get; set; }
+
+    public async Task<List<ExposureRow>> GetBackupExposureAsync(
         ServerConnection server, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        if (BeforeExposureReturns != null)
+        {
+            await BeforeExposureReturns.Task;
+            ct.ThrowIfCancellationRequested();
+        }
+
         if (!ExposureByServer.TryGetValue(server.ServerName, out var rows))
             throw new InvalidOperationException($"fake: {server.ServerName} is not answering");
 
-        return Task.FromResult(rows.ToList());
+        // Fresh instances per call, as the real query produces - two connections to the same
+        // instance must not share row objects, or the sweep cannot tell whose answer is whose.
+        return rows.Select(r => new ExposureRow
+        {
+            ServerName = r.ServerName,
+            DatabaseName = r.DatabaseName,
+            RecoveryModel = r.RecoveryModel,
+            StateDescription = r.StateDescription,
+            IsUnreachable = r.IsUnreachable,
+            LastFull = r.LastFull,
+            LastDifferential = r.LastDifferential,
+            LastLog = r.LastLog,
+            Level = r.Level,
+            Verdict = r.Verdict
+        }).ToList();
     }
 
     /// <summary>What each ad-hoc file's headers say, keyed by path (#203).</summary>
@@ -587,6 +691,10 @@ public sealed class FakeSqlServerService : ISqlServerService
     public async Task<List<BackupFileCheck>> CheckBackupFilesAsync(
         ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default)
     {
+        // Observed for the same reason the execute fake observes its token (#283): a pressed
+        // Stop reaches this check mid-copy, and a fake that ignores it lets a viewmodel
+        // misreport the cancellation without any test noticing.
+        ct.ThrowIfCancellationRequested();
         var results = new List<BackupFileCheck>();
         foreach (var path in paths)
         {

@@ -385,7 +385,20 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "9lives": {
+        "type": "Project",
+        "dependencies": {
+          "NineLives.Core": "[1.5.0, )"
+        }
+      },
       "ninelives": {
+        "type": "Project",
+        "dependencies": {
+          "CommunityToolkit.Mvvm": "[8.4.2, )",
+          "NineLives.Core": "[1.5.0, )"
+        }
+      },
+      "ninelives.core": {
         "type": "Project",
         "dependencies": {
           "Azure.Identity": "[1.21.0, )",

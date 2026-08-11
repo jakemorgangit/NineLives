@@ -7,6 +7,7 @@
          was added to it. Views that still declare their own simply shadow this with an identical
          instance, so both work. -->
     <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+    <converters:StringToVisibilityConverter x:Key="StringToVis" />
     <converters:NullToVisibilityConverter x:Key="NullToVis" />
     <converters:ContrastingTextConverter x:Key="ContrastingText" />
 
@@ -578,10 +579,15 @@
                                       Focusable="False"
                                       ClickMode="Press"
                                       IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
+                        <!-- ContentTemplateSelector forwarded like the stock template does:
+                             DisplayMemberPath works through the items control's template
+                             SELECTOR, so a closed box without it falls back to ToString()
+                             while the open list shows the right member (#269). -->
                         <ContentPresenter x:Name="ContentSite"
                                           IsHitTestVisible="False"
                                           Content="{TemplateBinding SelectionBoxItem}"
                                           ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
                                           ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                           Margin="12,8,28,8"
                                           VerticalAlignment="Center"

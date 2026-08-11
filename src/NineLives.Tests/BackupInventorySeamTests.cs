@@ -73,7 +73,9 @@ public class BackupInventorySeamTests
 
         await vm.LoadAsync(BackupLocation.Blob(Container()));
 
-        Assert.Null(vm.SelectedServerName);
+        // One discovered instance answers its own filter question (#319); the DATABASE -
+        // the decision that arms anything - stays unmade, and nothing is worked from.
+        Assert.Equal("SRV01", vm.SelectedServerName);
         Assert.Null(vm.SelectedDatabaseName);
         Assert.Empty(vm.WorkingSet);
         Assert.Equal(0, vm.SetCount);
