@@ -542,11 +542,23 @@ public partial class ServerManagerViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Connect, and say so either way (#357).
+    ///
+    /// SetError and SetStatus both write surfaces this screen does not render in view mode - the
+    /// error banner sits inside the edit form, gated on IsEditing, and the Connect button sits in
+    /// the panel gated on the inverse of it, so a message written here reached a collapsed
+    /// control. TestResult is the one surface view mode DOES render, which is why Test explains
+    /// itself and Connect, on the same screen against the same server, did not: a typo'd instance
+    /// or a wrong password on the last step of first run flashed "Connecting..." and returned to
+    /// a screen with nothing on it, a button indistinguishable from a broken one.
+    /// </summary>
     [RelayCommand]
     private async Task ConnectAsync()
     {
         if (SelectedServer == null) return;
 
+        TestResult = string.Empty;
         IsBusy = true;
         try
         {
@@ -573,10 +585,19 @@ public partial class ServerManagerViewModel : ViewModelBase
                 ConnectedServer = SelectedServer
             });
             SetStatus($"Connected to {SelectedServer.ServerName}");
+
+            TestSuccess = true;
+            TestResult = $"Connected to {SelectedServer.DisplayText}.";
         }
         catch (Exception ex)
         {
             SetError($"Connection failed: {ex.Message}");
+
+            // Same wording as Test's own failure, because they fail the same way for the same
+            // reasons - and reading differently would suggest the two buttons had found
+            // different things.
+            TestSuccess = false;
+            TestResult = $"Connection failed: {ex.Message}";
         }
         finally
         {

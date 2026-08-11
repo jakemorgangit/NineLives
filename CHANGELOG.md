@@ -12,6 +12,28 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The Backup and Copy consoles no longer vanish when the run ends** (#358). Both were bound to
+  "a run is in progress", so the panel holding SQL Server's own account of what happened
+  collapsed at the moment its contents started to matter. The error text left behind on the
+  backup screen reads "see the console for each failure" - and the console it names was gone.
+  On the copy screen it was worse: that console is where the target's recovery explanation and
+  the literal `RESTORE ... WITH RECOVERY` statements are printed when the restore half fails, so
+  the app hid the exact statements needed to get the target out of RESTORING, and the only way
+  back to them was to re-run a production operation. They are now bound to having output.
+
+- **Browse Backups says what went wrong** (#356). It had no error banner and no status line, so
+  every failure on it was silent: an expired SAS, a 403, a DNS failure, a genuinely empty
+  container and never having pressed the button all left the identical empty state, and pressing
+  Load Backups with nothing selected was a button that visibly did nothing at all. The view model
+  had been writing those messages the whole time - into a screen with nothing bound to them.
+
+- **A failed Connect on the SQL Servers screen explains itself** (#357). The message went to the
+  error banner, which lives inside the edit form; the Connect button lives in the panel shown
+  when that form is closed. So on the last step of first run, a typo'd instance name or a wrong
+  password flashed "Connecting..." and returned to a screen with nothing on it - while Test, one
+  button away against the same server, explained itself properly. Connect now writes the same
+  surface Test does, in the same words, since they fail the same way for the same reasons.
+
 - **A container that answers and holds nothing is no longer reported as a success** (#368).
   "Connected! 0 files found (0 B)" was the commonest new-user failure there is - a base path
   that does not match how the backups are actually laid out - presented in the voice of a
