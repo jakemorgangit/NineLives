@@ -1,5 +1,6 @@
 using System.Text;
 using Blackcat.NineLives.Cli.Verbs;
+using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Cli;
@@ -76,7 +77,30 @@ internal static class Program
             return ExitCodes.Ok;
         }
 
-        var args = CliArguments.Parse(rawArgs.Skip(1).ToArray(), spec);
+        // --ephemeral (#302): resolve names against zero-persistence definitions from the
+        // NINELIVES_* environment variables, before config. Stripped here because it belongs
+        // to the invocation, not to any one verb - and it is an explicit switch so the
+        // command line SAYS it, rather than depending on invisible environment state.
+        var verbArgs = rawArgs.Skip(1).ToArray();
+        var ephemeral = verbArgs.Any(a => a is "--ephemeral");
+        ServerConnection? envServer = null;
+        BlobContainerConfig? envContainer = null;
+        if (ephemeral)
+        {
+            verbArgs = verbArgs.Where(a => a is not "--ephemeral").ToArray();
+            envServer = EnvironmentCredentials.Server(Environment.GetEnvironmentVariable);
+            envContainer = EnvironmentCredentials.Container(Environment.GetEnvironmentVariable);
+            if (envServer == null && envContainer == null)
+            {
+                Console.Error.WriteLine(
+                    "--ephemeral is set, but neither NINELIVES_SERVER nor " +
+                    "NINELIVES_CONTAINER_URL is defined. Set the NINELIVES_* variables " +
+                    "(see '9lives help') or drop the switch.");
+                return ExitCodes.Usage;
+            }
+        }
+
+        var args = CliArguments.Parse(verbArgs, spec);
         if (!args.Ok)
         {
             foreach (var error in args.Errors)
@@ -91,7 +115,8 @@ internal static class Program
         var store = new CredentialStore();
         var services = new CliServices(
             store, new SqlServerService(store), new BlobStorageService(store),
-            new RestoreHistoryStore(), new WebhookRunNotifier(store, new OperationLog()));
+            new RestoreHistoryStore(), new WebhookRunNotifier(store, new OperationLog()),
+            envServer, envContainer);
 
         try
         {
