@@ -7,6 +7,7 @@
     <UserControl.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
         <converters:NullToVisibilityConverter x:Key="NullToVis" />
+        <converters:StringToVisibilityConverter x:Key="StringToVis" />
         <converters:EnumToBoolConverter x:Key="EnumToBool" />
         <converters:BackupTypeToColorConverter x:Key="TypeToColor" />
         <converters:TimelinePositionConverter x:Key="TimelinePos" />
@@ -737,12 +738,51 @@
                         </Grid>
                     </Border>
 
+                    <!-- Two different emptinesses, two different answers (#370).
+                         Both used to say "widen the filters" - including when there was nothing
+                         to filter, because Load resets every filter to open before it reports
+                         an empty set. That sent somebody to fiddle with checkboxes that were
+                         already fully open, at the moment they needed to be told there is no
+                         full backup here. HasPoints is what separates them. -->
                     <TextBlock Text="No restore point matches these filters. Widen the range or switch a type back on."
-                               Style="{StaticResource SecondaryText}"
                                Foreground="{DynamicResource WarningBrush}"
                                TextWrapping="Wrap"
-                               Margin="0,0,0,12"
-                               Visibility="{Binding Timeline.HasVisiblePoints, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                               Margin="0,0,0,12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Timeline.HasPoints}" Value="True" />
+                                            <Condition Binding="{Binding Timeline.HasVisiblePoints}" Value="False" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <TextBlock Text="This database has no restore points. A restore must start from a full backup - check retention, or whether the full backups sit under a different path than the container's pattern expects."
+                               Foreground="{DynamicResource WarningBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Timeline.HasPoints}" Value="False" />
+                                            <Condition Binding="{Binding Inventory.SelectedDatabaseName, Converter={StaticResource StringToVis}}" Value="Visible" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
 
                     <!-- ========== VISUAL TIMELINE ========== -->
                     <Border Background="{DynamicResource InputBackgroundBrush}"
@@ -2093,6 +2133,22 @@
                         </TextBlock>
                     </Border>
 
+                    <!-- Why there is no script, OUTSIDE the pane that holds the script (#370).
+                         This lived inside it, and the two states are mutually exclusive: a
+                         non-empty reason is exactly the case where HasScript is false and the
+                         pane is collapsed. So every explanation it could give - the STANDBY
+                         undo file, a log mark on a chain with no logs - was unreachable, and
+                         the screen showed an empty area and said nothing. -->
+                    <Border Background="{DynamicResource WarningPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource WarningBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4" Padding="12,10" Margin="0,0,0,12"
+                            Visibility="{Binding ScriptBlockedReason, Converter={StaticResource StringToVis}}">
+                        <TextBlock Text="{Binding ScriptBlockedReason}"
+                                   Style="{StaticResource BodyText}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
                     <!-- The generated script. Stays visible during and after execution: it used to
                          be hidden the moment Execute was pressed, so the script and the console
                          shared one slot and you could not see what was running while it ran. -->
@@ -2103,14 +2159,6 @@
                             <Grid Margin="12,8,12,4">
                                 <TextBlock Text="GENERATED SCRIPT" Style="{StaticResource LabelText}" />
 
-                        <!-- Why the pane is empty, where the eye already is - the script builds
-                             itself live, so there is no button to press and no dialog to read. -->
-                        <TextBlock Text="{Binding ScriptBlockedReason}"
-                                   Style="{StaticResource SecondaryText}"
-                                   TextWrapping="Wrap"
-                                   Margin="0,6,0,0">
-                            <TextBlock.Resources />
-                        </TextBlock>
                                 <TextBlock Text="updates as you change options"
                                            Style="{StaticResource SecondaryText}"
                                            FontSize="11"

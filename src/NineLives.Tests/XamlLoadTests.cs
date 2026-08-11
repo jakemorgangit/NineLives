@@ -1521,6 +1521,67 @@ public class XamlLoadTests(WpfFixture wpf)
         });
     }
 
+    // ── the screen says the true thing (#370) ───────────────────────────────────
+
+    /// <summary>
+    /// The reason there is no script is SHOWN.
+    ///
+    /// It lived inside the pane that holds the script, and the two states are mutually
+    /// exclusive - a non-empty reason is exactly the case where HasScript is false and that
+    /// pane is collapsed. So every explanation it could give was unreachable, and the screen
+    /// showed an empty area and said nothing.
+    /// </summary>
+    [Fact]
+    public void WhyThereIsNoScriptIsActuallyRendered()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // The reason only arises once generation is being attempted, which is inside the
+            // execute step - so that is the state it has to be legible in.
+            vm.Steps.Execute.IsVisible = true;
+            vm.Steps.Execute.IsExpanded = true;
+
+            typeof(RestoreViewModel).GetProperty(nameof(vm.ScriptBlockedReason))!
+                .SetValue(vm, "STANDBY needs an undo file path.");
+            typeof(RestoreViewModel).GetProperty(nameof(vm.HasScript))!.SetValue(vm, false);
+            Realise(view);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.Contains(shown, t => t.Contains("STANDBY needs an undo file path"));
+        });
+    }
+
+    /// <summary>
+    /// A database with no restore points at all is not a filter problem.
+    ///
+    /// Load resets every filter to open before reporting an empty set, so the "widen the
+    /// filters" text was shown against filters that were already fully open - at the moment
+    /// somebody needed to be told there is no full backup here.
+    /// </summary>
+    [Fact]
+    public void NoRestorePointsAtAllIsNotReportedAsAFilterProblem()
+    {
+        wpf.Invoke(() =>
+        {
+            var vm = NewRestoreViewModel();
+            var view = new RestoreView { DataContext = vm };
+            Realise(view);
+
+            // Nothing loaded: no points, and none visible.
+            Assert.False(vm.Timeline.HasPoints);
+            Assert.False(vm.Timeline.HasVisiblePoints);
+
+            var shown = FindAll<TextBlock>(view).Where(IsShown).Select(t => t.Text).ToList();
+
+            Assert.DoesNotContain(shown, t => t.Contains("Widen the range"));
+        });
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────
 
     private RestoreViewModel NewRestoreViewModel(ICredentialStore? credentialStore = null)

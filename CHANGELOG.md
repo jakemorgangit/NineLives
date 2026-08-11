@@ -180,6 +180,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Three places the app said nothing, or the wrong thing** (#370). The Exposure
+  dashboard's "Open in Restore" button was live on unreachable rows and silently did
+  nothing when pressed - and those are the rows that sort to the top, because they are
+  the alarms; it is now replaced on those rows by the actual next step, which is fixing
+  the connection. The explanation for an empty script pane lived INSIDE that pane, and
+  the two states are mutually exclusive, so every reason it could give - the STANDBY undo
+  file, a log mark on a chain with no logs - was unreachable; it now sits above the pane
+  where it can be read. And a database with no restore points at all was reported as a
+  filter problem, advising somebody to widen filters that the timeline had just reset to
+  fully open - it now says what is actually wrong, which is that a restore has to start
+  from a full backup.
+
 - **The CLI's exit codes stopped contradicting themselves** (#370). Two ways they lied to
   a pipeline. Adding `--json` to `list` changed the VERDICT: the JSON branch returned 0
   on a source holding nothing, while the same command without it returned 2 and the spec
