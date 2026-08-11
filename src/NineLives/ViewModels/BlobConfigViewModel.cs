@@ -865,9 +865,10 @@ public partial class BlobConfigViewModel : ViewModelBase
         // question rather than a single click (#42).
         var confirm = MessageBox.Show(
             $"Remove the container \"{SelectedContainer.Name}\"?\n\n" +
-            "Its stored SAS token will be deleted from Windows Credential Manager. The app never " +
-            "displays stored tokens, so if this is the only copy you will need to obtain a new one.\n\n" +
-            "Nothing in Azure is affected - no backups are deleted.",
+            "Its stored credential - the SAS token or access key pair - will be deleted from " +
+            "Windows Credential Manager. The app never displays stored credentials, so if this " +
+            "is the only copy you will need to obtain a new one.\n\n" +
+            "Nothing in the container itself is affected - no backups are deleted.",
             "Nine Lives", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
 
         if (confirm != MessageBoxResult.Yes) return;
