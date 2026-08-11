@@ -1903,7 +1903,9 @@ public partial class RestoreViewModel : ViewModelBase
             : !Options.HasStandbyFileIfNeeded
                 ? "STANDBY needs an undo file path - without one the script would end in " +
                   "STANDBY = '', which fails after the database has already been overwritten."
-            : null;
+            // The generator refuses this one outright rather than emitting it (#365); asked here
+            // so the screen explains it instead of surfacing an exception.
+            : RestoreScriptGenerator.DescribeSetWithNoFiles(chain);
 
         ScriptBlockedReason = blocked ?? string.Empty;
 

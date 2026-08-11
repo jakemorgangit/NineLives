@@ -12,6 +12,39 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A backup set with no files no longer generates a restore that ends the sequence** (#365).
+  A set discovered with nothing recorded against it produced a RESTORE naming no device -
+  which is not a syntax error but the valid recovery-only form. Run against a target sitting
+  in RESTORING, a log-shipping secondary or a paused restore, it would have brought the
+  database online wherever it had got to and ended the restore sequence for good: no further
+  log applicable, the whole chain to start again. The validator now reports it as an error,
+  the restore screen explains it where the script would be, and the generator refuses rather
+  than emitting it.
+
+- **A striped set missing its first file is caught** (#363). The stripe check returned early
+  on a single-file set, so a set holding only `..._2.bak` - stripe 1 purged by retention or
+  never uploaded - passed clean, while the *same* set as stripes 2 and 3 was correctly
+  flagged. It was blind precisely at its worst case. The question is now asked of the stripe
+  numbers rather than the file count: a lone `_2` says stripe 1 is missing on its own. A set
+  mixing an unnumbered file with a numbered one is caught too, and named.
+
+- **One striped set written to two folders is no longer offered as two restore points**
+  (#363). Multi-directory striping - how a large backup gets spread over two volumes - groups
+  by parent folder, so it arrived as two sets at the same instant, each holding half a media
+  set and each looking complete. A chain that should have offered four restore points offered
+  seven, every one of them restoring from half a set. The halves are now recognised by their
+  stripe numbers: no overlap and together running 1..N means one media set and nothing else.
+  Two genuinely complete backups that share a second each contain a stripe 1, so they are left
+  alone as the warning they are.
+
+- **KEEP_REPLICATION and the broker options only on the statement that recovers** (#364). They
+  were emitted on every statement in the chain while the recovery clause was chosen
+  separately, and SQL Server refuses the combination outright - Msg 3031, "Option 'norecovery'
+  conflicts with option(s) 'keep_replication'". The first statement failed, which made the
+  option unusable for any chain longer than one statement: every log-shipping and replication
+  scenario it exists for. A chain deliberately left in NORECOVERY or STANDBY now carries them
+  nowhere, since it never brings a database online for them to describe.
+
 - **Copy Database says which database it is about to overwrite** (#370). It defaults to
   overwriting, which is usually the point - a test environment being refreshed - but the
   only thing saying so was a ticked checkbox. The property that would have said it out

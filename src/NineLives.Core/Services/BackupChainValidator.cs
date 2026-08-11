@@ -77,10 +77,12 @@ public class BackupChainValidator
 
         foreach (var set in chain.AllSets)
         {
+            CheckSetHasFiles(set, issues);
             CheckStripes(set, issues);
             CheckEmptyFiles(set, issues);
         }
 
+        CheckSplitStripeSets(chain.AllSets, issues);
         CheckLogCadence(chain, issues);
         CheckLogCoverageStart(chain, issues);
         CheckOrdering(chain, issues);
@@ -97,6 +99,12 @@ public class BackupChainValidator
     {
         var issues = new List<ChainIssue>();
         if (sets.Count == 0) return issues;
+
+        // Asked of the whole inventory as well as of a chain (#363). A full split across two
+        // folders puts only one of its halves in any chain the builder assembles, so the chain
+        // never sees the pair - but the browse list does, and this is where the extra restore
+        // points come from.
+        CheckSplitStripeSets(sets, issues);
 
         var fulls = sets.Where(s => s.Type == BackupType.Full && !s.IsCopyOnly)
             .OrderBy(s => s.Timestamp).ToList();
@@ -210,36 +218,150 @@ public class BackupChainValidator
     }
 
     /// <summary>
-    /// A striped set is only restorable with EVERY stripe present - SQL Server rejects a partial
-    /// set. Stripe numbers should run 1..N with no holes.
+    /// A backup set with no files at all (#365).
     ///
-    /// Note this cannot detect a uniformly truncated set (stripes 1 and 2 of an original 4), since
-    /// nothing in the filename records how many there were. It catches holes, which is the common
-    /// shape of a failed or partial upload.
+    /// Checked before anything else about the set, because every other check reads
+    /// <see cref="BackupSet.Files"/> and finds nothing to complain about - which is how this
+    /// reached the generator, where a set with no devices produces the recovery-only form of
+    /// RESTORE and ends the restore sequence.
+    /// </summary>
+    private static void CheckSetHasFiles(BackupSet set, List<ChainIssue> issues)
+    {
+        if (set.FileCount > 0) return;
+
+        issues.Add(new ChainIssue(ChainIssueSeverity.Error,
+            $"{set.TypeDisplay} backup at {set.Timestamp:yyyy-MM-dd HH:mm} has no files",
+            "The set was discovered but nothing is recorded against it to restore from. A " +
+            "statement generated for it would name no device at all, which SQL Server reads as " +
+            "a recovery-only restore - it would bring the database online where it stands and " +
+            "end the restore sequence. Re-scan the container, or pick a different restore point."));
+    }
+
+    /// <summary>
+    /// A striped set is only restorable with EVERY stripe present - SQL Server rejects a partial
+    /// set with Msg 3132.
+    ///
+    /// The question is asked of the stripe NUMBERS, not of the file count (#363). Both previous
+    /// guards bailed exactly where the damage was worst: a set holding only <c>..._2.bak</c> -
+    /// stripe 1 purged, or never uploaded - has one file, and one file looked like an ordinary
+    /// unstriped backup. The same set as stripes 2 and 3 was correctly flagged, so the check was
+    /// blind precisely at its worst case. A lone <c>_2</c> means stripe 1 is missing, and that is
+    /// visible from the number alone.
+    ///
+    /// This still cannot detect a uniformly truncated set (stripes 1 and 2 of an original 4).
+    /// Nothing in the filename records how many there were, so a set that ends early looks exactly
+    /// like a smaller set. It catches holes, which is the common shape of a partial upload.
     /// </summary>
     private static void CheckStripes(BackupSet set, List<ChainIssue> issues)
     {
-        if (set.FileCount <= 1) return;
-
         var stripes = set.Files
             .Select(f => BackupSet.ParseFileName(f.FileName).stripe)
             .Where(n => n > 0)
+            .Distinct()
             .OrderBy(n => n)
             .ToList();
 
-        // Not a numbered stripe set - nothing to verify.
-        if (stripes.Count != set.FileCount) return;
+        // No file claims a stripe number - an ordinary unstriped backup, nothing to verify.
+        if (stripes.Count == 0) return;
 
-        var missing = Enumerable.Range(1, stripes[^1])
-            .Where(n => !stripes.Contains(n))
+        var highest = stripes[^1];
+        var missing = Enumerable.Range(1, highest).Where(n => !stripes.Contains(n)).ToList();
+        if (missing.Count == 0) return;
+
+        // Files carrying no number cannot be the missing stripes - the writer numbers all of a
+        // media set or none of it - but they are worth naming, because a set mixing the two is
+        // usually two different backups grouped together and the reader needs to see that.
+        var unnumbered = set.Files
+            .Where(f => BackupSet.ParseFileName(f.FileName).stripe == 0)
+            .Select(f => f.FileName)
             .ToList();
 
-        if (missing.Count > 0)
-            issues.Add(new ChainIssue(ChainIssueSeverity.Error,
-                $"{set.TypeDisplay} backup at {set.Timestamp:yyyy-MM-dd HH:mm} is missing stripe(s) " +
-                string.Join(", ", missing),
-                $"The set has {set.FileCount} file(s) numbered up to {stripes[^1]}. A striped backup cannot be " +
-                "restored unless every file is present, so this restore will fail."));
+        var detail =
+            $"The set holds {set.FileCount} file(s) and the highest stripe number present is " +
+            $"{highest}, so at least {missing.Count} file(s) of the media set are absent. A striped " +
+            "backup cannot be restored unless every stripe is present - this restore will fail " +
+            "with Msg 3132.";
+
+        if (unnumbered.Count > 0)
+            detail += $" {unnumbered.Count} file(s) in the set carry no stripe number at all " +
+                      $"({string.Join(", ", unnumbered)}), which usually means two different " +
+                      "backups have been grouped together.";
+
+        issues.Add(new ChainIssue(ChainIssueSeverity.Error,
+            $"{set.TypeDisplay} backup at {set.Timestamp:yyyy-MM-dd HH:mm} is missing stripe(s) " +
+            string.Join(", ", missing),
+            detail));
+    }
+
+    /// <summary>
+    /// One striped set written across two locations, discovered as two sets (#363).
+    ///
+    /// Sets are grouped by their parent folder, so multi-directory striping - Ola's
+    /// <c>@Directory = 'X,Y'</c>, which is how people spread a large backup over two volumes -
+    /// arrives as two sets carrying the same database, server, type and timestamp, each holding
+    /// half a media set. Neither half is restorable, and the timeline offers both, so a chain
+    /// that should have had four restore points had seven, every one of them broken.
+    ///
+    /// The stripe numbers are what make this provable rather than suspected. If the halves'
+    /// numbers do not overlap and together run 1..N with no holes, they are one media set and
+    /// nothing else: two independent backups of the same database would each be complete, and so
+    /// would both contain a stripe 1. Overlapping numbers are left alone for that reason - they
+    /// are two backup jobs that happened to start in the same second, and each still restores.
+    /// </summary>
+    private static void CheckSplitStripeSets(IEnumerable<BackupSet> sets, List<ChainIssue> issues)
+    {
+        var groups = sets
+            .GroupBy(s => (
+                s.Type,
+                Database: s.DatabaseName?.ToLowerInvariant() ?? string.Empty,
+                Server: s.ServerDisplay?.ToLowerInvariant() ?? string.Empty,
+                s.Timestamp))
+            .Where(g => g.Count() > 1);
+
+        foreach (var group in groups)
+        {
+            var members = group.ToList();
+            var numbers = members
+                .SelectMany(s => s.Files.Select(f => BackupSet.ParseFileName(f.FileName).stripe))
+                .Where(n => n > 0)
+                .ToList();
+
+            var distinct = numbers.Distinct().OrderBy(n => n).ToList();
+            var isOneMediaSet =
+                numbers.Count > 0
+                && numbers.Count == distinct.Count               // no half holds the same stripe twice
+                && distinct[^1] == numbers.Count                 // and together they run 1..N
+                && members.All(s => s.Files.Count > 0);
+
+            var first = members[0];
+            var where = string.Join(", ", members
+                .Select(s => s.Files.Count > 0 ? FolderOf(s.Files[0].BlobName) : "(empty)")
+                .Distinct());
+
+            if (isOneMediaSet)
+                issues.Add(new ChainIssue(ChainIssueSeverity.Error,
+                    $"{first.TypeDisplay} backup at {first.Timestamp:yyyy-MM-dd HH:mm} is one " +
+                    $"striped set split across {members.Count} locations",
+                    $"Stripes 1-{distinct[^1]} of a single media set are spread over: {where}. " +
+                    "Each location holds only part of the set, so both appear on the timeline and " +
+                    "neither can be restored - SQL Server needs every stripe named in one " +
+                    "statement. Point the container at the parent path that holds all of them, or " +
+                    "restore by hand naming every file."));
+            else
+                issues.Add(new ChainIssue(ChainIssueSeverity.Warning,
+                    $"{members.Count} {first.TypeDisplay.ToLowerInvariant()} backups share the " +
+                    $"same timestamp ({first.Timestamp:yyyy-MM-dd HH:mm})",
+                    $"Same database, same server, same second, in: {where}. Each is offered as its " +
+                    "own restore point, so the timeline shows more points than there were backups. " +
+                    "Usually two jobs writing the same backup to two places; check they are not " +
+                    "halves of one striped set before restoring either."));
+        }
+    }
+
+    private static string FolderOf(string blobName)
+    {
+        var cut = blobName.LastIndexOf('/');
+        return cut <= 0 ? "(root)" : blobName[..cut];
     }
 
     private static void CheckEmptyFiles(BackupSet set, List<ChainIssue> issues)
