@@ -12,6 +12,16 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The dot beside a container says something** (#407). It was drawn in the success colour
+  unconditionally - a green light beside every container whether or not it had a credential,
+  whether or not it had ever been tested, with no tooltip and no legend, so the only reading
+  available was "fine". The case that makes it matter is one the app creates itself: a config
+  export carries no secrets by design, so the first thing somebody saw after importing on a new
+  machine was a list of green dots on containers that could not reach anything. It now reports
+  what the vault actually holds - present, expired or missing - in words as well as in colour,
+  since this app's own styles already note that meaning must not ride on colour alone. Entra
+  containers are not reported as missing anything, having no stored secret to miss.
+
 - **A fresh install says what is missing and where to fix it** (#406). Rendering every screen
   with no containers and no servers found three that did not. Browse Backups said "Select a
   container and click Load Backups to browse" when there were no containers to select - an
