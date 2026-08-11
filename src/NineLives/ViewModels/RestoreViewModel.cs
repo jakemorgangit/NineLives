@@ -324,9 +324,6 @@ public partial class RestoreViewModel : ViewModelBase
     private string _moveLogFilePath = string.Empty;
 
     [ObservableProperty]
-    private bool _isFetchingPaths;
-
-    [ObservableProperty]
     private bool _pathsFromServer;
 
     [ObservableProperty]
@@ -1277,7 +1274,6 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        IsFetchingPaths = true;
         PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
         try
         {
@@ -1304,10 +1300,6 @@ public partial class RestoreViewModel : ViewModelBase
             MoveLogFilePath = Path.Combine(fallbackDir, $"{dbName}_log.ldf");
             PathsFromServer = false;
             PathSourceText = $"Could not fetch paths: {ex.Message}. Using generic placeholders.";
-        }
-        finally
-        {
-            IsFetchingPaths = false;
         }
     }
 
@@ -1721,8 +1713,21 @@ public partial class RestoreViewModel : ViewModelBase
 
     public bool IsExecuteBlocked => ExecuteBlockedReason.Length > 0;
 
-    /// <summary>The button's own IsEnabled, so the reason and the enabled state cannot disagree.</summary>
-    public bool CanPressExecute => !IsExecuteBlocked;
+    /// <summary>
+    /// The button's own IsEnabled.
+    ///
+    /// NOT simply the inverse of the blocked reason (#401). That reason is deliberately empty
+    /// while a restore runs - there is nothing to nag about mid-run, the Stop button is what is
+    /// wanted then - and reading the enablement off it therefore left Execute LIVE during a
+    /// restore. Two presses armed it and called RunAsync again, whose cancellation source cancels
+    /// the run in flight: a production restore abandoned mid-chain, leaving the target in
+    /// RESTORING, and started over from the top.
+    ///
+    /// So the two questions are asked separately. Backup and Copy Database both had this right
+    /// already - CanExecute => HasScript &amp;&amp; !IsRunning - and this is the screen where
+    /// getting it wrong costs the most, because WITH REPLACE has already dropped the target.
+    /// </summary>
+    public bool CanPressExecute => !IsExecuteBlocked && !IsExecuting;
 
     private void RefreshExecuteBlockedReason()
     {

@@ -8,6 +8,25 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Fixed
+
+- **Execute is no longer live while a restore is running** (#401). The button took its enabled
+  state from the same property that supplies the "why you cannot press this" sentence - and that
+  sentence is deliberately empty during a run, because mid-restore the control anybody wants is
+  Stop. Empty read as "not blocked", so the button stayed pressable, and two presses armed it and
+  called the run again: the first thing that does is begin a new cancellation, which abandons the
+  restore in flight and starts the chain over, leaving the target mid-restore in RESTORING. The
+  Backup and Copy Database screens both had this right already; this was the one where WITH
+  REPLACE has already dropped the target. The run itself now refuses to re-enter as well, since
+  the rehearsal path reaches it too.
+
+- **Verify Last Backup says it is running, and cannot be started twice** (#402). RESTORE
+  VERIFYONLY reads the whole backup - minutes on a real database - and the button looked exactly
+  as it had before, so the natural response was to press it again, which cancelled the verify and
+  started it over. The flag that would have said so existed and was bound to nothing.
+
 ## [1.6.1] - 2026-08-11
 
 ### Added
