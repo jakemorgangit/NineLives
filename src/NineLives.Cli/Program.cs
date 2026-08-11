@@ -12,6 +12,10 @@ namespace Blackcat.NineLives.Cli;
 /// </summary>
 internal static class Program
 {
+    /// <summary>The one switch that belongs to the invocation rather than to a verb.</summary>
+    private static bool IsEphemeral(string arg) =>
+        string.Equals(arg, "--ephemeral", StringComparison.OrdinalIgnoreCase);
+
     private static async Task<int> Main(string[] rawArgs)
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -82,12 +86,14 @@ internal static class Program
         // to the invocation, not to any one verb - and it is an explicit switch so the
         // command line SAYS it, rather than depending on invisible environment state.
         var verbArgs = rawArgs.Skip(1).ToArray();
-        var ephemeral = verbArgs.Any(a => a is "--ephemeral");
+        // Case-insensitive, like every other option the parser handles (#370). This was
+        // the one flag where --EPHEMERAL came back as an unknown argument.
+        var ephemeral = verbArgs.Any(IsEphemeral);
         ServerConnection? envServer = null;
         BlobContainerConfig? envContainer = null;
         if (ephemeral)
         {
-            verbArgs = verbArgs.Where(a => a is not "--ephemeral").ToArray();
+            verbArgs = verbArgs.Where(a => !IsEphemeral(a)).ToArray();
             envServer = EnvironmentCredentials.Server(Environment.GetEnvironmentVariable);
             envContainer = EnvironmentCredentials.Container(Environment.GetEnvironmentVariable);
             if (envServer == null && envContainer == null)
