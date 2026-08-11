@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Cli.Verbs;
@@ -186,40 +186,15 @@ internal static class RestoreVerb
 
         // Relocation (#299): the Terraform case. A freshly provisioned VM rarely has the
         // source server's drive layout, and the recorded paths fail mid-run with
-        // directory-not-found - after WITH REPLACE has already dropped the target. The
-        // rehearse verb has always relocated; the restore verb, the one the template
-        // actually ends with, now can. Explicit directories win; either side not given
-        // falls back to the target's own defaults.
-        List<FileMoveOption>? moves = null;
-        if (args.Has("relocate") || args.Get("data-path") != null || args.Get("log-path") != null)
+        // directory-not-found - after WITH REPLACE has already dropped the target. Shared with
+        // the script verb since #370, which needed the same clauses for the same reason.
+        var (moves, relocationError) = await Relocation.ResolveAsync(
+            args, services, target, chain, errors.WriteLine, ct);
+
+        if (relocationError != null)
         {
-            var moveDevices = chain.FullSet.Files
-                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
-                .ToList();
-
-            List<FileMoveOption> logicalFiles;
-            try
-            {
-                logicalFiles = await services.Sql.RestoreFileListOnlyAsync(target, moveDevices, ct);
-            }
-            catch (Exception ex)
-            {
-                errors.WriteLine($"Could not read the backup's file list from " +
-                                 $"{target.ServerName}, which relocation needs: {ex.Message}");
-                return ExitCodes.CouldNotAnswer;
-            }
-
-            var dataDir = args.Get("data-path");
-            var logDir = args.Get("log-path");
-            if (dataDir == null || logDir == null)
-            {
-                var (defaultData, defaultLog) = await services.Sql.GetDefaultPathsAsync(target, ct);
-                dataDir ??= defaultData;
-                logDir ??= defaultLog;
-            }
-
-            moves = RestoreRelocation.ToDirectories(logicalFiles, dataDir, logDir);
-            errors.WriteLine($"Relocating {moves.Count} file(s): data to {dataDir}, log to {logDir}.");
+            errors.WriteLine(relocationError);
+            return ExitCodes.CouldNotAnswer;
         }
 
         var script = new RestoreScriptGenerator().Generate(chain, new RestoreOptions
