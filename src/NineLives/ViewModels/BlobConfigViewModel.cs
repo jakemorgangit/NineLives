@@ -247,7 +247,27 @@ public partial class BlobConfigViewModel : ViewModelBase
         {
             var sas = _credentialStore.GetSasToken(container);
             if (sas != null) container.CacheSasToken(sas);
+
+            RecordCredentialState(container, sas);
         }
+    }
+
+    /// <summary>
+    /// What the vault says about this container's secret, recorded on the container (#407).
+    ///
+    /// One vault read, no network. Called wherever the answer can change - the load, and the save
+    /// that stores or deletes a token - because the list is bound live and Save deliberately does
+    /// not reload it, so without this the dot would stay red after somebody had just fixed it.
+    /// </summary>
+    private void RecordCredentialState(BlobContainerConfig container, string? sas = null)
+    {
+        sas ??= _credentialStore.GetSasToken(container);
+
+        container.CredentialState =
+            !container.AuthMode.NeedsSasToken() ? ContainerCredentialState.Present
+            : sas == null ? ContainerCredentialState.Missing
+            : container.ReadSasExpiry(sas).IsExpired ? ContainerCredentialState.Expired
+            : ContainerCredentialState.Present;
     }
 
     /// <summary>
@@ -863,6 +883,10 @@ public partial class BlobConfigViewModel : ViewModelBase
         IsEditing = false;
         HasUnsavedChanges = false;
         UpdateSasExpiryStatus(container);
+
+        // The token may have just been stored or deleted, so the dot has to catch up (#407).
+        RecordCredentialState(container);
+
         SetStatus("Container saved successfully.");
     }
 
