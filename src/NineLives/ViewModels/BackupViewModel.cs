@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -506,6 +506,20 @@ public partial class BackupViewModel : ViewModelBase
     /// <summary>SQL Server's own words as it goes, in the order it said them.</summary>
     public ObservableCollection<string> Console { get; } = [];
 
+    /// <summary>
+    /// Whether the console has anything in it - which is not the same as a run being in progress
+    /// (#358).
+    ///
+    /// The console used to be bound to IsRunning, so it collapsed the instant the run ended and
+    /// took SQL Server's own account of the failure with it. The error text left on screen says
+    /// "see the console for each failure", and the console was gone.
+    ///
+    /// Set as lines arrive rather than computed from Console.Count, so it survives the collection
+    /// being repopulated and can be pinned by a test that never touches a view.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hasConsoleOutput;
+
     public bool CanExecute => HasScript && !IsRunning;
 
     [RelayCommand(CanExecute = nameof(CanExecute))]
@@ -523,6 +537,7 @@ public partial class BackupViewModel : ViewModelBase
         IsRunning = true;
         ClearStatus();
         Console.Clear();
+        HasConsoleOutput = false;
 
         var ct = _runCancellation.Begin();
         var started = DateTime.Now;
@@ -812,9 +827,21 @@ public partial class BackupViewModel : ViewModelBase
     /// since its console was built; this screen now carries it too. InvokeAsync, not Invoke - a
     /// blocked connection thread is how "live" output arrives in bursts.
     /// </summary>
+
+    /// <summary>
+    /// Write one console line, as the run itself does (#358).
+    ///
+    /// The console outliving its run is a property of the screen, not of a SQL connection, and
+    /// staging a real run to prove it would need a server. This writes the same line by the same
+    /// route the run uses.
+    /// </summary>
+    internal void AppendConsoleForTests(string line) => Append(line);
+
     private void Append(string line)
     {
         if (_consoleDispatcher == null || _consoleDispatcher.CheckAccess()) Console.Add(line);
         else _consoleDispatcher.InvokeAsync(() => Console.Add(line));
+
+        HasConsoleOutput = true;
     }
 }

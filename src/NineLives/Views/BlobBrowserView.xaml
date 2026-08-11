@@ -17,6 +17,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -146,7 +147,40 @@
         </Border>
 
         <!-- Summary + Filters -->
-        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,0,0,12"
+        <!-- What happened, on the screen it happened on (#356).
+             This view had neither, so every failure was silent: an expired SAS, a 403, a DNS
+             failure, a genuinely empty container and never having pressed the button all left
+             the identical empty state. The view models were writing SetError and SetStatus the
+             whole time - the shell's status bar only ever renders MainViewModel's own, so those
+             were dead calls into nothing. Pressing Load Backups with nothing selected was a
+             button that visibly did nothing at all. -->
+        <StackPanel Grid.Row="2">
+            <ContentControl Style="{StaticResource ErrorBanner}" />
+
+            <TextBlock Text="{Binding StatusMessage}"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,12">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <!-- SetError writes the status line as well as the banner, because
+                                 not every screen surfaces both. This one does, so without this
+                                 the same sentence appears twice - once in red and once in grey,
+                                 which reads as two separate things having gone wrong. -->
+                            <DataTrigger Binding="{Binding HasError}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </StackPanel>
+
+        <Border Grid.Row="3" Style="{StaticResource CardBorder}" Margin="0,0,0,12"
                 Visibility="{Binding HasFiles, Converter={StaticResource BoolToVis}}">
             <StackPanel>
                 <!-- Summary Stats (set-based, filtered) -->
@@ -230,7 +264,7 @@
         </Border>
 
         <!-- Backup Files Grid -->
-        <Border Grid.Row="3" Style="{StaticResource CardBorder}">
+        <Border Grid.Row="4" Style="{StaticResource CardBorder}">
             <Grid>
                 <!-- Empty State -->
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"

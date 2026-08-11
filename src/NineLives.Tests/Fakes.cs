@@ -253,8 +253,13 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make the restore fail the way a real one does.</summary>
     public Exception? ExecuteThrows { get; set; }
 
+    /// <summary>Refuse the connection, for the screens that have to explain one (#357).</summary>
+    public Exception? TestConnectionThrows { get; set; }
+
     public Task<bool> TestConnectionAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(true);
+        => TestConnectionThrows != null
+            ? Task.FromException<bool>(TestConnectionThrows)
+            : Task.FromResult(true);
 
     public Task<bool?> WouldConnectWithCertificateValidationAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult<bool?>(true);
