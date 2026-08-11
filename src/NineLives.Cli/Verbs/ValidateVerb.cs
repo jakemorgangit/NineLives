@@ -63,7 +63,7 @@ internal static class ValidateVerb
     public static async Task<int> RunAsync(
         CliArguments args, CliServices services, TextWriter output, TextWriter errors)
     {
-        var (sets, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, _, error) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);

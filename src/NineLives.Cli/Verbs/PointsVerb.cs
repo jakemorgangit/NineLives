@@ -63,7 +63,7 @@ internal static class PointsVerb
             return ExitCodes.Usage;
         }
 
-        var (sets, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, _, error) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);

@@ -357,7 +357,10 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             CopyOnly = CopyOnly,
             Compression = Compression,
             Description = $"Copy of {SourceDatabase} from {SourceServer!.ServerName} " +
-                          $"to {TargetServer!.ServerName} as {TargetDatabaseName}"
+                          $"to {TargetServer!.ServerName} as {TargetDatabaseName}",
+
+            // Same as the backup screen (#361): the region has to reach the statement.
+            S3Region = MediumIsBlob ? Container?.S3Region : null
         });
 
         RestoreScript = _restoreGenerator.Generate(ChainForWhatWasWritten(destinations, takenAt),

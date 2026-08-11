@@ -108,7 +108,7 @@ internal static class ScriptVerb
             }
         }
 
-        var (sets, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, sourceContainer, error) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
@@ -131,7 +131,11 @@ internal static class ScriptVerb
             RecoveryMode = args.Has("norecovery") ? RecoveryMode.NoRecovery : RecoveryMode.Recovery,
             StopAt = stopAt,
             StopAtMark = mark,
-            StopBeforeMark = markAt == null
+            StopBeforeMark = markAt == null,
+            // The bucket's region has to reach the statement, not just the listing (#361).
+            // Null for a --server source, which found its backups through an instance's own
+            // history and has no container to ask.
+            S3Region = sourceContainer?.S3Region
         });
 
         if (args.Get("out") is { } path)
