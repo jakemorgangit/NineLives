@@ -180,6 +180,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A chain can no longer take one server's full and another's logs** (#362). Restore
+  points were computed by partitioning the sets on backup TYPE alone. Set grouping goes to
+  real trouble to keep two servers' same-named databases apart - a container holding Sales
+  from SRV01 and SRV02 is the everyday DR pair - and the pairing then discarded the
+  distinction. The app never showed it, because its inventory screen filters to one
+  instance first; the CLI has no such filter and a container source cannot narrow to a
+  server at all, so `9lives script --container backups --database Sales` produced exactly
+  that mixture, and nothing downstream caught it because the identity check compares
+  database names and both are Sales. Chains are now built per database-and-instance and
+  the results concatenated: nothing is dropped and nothing is refused, each server's
+  points are offered and each is internally consistent.
+
 - **A bucket path recorded in msdb restores from a URL, not from a disk** (#375). Whether
   a device is a path or a URL was answered two different ways: the inspection statements
   read the device string, and the restore generator read which FIELD of the file held it.
