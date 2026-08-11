@@ -205,6 +205,16 @@ more detail on the user-facing changes; this file is the short history.
   receipts out of fifty on a loaded runner. A writer that cannot take the lock now writes
   nothing, and the backoff starts short and jitters so it very rarely comes to that.
 
+- **The app refuses an S3 restore its engine cannot run** (#349). The SQL Server 2022+
+  and non-Express check shipped in the CLI's preflights alone, so the app - which is what
+  most restores are run from - promised a safety net in the README that only the other
+  front end provided. The gate now lives in the engine library and both front ends call
+  it, so a 2019 or Express target is refused before anything runs rather than erroring on
+  the server afterwards. It reads the whole chain rather than just the full backup - a
+  full on Azure carried forward by logs in a bucket still needs the connector - and it
+  asks the device the RESTORE will actually name, so a set read back from an instance's
+  own history is judged the same as one discovered by listing.
+
 - **A bucket has an endpoint, not a storage account** (#345). The container details pane
   read the first label of the host name into a row labelled STORAGE ACCOUNT - correct for
   Azure, and "s3" for every AWS bucket. Both the label and the value now follow the
