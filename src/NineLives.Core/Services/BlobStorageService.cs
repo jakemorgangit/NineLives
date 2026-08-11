@@ -150,6 +150,18 @@ public class BlobStorageService : IBlobStorageService
 
     public async Task<bool> VerifyConnectionAsync(BlobContainerConfig config, CancellationToken ct = default)
     {
+        if (config.IsS3)
+        {
+            // The smallest page the provider can answer proves everything the Azure probe
+            // proves: reachability, the bucket, the key pair and its List permission (#51).
+            var (url, keyId, secret, region) = S3Context(config);
+            await S3ListingClient.ListPageAsync(
+                url, keyId, secret, region,
+                prefix: url.BasePrefix.Length > 0 ? url.BasePrefix : null,
+                delimiter: null, maxKeys: 1, continuationToken: null, ct);
+            return true;
+        }
+
         await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         await foreach (var _ in client.GetBlobsAsync(
@@ -165,6 +177,23 @@ public class BlobStorageService : IBlobStorageService
     public async Task<List<string>> ListTopLevelFoldersAsync(
         BlobContainerConfig config, CancellationToken ct = default)
     {
+        if (config.IsS3)
+        {
+            var (url, keyId, secret, region) = S3Context(config);
+            var s3Folders = new List<string>();
+            string? token = null;
+            do
+            {
+                var page = await S3ListingClient.ListPageAsync(
+                    url, keyId, secret, region,
+                    prefix: url.BasePrefix.Length > 0 ? url.BasePrefix : null,
+                    delimiter: "/", maxKeys: null, continuationToken: token, ct);
+                s3Folders.AddRange(page.CommonPrefixes.Select(p => url.Relative(p).TrimEnd('/')));
+                token = page.NextContinuationToken;
+            } while (token != null);
+            return s3Folders;
+        }
+
         await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         var folders = new List<string>();
@@ -198,6 +227,8 @@ public class BlobStorageService : IBlobStorageService
         IProgress<int>? progress,
         CancellationToken ct = default)
     {
+        if (config.IsS3) return await ListS3BackupFilesAsync(config, scope, progress, ct);
+
         await EnsureSignedInAsync(config, ct);
         var client = CreateClient(config);
         var files = new List<BackupFileInfo>();
@@ -216,6 +247,80 @@ public class BlobStorageService : IBlobStorageService
 
         progress?.Report(files.Count);
         return files.OrderBy(f => f.LastModified).ToList();
+    }
+
+    /// <summary>
+    /// The S3 shape of the listing above, and nothing more than the shape (#51): the same
+    /// prefix push-down (ResolvePrefixesAsync is pure string work, and its folder-discovery
+    /// call routes back through the S3 branch), the same inference (ReadBlob neither knows nor
+    /// cares what listed the name), the same progress cadence, the same ordering. BlobUrl comes
+    /// out as s3://endpoint/bucket/key because that is what ContainerUrl is - which is exactly
+    /// the device string the engine half already generates RESTORE ... FROM URL with.
+    /// </summary>
+    private async Task<List<BackupFileInfo>> ListS3BackupFilesAsync(
+        BlobContainerConfig config,
+        BlobListingScope? scope,
+        IProgress<int>? progress,
+        CancellationToken ct)
+    {
+        var (url, keyId, secret, region) = S3Context(config);
+        var files = new List<BackupFileInfo>();
+
+        var prefixes = await ResolvePrefixesAsync(config, scope, ct);
+
+        foreach (var prefix in prefixes)
+        {
+            var listPrefix = url.BasePrefix + (prefix ?? string.Empty);
+            string? token = null;
+            do
+            {
+                var page = await S3ListingClient.ListPageAsync(
+                    url, keyId, secret, region,
+                    prefix: listPrefix.Length > 0 ? listPrefix : null,
+                    delimiter: null, maxKeys: null, continuationToken: token, ct);
+
+                foreach (var obj in page.Objects)
+                {
+                    // A console-made "folder" is a zero-byte object whose key ends in '/'.
+                    // Azure's hierarchy listing never surfaces these; a flat S3 listing does,
+                    // and one is not a backup.
+                    if (obj.Key.EndsWith('/')) continue;
+
+                    ReadBlob(config, url.Relative(obj.Key), obj.SizeBytes, obj.LastModified,
+                        files, obj.ETag);
+                    if (files.Count % 250 == 0) progress?.Report(files.Count);
+                }
+                token = page.NextContinuationToken;
+            } while (token != null);
+        }
+
+        progress?.Report(files.Count);
+        return files.OrderBy(f => f.LastModified).ToList();
+    }
+
+    /// <summary>
+    /// Everything an S3 request needs, resolved once per operation. The key pair lives in the
+    /// SAS slot - same vault entry, same unsaved-token override for Test Connection (#12) -
+    /// as the one string the engine's CREATE CREDENTIAL wants, split here because the listing
+    /// signs with the halves individually (#51).
+    /// </summary>
+    private (S3Url Url, string KeyId, string Secret, string Region) S3Context(
+        BlobContainerConfig config)
+    {
+        var url = S3Url.Parse(config.ContainerUrl);
+
+        var pair = config.UnsavedSasToken ?? _credentialStore.GetSasToken(config);
+        if (string.IsNullOrEmpty(pair))
+            throw new InvalidOperationException(
+                "No S3 credential found. Store the pair AccessKeyId:SecretKey for this " +
+                "container - it lives where the SAS token would.");
+
+        var split = S3Credentials.Split(pair)
+            ?? throw new InvalidOperationException(
+                "The stored S3 credential is not usable: " + S3Credentials.Validate(pair));
+
+        return (url, split.KeyId, split.Secret,
+            config.S3Region ?? url.RegionFromHost ?? "us-east-1");
     }
 
     /// <summary>
