@@ -12,6 +12,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A fresh install says what is missing and where to fix it** (#406). Rendering every screen
+  with no containers and no servers found three that did not. Browse Backups said "Select a
+  container and click Load Backups to browse" when there were no containers to select - an
+  instruction nobody could follow, on the screen that is the natural thing to press when you want
+  to look before committing to anything. Back Up showed two empty dropdowns and no words at all;
+  Copy Database showed three, and since a copy needs two servers, somebody with one configured
+  hit the same wall. The Restore and Exposure screens already named the missing thing, named the
+  screen that fills it and said what would then happen; the other three now do too.
+
 - **Five screens now say what they just did** (#404). Four of them - Settings, SQL Servers,
   Blob Storage and Exposure - carried an error banner and bound nothing to their status line, so
   failures showed and every confirmation, instruction and consequence did not. A config import

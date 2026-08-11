@@ -275,17 +275,16 @@
                                Style="{StaticResource BodyText}"
                                HorizontalAlignment="Center" />
                     <!-- Names the thing actually being asked for. Telling somebody who has chosen a
-                         server to select a container is an instruction they cannot follow (#197). -->
-                    <TextBlock Text="Select a container and click Load Backups to browse."
+                         server to select a container is an instruction they cannot follow (#197) -
+                         and so is telling somebody with no containers at all to select one (#406).
+                         All four cases live in BrowseHint, as one sentence. -->
+                    <TextBlock Text="{Binding BrowseHint}"
                                Style="{StaticResource SecondaryText}"
                                HorizontalAlignment="Center"
-                               Margin="0,4,0,0"
-                               Visibility="{Binding MediumIsBlob, Converter={StaticResource BoolToVis}}" />
-                    <TextBlock Text="Select a server and click Load Backups to read what it has backed up."
-                               Style="{StaticResource SecondaryText}"
-                               HorizontalAlignment="Center"
-                               Margin="0,4,0,0"
-                               Visibility="{Binding MediumIsSharedPath, Converter={StaticResource BoolToVis}}" />
+                               TextWrapping="Wrap"
+                               MaxWidth="440"
+                               TextAlignment="Center"
+                               Margin="0,4,0,0" />
                 </StackPanel>
 
                 <!-- DataGrid -->
