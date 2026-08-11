@@ -40,6 +40,10 @@
 
             <ContentControl Style="{StaticResource ErrorBanner}" Margin="0,0,0,12" />
 
+            <!-- "Cancelling..." and "Sweep cancelled." used to reach nothing, so pressing
+                 Stop on a long sweep looked like it had done nothing (#404). -->
+            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource StatusLine}" />
+
             <ItemsControl ItemsSource="{Binding Rows}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>

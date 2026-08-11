@@ -29,6 +29,9 @@
             <TextBlock Text="Configure the containers holding your backups - Azure Blob Storage, or any S3-compatible bucket."
                        Style="{StaticResource SecondaryText}"
                        Margin="0,4,0,0" />
+            <!-- What this screen just did. Its confirmations, instructions and
+                 consequences used to reach nothing at all (#404). -->
+            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource StatusLine}" />
         </StackPanel>
 
         <Grid Grid.Row="1">

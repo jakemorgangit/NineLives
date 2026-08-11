@@ -12,6 +12,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Five screens now say what they just did** (#404). Four of them - Settings, SQL Servers,
+  Blob Storage and Exposure - carried an error banner and bound nothing to their status line, so
+  failures showed and every confirmation, instruction and consequence did not. A config import
+  reported what it had added and updated to nobody, and the sentence telling you where to go and
+  look went with it. An export's "the file holds no secrets" - the one thing worth knowing before
+  emailing it to a colleague - was never shown. "Enter the new SAS token below" never appeared
+  beside the box it was about. Pressing Stop on an exposure sweep looked like it had done
+  nothing. And on History, the one screen with no banner by design, an error was drawn in exactly
+  the same grey as a success, so a refusal to destroy a restore's evidence read like "Script
+  copied to clipboard".
+
 - **Execute is no longer live while a restore is running** (#401). The button took its enabled
   state from the same property that supplies the "why you cannot press this" sentence - and that
   sentence is deliberately empty during a run, because mid-restore the control anybody wants is
