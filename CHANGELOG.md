@@ -12,18 +12,28 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
-- **S3-compatible object storage, the engine half** (#51). An \`s3://\` container is just
+- **S3-compatible object storage, the listing half** (#51). The app can now browse an
+  `s3://` container: a hand-rolled SigV4 signer and a minimal ListObjectsV2 client - one
+  signed GET, paged, path-style over TLS - behind the same storage interface Azure listings
+  use, so discovery, set grouping, chain building and the restore screens neither know nor
+  care which provider answered. No SDK: the signer is pinned stage by stage against AWS's
+  published test vectors. The region resolves configured, then host name, then us-east-1
+  (the engine's own default); Test Connection and `add-container` validation now genuinely
+  prove an S3 key pair reaches its bucket; and a refusal surfaces the provider's own error
+  sentence (AccessDenied and friends explain themselves). The storage-screen surfaces
+  follow next.
+
+- **S3-compatible object storage, the engine half** (#51). An `s3://` container is just
   another entry in the list - the URL's own scheme picks the provider, so existing configs
-  migrate by doing nothing. The credential is the pair \`AccessKeyId:SecretKey\`, which is the
+  migrate by doing nothing. The credential is the pair `AccessKeyId:SecretKey`, which is the
   engine's own secret format, so it rides the whole existing SAS pipeline unchanged (vault
   slot, in-memory member, export-strips-secrets, environment variable) with a shape check at
-  entry. The server-side credential branches to \`IDENTITY = 'S3 Access Key'\`; backups
-  overwrite with \`FORMAT\` (the S3 connector has no append), and both generators emit the
-  optional region as \`BACKUP_OPTIONS\`/\`RESTORE_OPTIONS\` JSON on every statement. A hard
-  preflight refuses an S3 restore below SQL Server 2022 or on Express - a capability \`--force\`
-  cannot conjure - before \`WITH REPLACE\` drops anything. \`add-container\` and \`--ephemeral\`
-  take S3 endpoints. Browsing an S3 bucket (the listing client) and the storage-screen
-  surfaces follow next.
+  entry. The server-side credential branches to `IDENTITY = 'S3 Access Key'`; backups
+  overwrite with `FORMAT` (the S3 connector has no append), and both generators emit the
+  optional region as `BACKUP_OPTIONS`/`RESTORE_OPTIONS` JSON on every statement. A hard
+  preflight refuses an S3 restore below SQL Server 2022 or on Express - a capability `--force`
+  cannot conjure - before `WITH REPLACE` drops anything. `add-container` and `--ephemeral`
+  take S3 endpoints.
 
 - **The execution verbs end as data, and receipts know their origin** (#303). `--json` on
   restore, rehearse and backup puts the ending on stdout machine-shaped: outcome, chain,
