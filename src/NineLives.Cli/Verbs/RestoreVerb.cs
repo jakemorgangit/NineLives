@@ -231,7 +231,8 @@ internal static class RestoreVerb
         // that says "this WOULD be refused" is the pipeline's cheap rehearsal of its own DR step.
         // With relocation, the space check judges the volumes the files actually LAND on.
         var preflight = await Preflights.RunAsync(
-            services, target, chain, targetDatabase, withReplace, args.Has("force"), moves);
+            services, target, chain, targetDatabase, withReplace, args.Has("force"), moves,
+            sourceContainer, line => errors.WriteLine(line));
 
         errors.WriteLine($"Chain: {point.TypeDisplay} reaching " +
                          $"{(stopAt ?? point.Timestamp):yyyy-MM-dd HH:mm:ss}, restoring " +

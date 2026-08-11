@@ -105,7 +105,7 @@ The full reference ships inside the exe: `9lives help` for the overview, `9lives
 9lives restore --container backups --database Sales --target target --at "%POINT_IN_TIME%" --execute
 ```
 
-Two verbs execute, and they are built out of refusals: `restore` and `rehearse` run nothing without `--execute`; overwriting an existing database is said with `--with-replace`, its own flag that `--force` cannot substitute for; and the same preflights the app fires - file readability, version direction (error 3169), the TDE certificate (error 33111) - refuse before anything is dropped, `--force` being the deliberate override for evidence only. Executed runs land in the app's History and notify the same webhooks, so `9lives rehearse --execute` on a schedule is nightly proof with receipts - no SQL Agent required.
+Two verbs execute, and they are built out of refusals: `restore` and `rehearse` run nothing without `--execute`; overwriting an existing database is said with `--with-replace`, its own flag that `--force` cannot substitute for; and the same preflights the app fires - the server-side credential the restore authenticates with, file readability, version direction (error 3169), the TDE certificate (error 33111) - refuse before anything is dropped, `--force` being the deliberate override for evidence only. Executed runs land in the app's History and notify the same webhooks, so `9lives rehearse --execute` on a schedule is nightly proof with receipts - no SQL Agent required.
 
 ## Features
 

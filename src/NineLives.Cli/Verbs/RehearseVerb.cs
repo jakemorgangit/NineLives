@@ -126,6 +126,25 @@ internal static class RehearseVerb
         var sourceDatabase = args.Get("database")!;
         var scratch = RehearsalPlanner.ScratchName(sourceDatabase, DateTime.Now);
 
+        // The credential the rehearsal authenticates with, on the TARGET instance (#353).
+        //
+        // Ensured before the file list rather than before the restore: FILELISTONLY reads the
+        // backup itself, so without this a scheduled rehearsal against a container fails at
+        // the read and reports NOT PROVEN - which says the backup is bad when the truth is
+        // that this host was never told how to reach it.
+        if (sourceContainer != null)
+        {
+            var credential = await BlobCredentialPreflight.EnsureAsync(
+                services.Store, services.Sql, null, sourceContainer, target,
+                line => errors.WriteLine(line));
+
+            if (!credential.CanProceed)
+            {
+                errors.WriteLine($"REFUSED: {credential.Refusal}");
+                return ExitCodes.Failed;
+            }
+        }
+
         // Relocation is not optional here: the scratch copy must never collide with the real
         // database's files, so every file moves to the target's defaults under the scratch name.
         var devices = chain.FullSet.Files
