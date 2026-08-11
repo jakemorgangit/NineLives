@@ -1144,6 +1144,8 @@ public class SqlServerService : ISqlServerService
             return BlobCredentialIdentity.SharedAccessSignature;
         if (identity.Equals("Managed Identity", StringComparison.OrdinalIgnoreCase))
             return BlobCredentialIdentity.ManagedIdentity;
+        if (identity.Equals("S3 Access Key", StringComparison.OrdinalIgnoreCase))
+            return BlobCredentialIdentity.S3AccessKey;
         return BlobCredentialIdentity.Other;
     }
 
@@ -1530,6 +1532,30 @@ public class SqlServerService : ISqlServerService
         }
 
         return orphans;
+    }
+
+    public async Task<int?> GetEngineEditionAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = CreateConnection(server);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int)";
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return result is int edition ? edition : null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // No verdict from silence: an instance that will not answer must not be treated
+            // as any particular edition.
+            return null;
+        }
     }
 
     public async Task<Dictionary<string, long>> GetVolumeFreeSpaceAsync(

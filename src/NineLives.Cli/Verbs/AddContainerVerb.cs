@@ -1,4 +1,5 @@
 using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Cli.Verbs;
 
@@ -12,8 +13,9 @@ internal static class AddContainerVerb
     public static readonly VerbSpec Spec = new(
         "add-container",
         "Add or update a blob container, and prove the SAS reaches it",
-        "9lives add-container --name NAME --url CONTAINER_URL [--sas TOKEN] [--no-validate]",
-        Valued: ["name", "url", "sas"],
+        "9lives add-container --name NAME --url CONTAINER_URL [--sas TOKEN] " +
+        "[--region REGION] [--no-validate]",
+        Valued: ["name", "url", "sas", "region"],
         Switches: ["no-validate"],
         Options:
         [
@@ -23,7 +25,12 @@ internal static class AddContainerVerb
                 "again with the new token."),
             ("--url CONTAINER_URL", "The container URL, no SAS in it: " +
                 "https://account.blob.core.windows.net/container"),
-            ("--sas TOKEN", "The SAS token, with or without its leading '?'. Stored in the " +
+            ("--region REGION", "For an s3:// container: the bucket's region, when the " +
+                "provider needs one said. The engine assumes us-east-1 otherwise; AWS-style " +
+                "endpoints usually carry the region in the host name and need nothing here."),
+            ("--sas TOKEN", "The credential. For an https:// Azure container: the SAS token, " +
+                "with or without its leading '?'. For an s3:// container: the pair " +
+                "AccessKeyId:SecretKey - the engine's own secret format. Stored in the " +
                 "Windows Credential Manager exactly as the app stores it. Prefer the " +
                 "NINELIVES_SAS environment variable in scripts - a variable stays out of " +
                 "shell history and process listings; a flag does not."),
@@ -73,9 +80,21 @@ internal static class AddContainerVerb
         var sas = args.Get("sas") ?? Environment.GetEnvironmentVariable("NINELIVES_SAS");
         if (string.IsNullOrEmpty(sas))
         {
-            errors.WriteLine("add-container needs the token: --sas, or the NINELIVES_SAS " +
+            errors.WriteLine("add-container needs the credential: --sas, or the NINELIVES_SAS " +
                              "environment variable (preferred in scripts - it stays out of " +
-                             "process listings).");
+                             "process listings). For an s3:// URL this is the pair " +
+                             "AccessKeyId:SecretKey; for https:// it is the SAS token.");
+            return ExitCodes.Usage;
+        }
+
+        var isS3 = url.StartsWith("s3://", StringComparison.OrdinalIgnoreCase);
+
+        // An s3:// endpoint's credential is the pair AccessKeyId:SecretKey (#51): the engine's
+        // own secret format, validated here so a malformed one is refused before it is stored
+        // rather than discovered as an authentication failure at restore time.
+        if (isS3 && S3Credentials.Validate(sas) is { } shapeError)
+        {
+            errors.WriteLine(shapeError);
             return ExitCodes.Usage;
         }
 
@@ -87,10 +106,13 @@ internal static class AddContainerVerb
         container.Name = name;
         container.ContainerUrl = url.TrimEnd('/');
         container.AuthMode = BlobAuthMode.SasToken;
+        // Region is addressing, stored on the container; null clears any stale value.
+        container.S3Region = isS3 ? args.Get("region") : null;
 
         if (existing == null) config.BlobContainers.Add(container);
         services.Store.SaveConfig(config);
-        services.Store.SaveSasToken(container, sas.TrimStart('?'));
+        // The pair goes in exactly as given; only a SAS carries a leading '?' to trim.
+        services.Store.SaveSasToken(container, isS3 ? sas : sas.TrimStart('?'));
 
         errors.WriteLine($"{(existing == null ? "Added" : "Updated")} container '{name}' -> " +
                          $"{container.ContainerUrl}.");

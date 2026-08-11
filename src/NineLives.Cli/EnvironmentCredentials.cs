@@ -46,12 +46,19 @@ internal static class EnvironmentCredentials
         var url = env("NINELIVES_CONTAINER_URL");
         if (string.IsNullOrWhiteSpace(url)) return null;
 
+        // The credential comes from NINELIVES_SAS for either provider - it is one string
+        // in both cases (a SAS token, or the S3 AccessKeyId:SecretKey pair) and rides the
+        // same in-memory member (#51). No separate S3 variable is needed.
+        var secret = env("NINELIVES_SAS");
         return new BlobContainerConfig
         {
             Id = "env-container",
             Name = env("NINELIVES_CONTAINER_NAME") ?? "env",
             ContainerUrl = url,
-            UnsavedSasToken = string.IsNullOrWhiteSpace(env("NINELIVES_SAS")) ? null : env("NINELIVES_SAS")
+            S3Region = url.StartsWith("s3://", StringComparison.OrdinalIgnoreCase)
+                ? env("NINELIVES_S3_REGION")
+                : null,
+            UnsavedSasToken = string.IsNullOrWhiteSpace(secret) ? null : secret
         };
     }
 }

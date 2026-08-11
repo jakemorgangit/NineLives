@@ -8,6 +8,14 @@ public class RestoreScriptGenerator
     public string Generate(BackupChain chain, RestoreOptions options)
     {
         var sb = new StringBuilder();
+
+        // Region is an S3 concept (#51): meaningful only when the chain's devices are s3://,
+        // and a stale value from a previous source must not leak into another provider's
+        // statements.
+        var s3 = chain.FullSet.Files.Any(f =>
+            !f.IsOnDisk && f.BlobUrl.StartsWith("s3://", StringComparison.OrdinalIgnoreCase));
+        if (!s3) options.S3Region = null;
+
         var dbName = EscapeName(options.TargetDatabaseName);
         var hasDiffs = chain.DiffSets.Count > 0;
         var hasLogs = chain.LogSets.Count > 0;
@@ -213,6 +221,13 @@ public class RestoreScriptGenerator
             sb.AppendLine("         CHECKSUM,");
         if (options.ContinueAfterError)
             sb.AppendLine("         CONTINUE_AFTER_ERROR,");
+
+        // On EVERY statement of the chain, the same rule as STOPAT: each RESTORE stands
+        // alone against the endpoint (#51).
+        if (!string.IsNullOrWhiteSpace(options.S3Region))
+            sb.AppendLine("         RESTORE_OPTIONS = '{\"s3\": {\"region\":\"" +
+                          TSql.EscapeLiteral(options.S3Region) + "\"}}',");
+
         sb.AppendLine($"         STATS = {options.StatsPercent};");
     }
 

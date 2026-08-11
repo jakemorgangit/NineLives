@@ -68,6 +68,35 @@ internal static class Preflights
             .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
             .ToList();
 
+        // 0 (checked here, refused hard): can this engine speak S3 at all (#51)? The S3
+        // connector arrived in SQL Server 2022 and is not in Express - a capability, not
+        // evidence, so --force cannot override it: the engine would simply error after WITH
+        // REPLACE had already dropped the target. No verdict from silence, as ever.
+        if (devices.Any(d => d.StartsWith("s3://", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                var s3Major = await services.Sql.GetProductMajorVersionAsync(target);
+                if (s3Major is { } m && m < 16)
+                    refusals.Add(
+                        $"This chain restores from S3-compatible storage, and {target.ServerName} " +
+                        $"is {VersionCompatibility.Describe(m)} - the S3 connector arrived in SQL " +
+                        "Server 2022. Restore onto a 2022+ instance, or from an Azure or shared-" +
+                        "path copy of the backups.");
+
+                var edition = await services.Sql.GetEngineEditionAsync(target);
+                if (edition == 4)
+                    refusals.Add(
+                        $"This chain restores from S3-compatible storage, and {target.ServerName} " +
+                        "is Express edition - the S3 connector is not available in Express, on " +
+                        "any version. Restore onto a Standard, Developer or Enterprise instance.");
+            }
+            catch
+            {
+                // The instance would not answer; the restore itself will say so properly.
+            }
+        }
+
         // 5. Will it physically fit (#297)? The GUI checks before WITH REPLACE drops
         // anything, and this front end is the one most often aimed at a freshly provisioned
         // VM with small disks. FILELISTONLY says how big each file lands, the target says

@@ -12,6 +12,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **S3-compatible object storage, the engine half** (#51). An \`s3://\` container is just
+  another entry in the list - the URL's own scheme picks the provider, so existing configs
+  migrate by doing nothing. The credential is the pair \`AccessKeyId:SecretKey\`, which is the
+  engine's own secret format, so it rides the whole existing SAS pipeline unchanged (vault
+  slot, in-memory member, export-strips-secrets, environment variable) with a shape check at
+  entry. The server-side credential branches to \`IDENTITY = 'S3 Access Key'\`; backups
+  overwrite with \`FORMAT\` (the S3 connector has no append), and both generators emit the
+  optional region as \`BACKUP_OPTIONS\`/\`RESTORE_OPTIONS\` JSON on every statement. A hard
+  preflight refuses an S3 restore below SQL Server 2022 or on Express - a capability \`--force\`
+  cannot conjure - before \`WITH REPLACE\` drops anything. \`add-container\` and \`--ephemeral\`
+  take S3 endpoints. Browsing an S3 bucket (the listing client) and the storage-screen
+  surfaces follow next.
+
 - **The execution verbs end as data, and receipts know their origin** (#303). `--json` on
   restore, rehearse and backup puts the ending on stdout machine-shaped: outcome, chain,
   point reached, measured duration - the rehearsal's proof carrying the real RTO number -

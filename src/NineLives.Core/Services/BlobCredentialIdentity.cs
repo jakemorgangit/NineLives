@@ -23,6 +23,13 @@ public enum BlobCredentialIdentity
     /// </summary>
     ManagedIdentity,
 
+    /// <summary>
+    /// WITH IDENTITY = 'S3 Access Key' - the S3 connector's identity (#51), SQL Server 2022+.
+    /// The secret is the literal pair 'AccessKeyId:SecretKey'. Only meaningful under an
+    /// s3:// credential name, which is the only place this app writes one.
+    /// </summary>
+    S3AccessKey,
+
     /// <summary>Anything else: a Windows account, a storage account key, a mistake. Not usable.</summary>
     Other
 }
@@ -42,7 +49,9 @@ public readonly record struct BlobCredentialStatus(BlobCredentialIdentity Kind, 
 
     /// <summary>Whether a RESTORE FROM URL can authenticate with it as it stands.</summary>
     public bool CanRestoreFromUrl =>
-        Kind is BlobCredentialIdentity.SharedAccessSignature or BlobCredentialIdentity.ManagedIdentity;
+        Kind is BlobCredentialIdentity.SharedAccessSignature
+             or BlobCredentialIdentity.ManagedIdentity
+             or BlobCredentialIdentity.S3AccessKey;
 
     /// <summary>Nothing of that name on the server.</summary>
     public static BlobCredentialStatus Missing => new(BlobCredentialIdentity.Missing, null);

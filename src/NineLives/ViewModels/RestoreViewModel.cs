@@ -1921,6 +1921,11 @@ public partial class RestoreViewModel : ViewModelBase
         options.StopAtMark = SelectedLogMark?.Name;
         options.StopBeforeMark = StopBeforeMark;
 
+        // The source container's region rides into the RESTORE_OPTIONS when the source is S3
+        // (#51). The generator ignores it - and clears it - for any non-S3 chain, so a stale
+        // value cannot leak between sources.
+        options.S3Region = SelectedContainer?.S3Region;
+
         GeneratedScript = _scriptGenerator.Generate(chain!, options);
         HasScript = true;
     }
