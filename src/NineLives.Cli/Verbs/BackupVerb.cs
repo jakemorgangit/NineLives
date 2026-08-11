@@ -20,9 +20,9 @@ internal static class BackupVerb
         "backup",
         "Generate, and with --execute run, a backup of a database",
         "9lives backup (--container NAME | --path DIR) --server NAME --database DB " +
-        "[--type full|diff|log] [--stripes N] [--not-copy-only] [--execute]",
+        "[--type full|diff|log] [--stripes N] [--not-copy-only] [--execute] [--json]",
         Valued: ["container", "path", "server", "database", "type", "stripes"],
-        Switches: ["execute", "not-copy-only"],
+        Switches: ["execute", "not-copy-only", "json"],
         Options:
         [
             ("--container NAME", "A blob container configured in the app, as the destination. " +
@@ -40,7 +40,10 @@ internal static class BackupVerb
                 "full RESETS THE DIFFERENTIAL BASE on the source: every differential the " +
                 "schedule takes afterwards depends on this file. A real choice, said loudly."),
             ("--execute", "Actually run it. Without this, the script prints and nothing is " +
-                "touched.")
+                "touched."),
+            ("--json", "The ending as data on stdout - outcome, type, destinations, " +
+                "duration, history id - in place of the script or beside the prose, which " +
+                "stays on stderr.")
         ],
         Notes:
         [
@@ -187,22 +190,60 @@ internal static class BackupVerb
                          $"{destinations.Count} file(s), " +
                          (copyOnly && type != BackupType.Differential ? "copy-only." : "plain."));
 
+        var json = args.Has("json");
+
         if (!args.Has("execute"))
         {
-            output.WriteLine(script);
+            if (json)
+                CliRunResult.Write(output, new
+                {
+                    Verb = "backup",
+                    Outcome = "Generated",
+                    Server = server.ServerName,
+                    Database = database,
+                    Type = type.Value.ToString(),
+                    CopyOnly = copyOnly && type != BackupType.Differential,
+                    Destinations = destinations,
+                    Script = script
+                });
+            else
+                output.WriteLine(script);
             errors.WriteLine("Nothing was executed. Add --execute to run this.");
             return ExitCodes.Ok;
         }
 
-        return await ExecuteAsync(services, server, script, database, type.Value, errors, ct);
+        return await ExecuteAsync(
+            services, server, script, database, type.Value, destinations,
+            json ? output : null, errors, ct);
     }
 
     private static async Task<int> ExecuteAsync(
         CliServices services, ServerConnection server, string script, string database,
-        BackupType type, TextWriter errors, CancellationToken ct)
+        BackupType type, List<string> destinations, TextWriter? jsonOut, TextWriter errors,
+        CancellationToken ct)
     {
         var startedAt = DateTime.Now;
         var log = new System.Text.StringBuilder();
+
+        // The run's ending as data (#303), when asked for.
+        void EmitResult(string outcome, DateTime completedAt, string historyId, string? error = null)
+        {
+            if (jsonOut == null) return;
+            CliRunResult.Write(jsonOut, new
+            {
+                Verb = "backup",
+                Outcome = outcome,
+                Server = server.ServerName,
+                Database = database,
+                Type = type.ToString(),
+                Destinations = destinations,
+                StartedAt = startedAt,
+                CompletedAt = completedAt,
+                DurationSeconds = Math.Round((completedAt - startedAt).TotalSeconds, 1),
+                HistoryId = historyId,
+                Error = error
+            });
+        }
 
         void Progress(string message)
         {
@@ -218,8 +259,9 @@ internal static class BackupVerb
             await services.Sql.ExecuteWithProgressAsync(server, script, Progress, ct);
 
             var completedAt = DateTime.Now;
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 Kind = "Backup",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
@@ -230,7 +272,9 @@ internal static class BackupVerb
                 Outcome = RestoreOutcome.Succeeded,
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            EmitResult("Succeeded", completedAt, receipt.Id);
 
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Succeeded, "Backup", database, server.ServerName,
@@ -245,8 +289,9 @@ internal static class BackupVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine("Cancelled from the terminal.");
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 Kind = "Backup",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
@@ -258,7 +303,9 @@ internal static class BackupVerb
                 ErrorMessage = "Cancelled from the terminal.",
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            EmitResult("Cancelled", completedAt, receipt.Id, "Cancelled from the terminal.");
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Backup", database, server.ServerName,
                 "Cancelled - any file already written is incomplete and cannot be restored " +
@@ -272,8 +319,9 @@ internal static class BackupVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine(ex.Message);
-            services.History.Append(new RestoreHistoryEntry
+            var receipt = new RestoreHistoryEntry
             {
+                Origin = "CLI",
                 Kind = "Backup",
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
@@ -285,7 +333,9 @@ internal static class BackupVerb
                 ErrorMessage = ex.Message,
                 Script = script,
                 Log = log.ToString()
-            });
+            };
+            services.History.Append(receipt);
+            EmitResult("Failed", completedAt, receipt.Id, ex.Message);
 
             services.Notifier.Notify(new RunNotification(
                 RunPhase.Problem, "Backup", database, server.ServerName,

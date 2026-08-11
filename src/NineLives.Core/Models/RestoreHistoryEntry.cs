@@ -45,6 +45,13 @@ public sealed class RestoreHistoryEntry
     /// </summary>
     public string Kind { get; set; } = "Restore";
 
+    /// <summary>
+    /// "App" or "CLI" (#303) - which front end acted. A 3am CLI restore reads differently in
+    /// an incident review than a clicked one. A string for the same cross-version tolerance
+    /// as Kind; entries written before this field existed read as "App", which they were.
+    /// </summary>
+    public string Origin { get; set; } = "App";
+
     public RestoreOutcome Outcome { get; set; }
 
     /// <summary>What went wrong, when something did.</summary>
@@ -80,5 +87,6 @@ public sealed class RestoreHistoryEntry
     public string Summary => $"{TargetDatabase} on {ServerName} - {OutcomeDisplay}";
 
     public string Detail =>
-        $"{ChainSummary}{(RestorePointTimestamp.HasValue ? $"  |  point {RestorePointTimestamp:yyyy-MM-dd HH:mm:ss}" : "")}  |  {DurationDisplay}";
+        $"{ChainSummary}{(RestorePointTimestamp.HasValue ? $"  |  point {RestorePointTimestamp:yyyy-MM-dd HH:mm:ss}" : "")}  |  {DurationDisplay}" +
+        (Origin is "App" or "" ? string.Empty : $"  |  via {Origin}");
 }
