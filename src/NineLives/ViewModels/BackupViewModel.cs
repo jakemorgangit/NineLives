@@ -770,7 +770,31 @@ public partial class BackupViewModel : ViewModelBase
     /// WITH CHECKSUM follows the backup's own setting - verifying checksums that were never
     /// written fails the verify for a backup that is fine.
     /// </summary>
-    [RelayCommand]
+    /// <summary>
+    /// Pressable only when there is something to verify and nothing being verified (#402).
+    ///
+    /// The second half is what was missing. RESTORE VERIFYONLY reads the whole backup - minutes,
+    /// on a real database - and the button looked exactly as it had before, so the natural
+    /// response was to press it again. That call begins a new cancellation, which cancels the
+    /// verify in flight: every minute of reading thrown away, and a console reading "Verify
+    /// cancelled." immediately followed by "Verifying...", which looks like the app changed its
+    /// mind rather than like a button that should have been disabled.
+    /// </summary>
+    public bool CanVerify => CanVerifyLastBackup && !IsVerifying;
+
+    partial void OnIsVerifyingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanVerify));
+        VerifyLastBackupCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnCanVerifyLastBackupChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanVerify));
+        VerifyLastBackupCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanVerify))]
     private async Task VerifyLastBackupAsync()
     {
         if (Server == null || _lastWrittenDevices.Count == 0) return;

@@ -286,6 +286,15 @@
                                 Visibility="{Binding CanVerifyLastBackup, Converter={StaticResource BoolToVis}}"
                                 Padding="16,8" Margin="0,0,8,8"
                                 ToolTip="RESTORE VERIFYONLY over the files the last run wrote. A backup nobody has verified is a hope, not a backup." />
+
+                        <!-- Says it is happening (#402). Reading a whole backup takes minutes, and
+                             the button used to look identical throughout - so it got pressed
+                             again, which cancelled the verify and started it over. -->
+                        <TextBlock Text="Verifying the backup..."
+                                   Style="{StaticResource SecondaryText}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,8"
+                                   Visibility="{Binding IsVerifying, Converter={StaticResource BoolToVis}}" />
                     </WrapPanel>
 
                     <!-- Where the files will land, readable before anything is written. -->

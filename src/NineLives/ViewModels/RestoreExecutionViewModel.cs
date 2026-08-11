@@ -180,8 +180,24 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// The server-side credential check (#115 seam 5). A refusal has written nothing, so the run is
     /// abandoned without a history entry - it was never attempted.
     /// </param>
+    /// <summary>
+    /// Stage a run in progress without one, for the screens that have to behave differently
+    /// while a restore is running (#401). A real run needs a server.
+    /// </summary>
+    internal void SetExecutingForTests(bool value) => IsExecuting = value;
+
     public async Task RunAsync(RestoreRun run, Func<Action<string>, Task<CredentialPreflight>> preflight)
     {
+        // The last line of defence (#401). The screen's button is gated, but this is also reached
+        // from the rehearsal path, and the cost of re-entering is not a wasted call: the first
+        // thing below is a cancellation Begin(), which would abandon the restore already running
+        // and leave its target mid-chain in RESTORING.
+        if (IsExecuting)
+        {
+            SetError("A restore is already running. Stop it first, or wait for it to finish.");
+            return;
+        }
+
         // What the notifications call the run. A rehearsal's TARGET is the scratch copy, which
         // is an implementation detail - the thing being PROVEN is the source database, and that
         // is the name a Teams channel can recognise.
