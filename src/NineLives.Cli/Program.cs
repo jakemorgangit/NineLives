@@ -104,6 +104,7 @@ internal static class Program
                 "script" => await ScriptVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "validate" => await ValidateVerb.RunAsync(args, services, Console.Out, Console.Error),
                 "exposure" => await ExposureVerb.RunAsync(args, services, Console.Out, Console.Error),
+                "backup" => await BackupVerb.RunAsync(args, services, Console.Out, Console.Error, interrupt.Token),
                 "restore" => await RestoreVerb.RunAsync(args, services, Console.Out, Console.Error, interrupt.Token),
                 "rehearse" => await RehearseVerb.RunAsync(args, services, Console.Out, Console.Error, interrupt.Token),
                 _ => ExitCodes.Usage

@@ -55,8 +55,12 @@ public class BackupScriptGenerator
 
     private static void AppendBackup(StringBuilder sb, BackupOptions options)
     {
+        // BACKUP LOG for a log backup; BACKUP DATABASE for full and differential, the
+        // differential distinguished in the WITH list (#300).
+        var statement = options.Type == BackupType.TransactionLog ? "BACKUP LOG" : "BACKUP DATABASE";
+
         // Exact, not unwrapped (#294): this name came from the server's own database list.
-        sb.AppendLine($"BACKUP DATABASE {TSql.QuoteNameExact(options.DatabaseName)}");
+        sb.AppendLine($"{statement} {TSql.QuoteNameExact(options.DatabaseName)}");
         sb.AppendLine($"    TO {DeviceClause(options)}");
         sb.AppendLine($"    WITH {string.Join(", ", WithOptions(options))};");
         sb.AppendLine("GO");
@@ -85,8 +89,14 @@ public class BackupScriptGenerator
     {
         var with = new List<string>();
 
-        // First, because it is the one that changes what happens to the SOURCE.
-        if (options.CopyOnly) with.Add("COPY_ONLY");
+        // DIFFERENTIAL first when it applies - it is what makes this statement a different
+        // kind of backup, not an option on one (#300).
+        if (options.Type == BackupType.Differential) with.Add("DIFFERENTIAL");
+
+        // First of the options proper, because it is the one that changes what happens to
+        // the SOURCE. A differential has no copy-only form - and does not move the base
+        // anyway, which is what COPY_ONLY protects - so the flag is ignored for one.
+        if (options.CopyOnly && options.Type != BackupType.Differential) with.Add("COPY_ONLY");
 
         if (options.Compression) with.Add("COMPRESSION");
         if (options.Checksum) with.Add("CHECKSUM");
