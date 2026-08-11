@@ -23,6 +23,10 @@ public class BackupScriptGenerator
 
         var sb = new StringBuilder();
 
+        // Region is an S3 concept; a stale value on an Azure or share backup must not leak
+        // into the statement (#51).
+        if (!IsS3(options)) options.S3Region = null;
+
         AppendHeader(sb, options);
         AppendBackup(sb, options);
 
@@ -52,6 +56,11 @@ public class BackupScriptGenerator
 
         sb.AppendLine();
     }
+
+    /// <summary>An s3:// destination selects the S3 connector's rules (#51).</summary>
+    private static bool IsS3(BackupOptions options) =>
+        options.Destinations.Count > 0 &&
+        options.Destinations[0].StartsWith("s3://", StringComparison.OrdinalIgnoreCase);
 
     private static void AppendBackup(StringBuilder sb, BackupOptions options)
     {
@@ -106,12 +115,21 @@ public class BackupScriptGenerator
                      $"SERVER CERTIFICATE = {TSql.QuoteNameExact(options.EncryptionCertificate)})");
 
         // FORMAT implies INIT, and naming both is noise at best. FORMAT also discards whatever the
-        // media set already held, so it is never inferred - only ever asked for.
-        if (options.Format) with.Add("FORMAT");
+        // media set already held, so it is never inferred - only ever asked for. EXCEPT on S3
+        // (#51): the S3 connector has no append at all, INIT is rejected, and overwrite is
+        // spelled FORMAT - safe here precisely because every destination carries a fresh
+        // timestamped name, so there is never an existing backup for FORMAT to discard.
+        if (options.Format || IsS3(options)) with.Add("FORMAT");
         else if (options.Init) with.Add("INIT");
 
         if (!string.IsNullOrWhiteSpace(options.Description))
             with.Add($"DESCRIPTION = N'{TSql.EscapeLiteral(options.Description)}'");
+
+        // The engine assumes us-east-1 when unsaid; a provider that needs another region
+        // takes it as JSON (#51).
+        if (!string.IsNullOrWhiteSpace(options.S3Region))
+            with.Add("BACKUP_OPTIONS = '{\"s3\": {\"region\":\"" +
+                     TSql.EscapeLiteral(options.S3Region) + "\"}}'");
 
         with.Add($"STATS = {options.StatsPercent}");
 

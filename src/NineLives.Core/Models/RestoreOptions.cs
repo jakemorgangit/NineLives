@@ -11,6 +11,13 @@ public enum RecoveryMode
 
 public class RestoreOptions
 {
+    /// <summary>
+    /// The bucket's region for an s3:// chain (#51), emitted as RESTORE_OPTIONS JSON on
+    /// every statement. Ignored - and cleared by the generator - when the chain's devices
+    /// are not S3.
+    /// </summary>
+    public string? S3Region { get; set; }
+
     public string TargetDatabaseName { get; set; } = string.Empty;
     public bool WithReplace { get; set; } = true;
     public RecoveryMode RecoveryMode { get; set; } = RecoveryMode.Recovery;

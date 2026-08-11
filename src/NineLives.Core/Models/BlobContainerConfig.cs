@@ -93,6 +93,22 @@ public class BlobContainerConfig : INotifyPropertyChanged
     public string ContainerUrl { get; set; } = string.Empty;
 
     /// <summary>
+    /// Whether this container is S3-compatible object storage (#51). Derived from the URL's
+    /// own scheme - an s3:// endpoint IS the provider answer, there is no second field to
+    /// keep in sync, and every existing config migrates by doing nothing.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsS3 => ContainerUrl.StartsWith("s3://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The bucket's region, for providers that need one (#51). Addressing, not a secret - it
+    /// rides in the config and in exports. Null means the provider's default (the engine
+    /// assumes us-east-1); AWS-style endpoints usually carry the region in the host name and
+    /// need nothing here.
+    /// </summary>
+    public string? S3Region { get; set; }
+
+    /// <summary>
     /// How the app signs in to this container (#29). Absent from config files written before this
     /// existed, which deserialise to <see cref="BlobAuthMode.SasToken"/> - the behaviour they
     /// already had, so no migration is needed.

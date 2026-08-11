@@ -52,6 +52,14 @@ public static class BlobCredentialStatement
                 $"WITH IDENTITY = 'SHARED ACCESS SIGNATURE',{Environment.NewLine}" +
                 $"SECRET = '{TSql.EscapeLiteral((sasToken ?? string.Empty).TrimStart('?'))}'",
 
+            // The S3 connector's identity (#51). The secret is the pair the app already
+            // stores as one string - 'AccessKeyId:SecretKey' is the engine's own format -
+            // and it goes in exactly as held: the '?' trim above is a SAS-ism.
+            BlobCredentialIdentity.S3AccessKey =>
+                $"{verb} CREDENTIAL {quotedName}{Environment.NewLine}" +
+                $"WITH IDENTITY = 'S3 Access Key',{Environment.NewLine}" +
+                $"SECRET = '{TSql.EscapeLiteral(sasToken ?? string.Empty)}'",
+
             _ => throw new ArgumentOutOfRangeException(
                 nameof(identity),
                 identity,

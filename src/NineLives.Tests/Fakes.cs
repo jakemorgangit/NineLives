@@ -333,6 +333,12 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>What GetProductMajorVersionAsync answers - 16 is SQL Server 2022 (#210).</summary>
     public int? ProductMajorVersion { get; set; } = 16;
 
+    /// <summary>What GetEngineEditionAsync answers - 4 is Express (#51). Default non-Express.</summary>
+    public int? EngineEdition { get; set; } = 3;
+
+    public Task<int?> GetEngineEditionAsync(ServerConnection server, CancellationToken ct = default)
+        => Task.FromResult(EngineEdition);
+
     /// <summary>Per-server overrides, for the checks that compare two servers' versions.</summary>
     public Dictionary<string, int?> MajorVersionByServer { get; } =
         new(StringComparer.OrdinalIgnoreCase);

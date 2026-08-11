@@ -90,4 +90,10 @@ public class BackupOptions
 
     /// <summary>A description written into the backup header, for whoever finds it later.</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// The bucket's region for an s3:// destination (#51), emitted as BACKUP_OPTIONS JSON.
+    /// Ignored - and cleared by the generator - when the destinations are not S3.
+    /// </summary>
+    public string? S3Region { get; set; }
 }

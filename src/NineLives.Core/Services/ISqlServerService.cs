@@ -65,6 +65,14 @@ public interface ISqlServerService
     Task<int?> GetProductMajorVersionAsync(ServerConnection server, CancellationToken ct = default);
 
     /// <summary>
+    /// SERVERPROPERTY('EngineEdition') as the engine reports it - 4 is Express (#51). Null
+    /// when the instance will not say. Asked by the S3 capability gate: the S3 connector
+    /// needs SQL Server 2022+ AND a non-Express edition, and refusing on a guess would block
+    /// legal restores, so silence produces no verdict.
+    /// </summary>
+    Task<int?> GetEngineEditionAsync(ServerConnection server, CancellationToken ct = default);
+
+    /// <summary>
     /// The marked transactions msdb knows for a database (#243) - name, description and when.
     /// Almost no tooling reads logmarkhistory, which is why almost nobody uses marks.
     /// </summary>

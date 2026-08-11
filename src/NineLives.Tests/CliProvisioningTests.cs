@@ -154,6 +154,41 @@ public class CliProvisioningTests
         Assert.DoesNotContain("secret123", errors);
     }
 
+    /// <summary>An s3:// endpoint is just another container (#51): the key pair is stored as
+    /// the one string the engine wants, the region is kept, and validation runs the same way.</summary>
+    [Fact]
+    public async Task AddContainerAcceptsAnS3EndpointWithAKeyPairAndRegion()
+    {
+        var (services, store, _, _) = Stage();
+
+        var (exit, errors) = await Run(AddContainerVerb.RunAsync, AddContainerVerb.Spec,
+            ["--name", "s3backups", "--url", "s3://s3.eu-west-2.amazonaws.com/sqlbackups",
+             "--sas", "AKIAEXAMPLE:abc/def+secret", "--region", "eu-west-2"], services);
+
+        Assert.Equal(0, exit);
+        var container = Assert.Single(store.LoadConfig().BlobContainers);
+        Assert.True(container.IsS3);
+        Assert.Equal("eu-west-2", container.S3Region);
+        // The pair is stored verbatim - it IS the credential secret the engine will use.
+        Assert.Equal("AKIAEXAMPLE:abc/def+secret", store.GetSasToken(container));
+        Assert.DoesNotContain("secret", errors);
+    }
+
+    /// <summary>A malformed key pair is refused before storage, not discovered at restore.</summary>
+    [Fact]
+    public async Task AddContainerRefusesAMalformedS3KeyPair()
+    {
+        var (services, store, _, _) = Stage();
+
+        var (exit, errors) = await Run(AddContainerVerb.RunAsync, AddContainerVerb.Spec,
+            ["--name", "s3backups", "--url", "s3://s3.eu-west-2.amazonaws.com/sqlbackups",
+             "--sas", "no-colon-here"], services);
+
+        Assert.Equal(64, exit);
+        Assert.Contains("AccessKeyId:SecretKey", errors);
+        Assert.Empty(store.LoadConfig().BlobContainers);
+    }
+
     /// <summary>The SAS that looks right but is not: recorded, refused, exit 3, chain stops.</summary>
     [Fact]
     public async Task AddContainerWithASasTheContainerRefusesExitsThree()

@@ -76,7 +76,10 @@ public static class BlobCredentialPreflight
                 "and the SAS token is sent over it.");
 
         var written = await sql.EnsureCredentialExistsAsync(
-            server, credentialName, container.ContainerUrl, sasToken);
+            server, credentialName, container.ContainerUrl, sasToken,
+            container.IsS3
+                ? BlobCredentialIdentity.S3AccessKey
+                : BlobCredentialIdentity.SharedAccessSignature);
 
         appendLog(written == CredentialChange.Created
             ? "Credential created on the server."
