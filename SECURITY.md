@@ -13,7 +13,7 @@ replace databases. Security reports are taken seriously here.
   the fix stay in one place until there's something to release.
 - **jake@blackcat.wales** if you'd rather use email.
 
-Useful things to include: the version (Help → About), what an attacker would gain, and the smallest
+Useful things to include: the version (the About screen), what an attacker would gain, and the smallest
 set of steps that shows it. A proof of concept helps but is not required — a clear description of
 the flaw is enough.
 
@@ -73,7 +73,7 @@ unexpected, or turns untrusted data into executed T-SQL, is.
 - Any stored secret — a SAS token, an S3 secret key, a SQL password, a webhook URL — ending up
   anywhere other than Credential Manager: logs, the generated script, `config.json`, the exported
   config, the clipboard, an error message, a crash dump.
-- Anything that reaches T-SQL without going through `Services/TSql.cs`, or a way past its quoting.
+- Anything that reaches T-SQL without going through `src/NineLives.Core/Services/TSql.cs`, or a way past its quoting.
 - A restore being aimed at a server or database other than the one shown in the confirmation.
 - Credentials being sent over a connection that isn't validated the way the settings claim.
 

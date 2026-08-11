@@ -84,9 +84,9 @@ Every PR runs on `windows-latest`:
 
 ## Expectations for a change
 
-- New logic in `Services/` or `Models/` comes with tests. These are the parts that decide which
+- New logic in `src/NineLives.Core/Services/` or `src/NineLives.Core/Models/` comes with tests. These are the parts that decide which
   backups form a restore chain, so they carry the most risk.
-- **All generated T-SQL goes through `Services/TSql.cs`.** Identifiers use `QuoteName`, string
+- **All generated T-SQL goes through `src/NineLives.Core/Services/TSql.cs`.** Identifiers use `QuoteName`, string
   literals use `EscapeLiteral`. Do not hand-roll escaping.
 - If you change restore-chain logic, say in the PR what a DBA would see differently.
 - No credentials, SAS tokens, or real server/database names in code, comments, tests, or
@@ -94,7 +94,7 @@ Every PR runs on `windows-latest`:
 
 ## Reporting bugs
 
-Include the app version (Help → About), Windows and SQL Server versions, your backup layout
+Include the app version (the About screen, or the bottom right of the window), Windows and SQL Server versions, your backup layout
 (path pattern or Ola naming), and — where relevant — the generated script with identifying
 details replaced.
 
