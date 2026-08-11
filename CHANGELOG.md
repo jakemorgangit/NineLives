@@ -12,6 +12,26 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A container that answers and holds nothing is no longer reported as a success** (#368).
+  "Connected! 0 files found (0 B)" was the commonest new-user failure there is - a base path
+  that does not match how the backups are actually laid out - presented in the voice of a
+  tick. The user goes on, and meets an inexplicably empty Browse Backups two screens later
+  with nothing to connect it to. It now reads as the finding it is, and says the three things
+  worth saying: the credential works, the container exists, and the backups may be under a
+  path this container's base path does not cover. The credential keeps its own sentence
+  deliberately, because it *is* proven and re-checking a working SAS token is its own wasted
+  afternoon.
+
+- **The keyboard cannot escape the first-run mode cards** (#369). Ctrl+0..9 are bound on the
+  window and stayed live behind them, so a keystroke landed on Blob Storage with the sidebar
+  collapsed to zero width, no mode chosen, no navigation and no way back to the cards - an app
+  that had to be restarted, and one that would not even record which screen it was on. The
+  comment beside the cards called them a gate there was no way past; there were ten. The
+  milder version of the same hole: in Basic mode, Ctrl+4 reached the Back Up screen the mode
+  exists to hide, and Ctrl+3 reached Browse Backups. Navigation now refuses while the cards
+  are up, and a screen the mode hides falls back to Home the way narrowing the mode already
+  does.
+
 - **A backup set with no files no longer generates a restore that ends the sequence** (#365).
   A set discovered with nothing recorded against it produced a RESTORE naming no device -
   which is not a syntax error but the valid recovery-only form. Run against a target sitting
