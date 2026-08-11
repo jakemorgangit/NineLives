@@ -17,11 +17,48 @@ namespace Blackcat.NineLives.Services;
 internal static class BlobFailureExplainer
 {
     /// <summary>
-    /// Guidance for a failure, or null when there is nothing useful to add and Azure's own message
-    /// should stand on its own.
+    /// Guidance for a failure, or null when there is nothing useful to add and the provider's own
+    /// message should stand on its own.
     /// </summary>
     internal static string? Explain(Exception exception, BlobContainerConfig config)
     {
+        // The S3 codes are part of the contract every compatible provider imitates, which makes
+        // them the reliable thing to switch on - the message text gets rephrased per provider,
+        // and it is already shown above this guidance anyway (#51).
+        if (exception is S3RequestFailedException s3)
+        {
+            return s3.Code switch
+            {
+                "InvalidAccessKeyId" =>
+                    "The endpoint does not recognise this access key id. Check it was pasted "
+                    + "whole, and that the key belongs to this provider and account - a key from "
+                    + "a different account looks identical.",
+                "SignatureDoesNotMatch" =>
+                    "The endpoint recognised the access key id, but the signature computed from "
+                    + "the secret key is wrong. Re-enter the pair. If the pair is definitely "
+                    + "right, check the Region field - some providers answer with this code when "
+                    + "the request is signed for the wrong region.",
+                "AccessDenied" =>
+                    "The key pair is valid but not allowed to list this bucket. The key needs "
+                    + "permission to list the bucket and read its objects (on AWS: s3:ListBucket "
+                    + "and s3:GetObject) - listing is how backups are discovered here, and "
+                    + "reading is how the engine restores them.",
+                "RequestTimeTooSkewed" =>
+                    "This machine's clock is too far from the provider's. Every signed request "
+                    + "carries a timestamp the provider checks - correct the clock (Windows time "
+                    + "synchronisation) and try again.",
+                "NoSuchBucket" =>
+                    "The endpoint answered, but the bucket does not exist there. The bucket is "
+                    + "the first path segment of the s3:// URL - check its spelling, and that "
+                    + "the endpoint host is the one serving the bucket's region.",
+                "PermanentRedirect" or "AuthorizationHeaderMalformed" =>
+                    "The bucket lives in a different region than the request was signed for. Set "
+                    + "the Region field to the bucket's real region - the provider's message "
+                    + "above usually names it.",
+                _ => null
+            };
+        }
+
         if (exception is not RequestFailedException failure) return null;
 
         return failure.ErrorCode switch

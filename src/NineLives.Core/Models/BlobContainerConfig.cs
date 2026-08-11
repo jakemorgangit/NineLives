@@ -275,6 +275,14 @@ public class BlobContainerConfig : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// What to call the way this container authenticates. An s3:// container reuses
+    /// <see cref="BlobAuthMode.SasToken"/> as its storage slot (#51), but showing "SAS token"
+    /// for it would send someone reading Azure documentation for a bucket.
+    /// </summary>
+    [JsonIgnore]
+    public string AuthDisplay => IsS3 ? "S3 access key pair" : AuthMode.Describe();
+
     private string? _cachedSasTokenValue;
 
     public DateTime? GetSasExpiry(string? sasToken = null) => ReadSasExpiry(sasToken).ExpiresAt;

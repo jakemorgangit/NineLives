@@ -94,7 +94,7 @@ public static class S3ListingClient
         var body = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException(DescribeRefusal((int)response.StatusCode, body));
+            throw Refusal((int)response.StatusCode, body);
 
         return ParsePage(body);
     }
@@ -104,9 +104,10 @@ public static class S3ListingClient
     /// the single most useful sentence available - AccessDenied, RequestTimeTooSkewed and
     /// SignatureDoesNotMatch all explain themselves. Passed through rather than translated;
     /// when the body is not the expected XML (a proxy's error page, an empty 403) the status
-    /// line still stands on its own.
+    /// line still stands on its own. The code rides on the exception for the failure
+    /// explainer, which can turn it into the next move.
     /// </summary>
-    private static string DescribeRefusal(int status, string body)
+    private static S3RequestFailedException Refusal(int status, string body)
     {
         string? code = null, message = null;
         try
@@ -123,7 +124,8 @@ public static class S3ListingClient
         var head = string.IsNullOrEmpty(code)
             ? $"The S3 endpoint refused the listing (HTTP {status})."
             : $"The S3 endpoint refused the listing ({code}, HTTP {status}).";
-        return string.IsNullOrEmpty(message) ? head : $"{head} {message}";
+        return new S3RequestFailedException(
+            string.IsNullOrEmpty(message) ? head : $"{head} {message}", code, status);
     }
 
     /// <summary>

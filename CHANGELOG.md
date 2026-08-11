@@ -12,6 +12,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **S3-compatible object storage, the screen half** (#51). The Blob Storage screen reads the
+  URL's scheme the way everything else does: type an `s3://` URL and the SAS section becomes
+  the key-pair boxes - access key id and secret key, combined on save into the engine's own
+  `AccessKeyId:SecretKey` secret format, shape-checked at entry - plus a Region field for the
+  providers that need one said. The Entra choices vanish (a bucket has exactly one way in),
+  no SAS expiry line appears against a credential that has none, and Test Connection tests
+  exactly what is on screen - stored secret with the on-screen region, when the region is the
+  thing being fixed. A refused listing now explains itself: AccessDenied, InvalidAccessKeyId,
+  SignatureDoesNotMatch, RequestTimeTooSkewed, NoSuchBucket and wrong-region redirects each
+  turn into the next move, not just the provider's sentence.
+
 - **S3-compatible object storage, the listing half** (#51). The app can now browse an
   `s3://` container: a hand-rolled SigV4 signer and a minimal ListObjectsV2 client - one
   signed GET, paged, path-style over TLS - behind the same storage interface Azure listings
