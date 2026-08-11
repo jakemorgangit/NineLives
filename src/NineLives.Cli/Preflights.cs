@@ -24,7 +24,8 @@ internal static class Preflights
     /// </summary>
     public static async Task<Result> RunAsync(
         CliServices services, ServerConnection target, BackupChain chain,
-        string targetDatabase, bool withReplace, bool force)
+        string targetDatabase, bool withReplace, bool force,
+        IReadOnlyList<FileMoveOption>? fileMoves = null)
     {
         var refusals = new List<string>();
         var warnings = new List<string>();
@@ -75,7 +76,10 @@ internal static class Preflights
         // not the same as not fitting.
         try
         {
-            var files = await services.Sql.RestoreFileListOnlyAsync(target, devices);
+            // With relocation in play the caller already knows where each file LANDS - the
+            // moves are the truth to check, not the recorded paths (#299).
+            var files = (IReadOnlyList<FileMoveOption>?)fileMoves
+                        ?? await services.Sql.RestoreFileListOnlyAsync(target, devices);
             if (files.Count > 0)
             {
                 var free = await services.Sql.GetVolumeFreeSpaceAsync(target);
