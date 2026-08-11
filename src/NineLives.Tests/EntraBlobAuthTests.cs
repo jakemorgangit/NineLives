@@ -15,6 +15,9 @@ namespace Blackcat.NineLives.Tests;
 /// The reason it matters: many organisations now prohibit long-lived SAS tokens outright, which
 /// made the tool unusable for them regardless of its merits.
 /// </summary>
+/// <remarks>Sets BlobStorageService.CredentialFactoryForTests, a process-wide static (#348).
+/// The other two Entra classes are already here for the fixture; this one joins for the seam.</remarks>
+[Collection(WpfCollection.Name)]
 public class EntraBlobAuthTests
 {
     private static BlobContainerConfig Container(BlobAuthMode mode) => new()
