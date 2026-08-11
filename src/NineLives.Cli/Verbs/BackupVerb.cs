@@ -168,6 +168,20 @@ internal static class BackupVerb
         if (BackupDestinationBuilder.DescribeTooLong(destinations) is { } tooLong)
         {
             errors.WriteLine($"REFUSED: {tooLong}");
+
+            // A refusal is an ending like any other, so --json gets an object here too (#370).
+            // It used to put nothing on stdout at all, which is the one path a wrapper most
+            // needs to read: why did this not run?
+            if (args.Has("json"))
+                CliRunResult.Write(output, new
+                {
+                    Verb = "backup",
+                    Outcome = "Refused",
+                    Server = server.ServerName,
+                    Database = database,
+                    Refusals = new[] { tooLong }
+                });
+
             return ExitCodes.Usage;
         }
 
@@ -195,7 +209,22 @@ internal static class BackupVerb
             if (!preflight.CanProceed)
             {
                 errors.WriteLine($"REFUSED: {preflight.Refusal}");
-                if (!args.Has("execute")) output.WriteLine(script);
+
+                // Under --json the ending is an object, not a T-SQL script (#370). Printing the
+                // script onto stdout here handed a jq pipeline a page of SQL where it expected
+                // the reason.
+                if (args.Has("json"))
+                    CliRunResult.Write(output, new
+                    {
+                        Verb = "backup",
+                        Outcome = "Refused",
+                        Server = server.ServerName,
+                        Database = database,
+                        Refusals = new[] { preflight.Refusal }
+                    });
+                else if (!args.Has("execute"))
+                    output.WriteLine(script);
+
                 return ExitCodes.Failed;
             }
         }

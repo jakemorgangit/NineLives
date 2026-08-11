@@ -38,8 +38,10 @@ internal static class HelpWriter
             "agents where nothing may outlive the job. NINELIVES_SERVER (address, resolvable " +
             "as the name NINELIVES_SERVER_NAME or 'env'), NINELIVES_SQL_USER and " +
             "NINELIVES_SQL_PASSWORD (SQL auth; omit both for Windows auth), " +
-            "NINELIVES_CONTAINER_URL (resolvable as NINELIVES_CONTAINER_NAME or 'env') and " +
-            "NINELIVES_SAS. Secrets stay in process memory; history receipts still write and " +
+            "NINELIVES_CONTAINER_URL (resolvable as NINELIVES_CONTAINER_NAME or 'env'), " +
+            "NINELIVES_SAS - the SAS token, or for an s3:// URL the pair AccessKeyId:SecretKey - " +
+            "and NINELIVES_S3_REGION, for a bucket whose region its host name does not carry. " +
+            "Secrets stay in process memory; history receipts still write and " +
             "webhooks still fire - they are the point.");
         output.WriteLine();
         Wrapped(output,

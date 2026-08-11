@@ -26,7 +26,8 @@ internal static class RestoreVerb
         "[--stop-before-mark NAME | --stop-at-mark NAME] [--execute] [--force] [--json]",
         Valued: ["container", "server", "database", "at", "target", "target-database",
                  "stop-before-mark", "stop-at-mark", "data-path", "log-path"],
-        Switches: ["execute", "with-replace", "norecovery", "force", "relocate", "json"],
+        Switches: ["execute", "with-replace", "norecovery", "force", "relocate", "json",
+                   "keep-sessions"],
         Options:
         [
             ("--container NAME", "A blob container configured in the app, as the source."),
@@ -52,6 +53,12 @@ internal static class RestoreVerb
             ("--stop-at-mark NAME", "Stop at the mark, inclusive."),
             ("--execute", "Actually run it. Without this, the script and every preflight " +
                 "verdict print and nothing is touched."),
+            ("--keep-sessions", "Leave other connections alone. The default disconnects them - " +
+                "ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE, rolling back " +
+                "whatever they were doing - because a restore cannot begin while anybody is " +
+                "connected. The database is put back to MULTI_USER after the whole chain " +
+                "succeeds, so a chain that fails part way leaves it single-user until somebody " +
+                "says otherwise; pass this to keep that decision your own."),
             ("--force", "Override what the EVIDENCE says - version direction, missing TDE " +
                 "certificate, unreadable files - loudly, as warnings. It cannot stand in " +
                 "for --with-replace: evidence is overridable, consent is not."),
@@ -220,6 +227,11 @@ internal static class RestoreVerb
             TargetDatabaseName = targetDatabase,
             WithReplace = withReplace,
             RecoveryMode = args.Has("norecovery") ? RecoveryMode.NoRecovery : RecoveryMode.Recovery,
+
+            // Kicking the other sessions out is the default here as it is in the app, because a
+            // restore cannot begin while anybody is connected - but the app makes it a visible
+            // tick box and the CLI made it silent and unrefusable (#370).
+            DisconnectSessions = !args.Has("keep-sessions"),
             StopAt = stopAt,
             StopAtMark = mark,
             StopBeforeMark = markAt == null,

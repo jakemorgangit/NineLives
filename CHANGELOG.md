@@ -180,6 +180,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The CLI says what it does** (#370). A scripted restore always issued
+  `ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE` and never mentioned it -
+  a capability the app presents as a tick box was invisible and unrefusable from a
+  script, and since MULTI_USER is only restored after the whole chain succeeds, a chain
+  that failed part way left the database single-user. There is now `--keep-sessions`,
+  and the default behaviour is documented on the verb's own page. A refusal under
+  `--json` now answers in JSON rather than putting a page of T-SQL on stdout, or nothing
+  at all - which was the one path a wrapper most needs to read. And `--ephemeral` is
+  matched without regard to case like every other option, with `NINELIVES_S3_REGION`
+  named in the help that had always omitted it.
+
 - **Three places the app said nothing, or the wrong thing** (#370). The Exposure
   dashboard's "Open in Restore" button was live on unreachable rows and silently did
   nothing when pressed - and those are the rows that sort to the top, because they are
