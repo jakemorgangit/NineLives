@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Cli.Verbs;
@@ -18,10 +18,11 @@ internal static class ScriptVerb
         "script",
         "Emit the validated restore T-SQL for a moment",
         "9lives script (--container NAME | --server NAME) --database DB [--at \"yyyy-MM-dd HH:mm:ss\"] " +
-        "[--target-database NAME] [--with-replace] [--norecovery] [--stop-before-mark NAME | --stop-at-mark NAME] [--out FILE]",
-        Valued: ["container", "server", "database", "at", "target-database",
-                 "stop-before-mark", "stop-at-mark", "out"],
-        Switches: ["with-replace", "norecovery"],
+        "[--target-database NAME] [--with-replace] [--norecovery] [--stop-before-mark NAME | --stop-at-mark NAME] " +
+        "[--target NAME [--relocate | --data-path DIR [--log-path DIR]]] [--out FILE]",
+        Valued: ["container", "server", "database", "at", "target-database", "target",
+                 "stop-before-mark", "stop-at-mark", "data-path", "log-path", "out"],
+        Switches: ["with-replace", "norecovery", "relocate"],
         Options:
         [
             ("--container NAME", "A blob container configured in the app."),
@@ -38,6 +39,15 @@ internal static class ScriptVerb
                 "deployment never happened. Marks are planted with BEGIN TRANSACTION ... " +
                 "WITH MARK; the app's restore screen finds them in msdb."),
             ("--stop-at-mark NAME", "Stop AT the mark, including the marked transaction."),
+            ("--target NAME", "The instance the script will eventually run ON. Only needed for " +
+                "relocation, and used only to ask it two questions - nothing is executed."),
+            ("--relocate", "MOVE every file to the target's default data and log directories, " +
+                "keeping its original name. Needs --target."),
+            ("--data-path DIR", "MOVE data files into this directory (log files follow " +
+                "--log-path, or the target's default log directory). Implies relocation, " +
+                "needs --target."),
+            ("--log-path DIR", "MOVE log files into this directory. Implies relocation; data " +
+                "files follow --data-path, or the target's default data directory."),
             ("--out FILE", "Write the script to a file instead of stdout.")
         ],
         Notes:
@@ -52,14 +62,21 @@ internal static class ScriptVerb
             "is a hole no chain reaches: the verb refuses and names the nearest reachable " +
             "points either side, because quietly restoring to somewhere nearby is worse.",
             "A mark and a time are the same mechanism aimed differently, so giving both is " +
-            "refused rather than ranked."
+            "refused rather than ranked.",
+            "Relocation is the one thing here that cannot be done offline (#370). The logical " +
+            "file names come from RESTORE FILELISTONLY and the default directories come from " +
+            "the instance, so --relocate, --data-path and --log-path need a --target to ask. " +
+            "That target is read, never written to. Without one they are refused rather than " +
+            "ignored: a script that silently has no MOVE in it is a script that fails in the " +
+            "change window it was generated for."
         ],
         ExitCodes:
         [
             "0   script emitted",
             "2   no chain covers the moment asked for, or the source holds no backups for " +
             "this database",
-            "3   the source could not be read at all",
+            "3   the source could not be read at all, or the target could not answer the two " +
+            "questions relocation needs",
             "64  usage"
         ],
         Examples:
@@ -67,7 +84,10 @@ internal static class ScriptVerb
             ("9lives script --container backups --database Sales --at \"2026-08-02 19:00\" --out restore.sql",
                 "the validated script for that moment, into a file"),
             ("9lives script --server SRV01 --database Sales --stop-before-mark deploy_v2",
-                "undo a marked deployment - the sharpest point-in-time tool SQL Server has")
+                "undo a marked deployment - the sharpest point-in-time tool SQL Server has"),
+            ("9lives script --container backups --database Sales --target SRV02 --relocate --out restore.sql",
+                "generate here, run in the change window - with MOVE clauses for a machine that " +
+                "does not share the source's drive layout")
         ]);
 
     public static async Task<int> RunAsync(
@@ -128,6 +148,39 @@ internal static class ScriptVerb
         }
 
         var chain = new BackupChainBuilder().BuildChainFromRestorePoint(point);
+
+        // Relocation, the one thing this verb cannot answer on its own (#370). Refused without a
+        // target rather than dropped, because the workflow this exists for - generate here, hand
+        // it over, run it in the change window on a machine with a different drive layout - is
+        // exactly the one where a missing MOVE is not discovered until it is expensive.
+        List<FileMoveOption>? moves = null;
+        if (Relocation.WasAskedFor(args))
+        {
+            if (args.Get("target") == null)
+            {
+                errors.WriteLine(Relocation.NeedsATarget);
+                return ExitCodes.Usage;
+            }
+
+            var (relocateTo, targetError) = services.FindServer(args.Get("target")!);
+            if (relocateTo == null)
+            {
+                errors.WriteLine(targetError);
+                return ExitCodes.Usage;
+            }
+
+            var (resolved, relocationError) = await Relocation.ResolveAsync(
+                args, services, relocateTo, chain, errors.WriteLine, CancellationToken.None);
+
+            if (relocationError != null)
+            {
+                errors.WriteLine(relocationError);
+                return ExitCodes.CouldNotAnswer;
+            }
+
+            moves = resolved;
+        }
+
         var script = new RestoreScriptGenerator().Generate(chain, new RestoreOptions
         {
             TargetDatabaseName = args.Get("target-database") ?? args.Get("database")!,
@@ -136,6 +189,7 @@ internal static class ScriptVerb
             StopAt = stopAt,
             StopAtMark = mark,
             StopBeforeMark = markAt == null,
+            FileMoves = moves ?? [],
             // The bucket's region has to reach the statement, not just the listing (#361).
             // Null for a --server source, which found its backups through an instance's own
             // history and has no container to ask.

@@ -10,6 +10,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+### Added
+
+- **`script` can relocate** (#370). `restore` took `--relocate`, `--data-path` and `--log-path`;
+  `script` took none of them, so the workflow the two exist to serve together - generate the
+  script here, hand it to a DBA, run it in the change window on a freshly provisioned machine -
+  silently dropped the WITH MOVE clauses, and the restore failed at run time with a
+  directory-not-found after WITH REPLACE had already dropped the target. Relocation cannot be
+  worked out offline: the logical file names come from RESTORE FILELISTONLY and the default
+  directories come from the instance. So `script` now takes a `--target` used only to ask those
+  two questions, and refuses the relocation flags without one rather than emitting a script that
+  quietly has no MOVE in it.
+
 ### Fixed
 
 - **The saved-containers list no longer turns white while the Add Container form is open.**
