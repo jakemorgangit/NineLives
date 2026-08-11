@@ -22,10 +22,11 @@ internal static class RestoreVerb
         "Generate, and with --execute run, a restore against a target server",
         "9lives restore (--container NAME | --server NAME) --database DB --target SERVER " +
         "[--at \"yyyy-MM-dd HH:mm:ss\"] [--target-database NAME] [--with-replace] [--norecovery] " +
+        "[--relocate | --data-path DIR [--log-path DIR]] " +
         "[--stop-before-mark NAME | --stop-at-mark NAME] [--execute] [--force]",
         Valued: ["container", "server", "database", "at", "target", "target-database",
-                 "stop-before-mark", "stop-at-mark"],
-        Switches: ["execute", "with-replace", "norecovery", "force"],
+                 "stop-before-mark", "stop-at-mark", "data-path", "log-path"],
+        Switches: ["execute", "with-replace", "norecovery", "force", "relocate"],
         Options:
         [
             ("--container NAME", "A blob container configured in the app, as the source."),
@@ -40,6 +41,13 @@ internal static class RestoreVerb
                 "from anywhere, never implied by --force - this flag is the only way to " +
                 "mean it."),
             ("--norecovery", "Leave the database restoring, ready for more log."),
+            ("--relocate", "MOVE every file to the target's default data and log " +
+                "directories, keeping the original file names. The freshly provisioned VM " +
+                "rarely has the source server's drive layout."),
+            ("--data-path DIR", "MOVE data files into this directory (log files follow " +
+                "--log-path, or the target's default log directory). Implies relocation."),
+            ("--log-path DIR", "MOVE log files into this directory. Implies relocation; " +
+                "data files follow --data-path, or the target's default data directory."),
             ("--stop-before-mark NAME", "Stop just before the named marked transaction."),
             ("--stop-at-mark NAME", "Stop at the mark, inclusive."),
             ("--execute", "Actually run it. Without this, the script and every preflight " +
@@ -67,9 +75,13 @@ internal static class RestoreVerb
             "the app's History screen lists - script, console log, outcome, duration - and " +
             "notifications to the same webhooks. A 3am restore from a runbook step looks " +
             "exactly like a clicked one afterwards.",
-            "Files restore to the paths recorded in the backup. Relocation flags are not " +
-            "built yet - the rehearse verb relocates automatically, and the app's restore " +
-            "screen has full WITH MOVE control."
+            "Files restore to the paths recorded in the backup unless relocation is " +
+            "asked for. --relocate moves every file to the target's default data and log " +
+            "directories keeping its original name; --data-path and --log-path place them " +
+            "explicitly, mirroring the app's WITH MOVE control. Either way the disk-space " +
+            "preflight judges the volumes the files actually LAND on - and a freshly " +
+            "provisioned VM whose drives differ from the source server's is exactly where " +
+            "the recorded paths would have failed mid-run."
         ],
         ExitCodes:
         [
@@ -86,7 +98,10 @@ internal static class RestoreVerb
             ("9lives restore --container backups --database Sales --target SRV02 --with-replace --execute",
                 "the real thing, consented to explicitly"),
             ("9lives restore --server SRV01 --database Sales --target SRV02 --at \"2026-08-02 19:00\" --execute",
-                "a moment mid-log, STOPAT stamped on every log restore")
+                "a moment mid-log, STOPAT stamped on every log restore"),
+            ("9lives restore --container backups --database Sales --target SRV02 --relocate --with-replace --execute",
+                "the provisioning shape: files land in the new VM's own data and log " +
+                "directories, whatever its drives are")
         ]);
 
     public static async Task<int> RunAsync(
@@ -156,6 +171,44 @@ internal static class RestoreVerb
         var targetDatabase = args.Get("target-database") ?? sourceDatabase;
         var withReplace = args.Has("with-replace");
 
+        // Relocation (#299): the Terraform case. A freshly provisioned VM rarely has the
+        // source server's drive layout, and the recorded paths fail mid-run with
+        // directory-not-found - after WITH REPLACE has already dropped the target. The
+        // rehearse verb has always relocated; the restore verb, the one the template
+        // actually ends with, now can. Explicit directories win; either side not given
+        // falls back to the target's own defaults.
+        List<FileMoveOption>? moves = null;
+        if (args.Has("relocate") || args.Get("data-path") != null || args.Get("log-path") != null)
+        {
+            var moveDevices = chain.FullSet.Files
+                .Select(f => f.IsOnDisk ? f.RestoreDevice : BlobUrlEncoder.Encode(f.BlobUrl))
+                .ToList();
+
+            List<FileMoveOption> logicalFiles;
+            try
+            {
+                logicalFiles = await services.Sql.RestoreFileListOnlyAsync(target, moveDevices, ct);
+            }
+            catch (Exception ex)
+            {
+                errors.WriteLine($"Could not read the backup's file list from " +
+                                 $"{target.ServerName}, which relocation needs: {ex.Message}");
+                return ExitCodes.CouldNotAnswer;
+            }
+
+            var dataDir = args.Get("data-path");
+            var logDir = args.Get("log-path");
+            if (dataDir == null || logDir == null)
+            {
+                var (defaultData, defaultLog) = await services.Sql.GetDefaultPathsAsync(target, ct);
+                dataDir ??= defaultData;
+                logDir ??= defaultLog;
+            }
+
+            moves = RestoreRelocation.ToDirectories(logicalFiles, dataDir, logDir);
+            errors.WriteLine($"Relocating {moves.Count} file(s): data to {dataDir}, log to {logDir}.");
+        }
+
         var script = new RestoreScriptGenerator().Generate(chain, new RestoreOptions
         {
             TargetDatabaseName = targetDatabase,
@@ -163,13 +216,15 @@ internal static class RestoreVerb
             RecoveryMode = args.Has("norecovery") ? RecoveryMode.NoRecovery : RecoveryMode.Recovery,
             StopAt = stopAt,
             StopAtMark = mark,
-            StopBeforeMark = markAt == null
+            StopBeforeMark = markAt == null,
+            FileMoves = moves ?? []
         });
 
         // The preflights run whether or not this is an --execute: a generate-only invocation
         // that says "this WOULD be refused" is the pipeline's cheap rehearsal of its own DR step.
+        // With relocation, the space check judges the volumes the files actually LAND on.
         var preflight = await Preflights.RunAsync(
-            services, target, chain, targetDatabase, withReplace, args.Has("force"));
+            services, target, chain, targetDatabase, withReplace, args.Has("force"), moves);
 
         errors.WriteLine($"Chain: {point.TypeDisplay} reaching " +
                          $"{(stopAt ?? point.Timestamp):yyyy-MM-dd HH:mm:ss}, restoring " +

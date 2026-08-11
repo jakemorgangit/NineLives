@@ -12,6 +12,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The CLI restore relocates** (#299): `--relocate` moves every file to the target's own
+  default data and log directories keeping its original name, and `--data-path` /
+  `--log-path` place them explicitly - mirroring the app's WITH MOVE control. The freshly
+  provisioned VM rarely has the source server's drive layout, and the recorded paths used
+  to fail with directory-not-found mid-run, after WITH REPLACE had already dropped the
+  target. With relocation in play the disk-space preflight judges the volumes the files
+  actually LAND on. The three-line Terraform template now survives any VM shape
+
 - Rehearsal notifications now name the database being PROVEN rather than the scratch copy it
   was proven on - "Rehearsal MyDb", not "Rehearsal MyDb_rehearsal_20260810_0930"
 - The Exposure dashboard sweeps itself on first visit - arriving at an empty screen that needs a
