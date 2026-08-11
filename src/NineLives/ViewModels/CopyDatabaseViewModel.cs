@@ -342,6 +342,13 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         Destinations = new ObservableCollection<string>(destinations);
 
+        // The same length the server will refuse, said while it can still be changed (#346).
+        if (BackupDestinationBuilder.DescribeTooLong(destinations) is { } tooLong)
+        {
+            SetError(tooLong);
+            return;
+        }
+
         BackupScript = _backupGenerator.Generate(new BackupOptions
         {
             DatabaseName = SourceDatabase!,

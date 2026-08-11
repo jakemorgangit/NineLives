@@ -215,8 +215,11 @@
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,12" />
 
-                                <TextBlock Text="STORAGE ACCOUNT" Style="{StaticResource LabelText}" />
-                                <TextBlock Text="{Binding SelectedContainer.StorageAccountName}"
+                                <!-- Label and value both from the container (#345): a bucket has
+                                     an endpoint, not a storage account, and the old value read
+                                     the first label of the host - "s3" for every AWS bucket. -->
+                                <TextBlock Text="{Binding SelectedContainer.LocationLabel}" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="{Binding SelectedContainer.LocationDisplay}"
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
 
@@ -245,7 +248,7 @@
                                     </TextBlock.Text>
                                 </TextBlock>
 
-                                <TextBlock Text="BLOB PATH STRUCTURE" Style="{StaticResource LabelText}" />
+                                <TextBlock Text="PATH STRUCTURE" Style="{StaticResource LabelText}" />
                                 <TextBlock Text="{Binding SelectedContainer.PathPattern}"
                                            Style="{StaticResource BodyText}"
                                            Margin="0,0,0,12" />
@@ -569,7 +572,7 @@
                             <TextBlock>
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource LabelText}">
-                                        <Setter Property="Text" Value="BLOB PATH STRUCTURE" />
+                                        <Setter Property="Text" Value="PATH STRUCTURE" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsMixedSourceType}" Value="True">
                                                 <Setter Property="Text" Value="STANDALONE PATH STRUCTURE" />
@@ -578,7 +581,7 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <TextBlock Text="Drag the coloured elements below to define how blob paths are structured. Each colour represents a path component. Add or remove elements as needed. FileName must always be last."
+                            <TextBlock Text="Drag the coloured elements below to define how the paths in this container are structured. Each colour represents a path component. Add or remove elements as needed. FileName must always be last."
                                        Style="{StaticResource SecondaryText}"
                                        FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap" />
 

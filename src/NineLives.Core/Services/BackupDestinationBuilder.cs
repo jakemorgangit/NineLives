@@ -90,6 +90,39 @@ public static class BackupDestinationBuilder
     }
 
     /// <summary>
+    /// How long a backup device URL may be before SQL Server refuses it (#346).
+    ///
+    /// The engine's own limit, not ours. Past it BACKUP TO URL fails on the server, with a
+    /// message about the device rather than about lengths - and by then the run is under way.
+    /// </summary>
+    public const int MaxDeviceUrlLength = 259;
+
+    /// <summary>
+    /// Why these destinations cannot be written, or null when they can.
+    ///
+    /// Checked where it can still be fixed. Every part that makes a URL long is a setting
+    /// somebody chose - the endpoint, the base prefix, the path pattern - so the refusal names
+    /// the longest offender and its length rather than saying "too long" and leaving the search
+    /// to whoever is standing there. Striping is the multiplier worth knowing about: every
+    /// stripe carries the same prefix, so one that does not fit means none of them do.
+    /// </summary>
+    public static string? DescribeTooLong(IReadOnlyList<string> destinations)
+    {
+        var worst = destinations
+            .Where(d => d.Length > MaxDeviceUrlLength)
+            .OrderByDescending(d => d.Length)
+            .FirstOrDefault();
+
+        if (worst == null) return null;
+
+        return $"This backup's destination is {worst.Length} characters and SQL Server refuses a " +
+               $"backup URL longer than {MaxDeviceUrlLength}:{Environment.NewLine}{Environment.NewLine}" +
+               $"{worst}{Environment.NewLine}{Environment.NewLine}" +
+               "Shorten the container's path pattern, or its base path, before running this - the " +
+               "server would refuse it mid-backup otherwise.";
+    }
+
+    /// <summary>
     /// The file paths to write on a share.
     ///
     /// A share has no configured pattern to follow, and it does not need one: backups written here

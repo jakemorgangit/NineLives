@@ -186,6 +186,71 @@ public class BackupDestinationBuilderTests
         Assert.DoesNotContain(@"\", name);
     }
 
+    // ── the length SQL Server refuses (#346) ────────────────────────────────────
+
+    /// <summary>
+    /// An ordinary destination is not refused. The guard exists to catch a real engine limit,
+    /// and one that fired on normal work would be worse than the failure it prevents.
+    /// </summary>
+    [Fact]
+    public void AnOrdinaryDestinationIsNotRefused()
+    {
+        var destinations = BackupDestinationBuilder
+            .ForContainer(Container(), "SRV01", "MyDb", BackupType.Full, T0);
+
+        Assert.Null(BackupDestinationBuilder.DescribeTooLong(destinations));
+    }
+
+    /// <summary>
+    /// Past 259 characters SQL Server refuses the device mid-backup, so this is caught while
+    /// the settings that made it long can still be changed.
+    /// </summary>
+    [Fact]
+    public void ADestinationOverTheEngineLimitIsRefusedWithItsLengthAndTheUrl()
+    {
+        var deep = new BlobContainerConfig
+        {
+            Name = "long",
+            // A real shape: an endpoint, a bucket, and a base path somebody chose.
+            ContainerUrl = "s3://s3.eu-west-2.amazonaws.com/" + new string('b', 60) + "/" + new string('p', 60),
+            PathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}"
+        };
+
+        var destinations = BackupDestinationBuilder.ForContainer(
+            deep, new string('s', 40), new string('d', 60), BackupType.Full, T0);
+
+        var refusal = BackupDestinationBuilder.DescribeTooLong(destinations);
+
+        Assert.NotNull(refusal);
+        Assert.Contains(destinations[0].Length.ToString(), refusal);
+        Assert.Contains("259", refusal);
+        // The URL itself, because the fix is always in one of its parts.
+        Assert.Contains(destinations[0], refusal);
+    }
+
+    /// <summary>
+    /// Every stripe carries the same prefix, so one that does not fit means the set does not -
+    /// and the refusal names the longest rather than whichever came first.
+    /// </summary>
+    [Fact]
+    public void TheWorstStripeIsTheOneNamed()
+    {
+        var container = new BlobContainerConfig
+        {
+            Name = "long",
+            ContainerUrl = "https://acct.blob.core.windows.net/" + new string('c', 120),
+            PathPattern = "{BackupType}/{ServerName}/{DatabaseName}/{FileName}"
+        };
+
+        var destinations = BackupDestinationBuilder.ForContainer(
+            container, new string('s', 40), new string('d', 40), BackupType.Full, T0, stripes: 3);
+
+        var refusal = BackupDestinationBuilder.DescribeTooLong(destinations);
+
+        Assert.NotNull(refusal);
+        Assert.Contains(destinations.OrderByDescending(d => d.Length).First(), refusal);
+    }
+
     // ── a share ─────────────────────────────────────────────────────────────────
 
     /// <summary>

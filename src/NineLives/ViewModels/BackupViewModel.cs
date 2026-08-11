@@ -451,6 +451,14 @@ public partial class BackupViewModel : ViewModelBase
             _generated.Select(g => g.Script));
         Destinations = new ObservableCollection<string>(_generated.SelectMany(g => g.Destinations));
 
+        // Said at generate time, while the script is on screen and the settings that made it
+        // long are still to hand (#346). The server would refuse this mid-backup.
+        if (BackupDestinationBuilder.DescribeTooLong([.. Destinations]) is { } tooLong)
+        {
+            SetError(tooLong);
+            return;
+        }
+
         SetStatus(_generated.Count == 1
             ? "Script generated."
             : $"Script generated - {_generated.Count} databases, in order.");

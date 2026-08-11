@@ -162,6 +162,15 @@ internal static class BackupVerb
             : BackupDestinationBuilder.ForSharedPath(
                 path!, database, type.Value, takenAt, stripes, copyOnly);
 
+        // Before the script exists, let alone runs (#346). A URL SQL Server will refuse for its
+        // length is a problem with the container's settings, not a run to start and have fail
+        // on the server - so it exits as usage rather than as a failed backup.
+        if (BackupDestinationBuilder.DescribeTooLong(destinations) is { } tooLong)
+        {
+            errors.WriteLine($"REFUSED: {tooLong}");
+            return ExitCodes.Usage;
+        }
+
         var script = new BackupScriptGenerator().Generate(new BackupOptions
         {
             DatabaseName = database,
