@@ -180,6 +180,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The bucket's region reaches the statement, not just the listing** (#361). The region
+  was stored, used when the app listed a container, and understood by both generators -
+  but only the app's restore path ever put it on the options object. Every other path
+  left it null, so the statement went to SQL Server signed for the provider's default
+  region. The failure shape was the nasty one: the container tests perfectly and `list`
+  works, because listing is signed by this app, and then the backup or restore fails,
+  because the statement is signed by the engine. It bit exactly the providers the feature
+  exists for - AWS-style hosts carry their region in the name, and Wasabi, Backblaze B2,
+  R2 and storage appliances generally do not. Now threaded through the Back Up screen,
+  Copy Database, and the CLI's backup, restore, rehearse and script verbs.
+
 - **A striped backup read from an instance's own history is no longer called corrupt**
   (#351). msdb records a backup's size once for the whole set rather than per stripe, so
   every stripe after the first was left at zero - and zero already meant something here,

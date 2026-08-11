@@ -421,7 +421,12 @@ public partial class BackupViewModel : ViewModelBase
             Compression = Compression,
             Checksum = Checksum,
             EncryptionCertificate = Encrypt ? SelectedEncryptionCertificate : null,
-            Description = string.IsNullOrWhiteSpace(Description) ? null : Description
+            Description = string.IsNullOrWhiteSpace(Description) ? null : Description,
+
+            // The bucket's region, or the statement is signed for the wrong one (#361). Only
+            // the restore path was setting this, so a backup TO a bucket whose region is not
+            // in its host name failed after the container had tested perfectly.
+            S3Region = MediumIsBlob ? Container?.S3Region : null
         });
 
         return (script, destinations);

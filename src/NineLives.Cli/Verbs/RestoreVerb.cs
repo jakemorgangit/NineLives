@@ -153,7 +153,7 @@ internal static class RestoreVerb
             return ExitCodes.Usage;
         }
 
-        var (sets, error) = await InventoryLoader.LoadAsync(args, services);
+        var (sets, sourceContainer, error) = await InventoryLoader.LoadAsync(args, services);
         if (sets == null)
         {
             errors.WriteLine(error);
@@ -220,7 +220,11 @@ internal static class RestoreVerb
             StopAt = stopAt,
             StopAtMark = mark,
             StopBeforeMark = markAt == null,
-            FileMoves = moves ?? []
+            FileMoves = moves ?? [],
+            // The bucket's region has to reach the statement, not just the listing (#361).
+            // Null for a --server source, which found its backups through an instance's own
+            // history and has no container to ask.
+            S3Region = sourceContainer?.S3Region
         });
 
         // The preflights run whether or not this is an --execute: a generate-only invocation

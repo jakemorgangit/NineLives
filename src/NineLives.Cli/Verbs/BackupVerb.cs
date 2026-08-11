@@ -177,7 +177,12 @@ internal static class BackupVerb
             Medium = container != null ? BackupMedium.AzureBlob : BackupMedium.SharedPath,
             Destinations = destinations,
             Type = type.Value,
-            CopyOnly = copyOnly
+            CopyOnly = copyOnly,
+
+            // Without this the statement is signed for the provider's default region (#361),
+            // so every bucket that does not carry its region in the host name fails here
+            // having listed perfectly a moment earlier.
+            S3Region = container?.S3Region
         });
 
         // BACKUP TO URL needs the credential on the SOURCE instance (#284's preflight, the
