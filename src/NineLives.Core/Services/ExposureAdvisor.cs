@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -25,6 +25,20 @@ public sealed class ExposureRow
     /// database (#287). A property rather than a magic string compared in two places.
     /// </summary>
     public bool IsUnreachable { get; init; }
+
+    /// <summary>
+    /// The instance's OWN clock when this row was read (#414).
+    ///
+    /// msdb records backup_finish_date in the server's local time, and the app used to judge it
+    /// against DateTime.Now on this machine - so every age was out by the offset between the two,
+    /// and with a one-hour warning threshold the offset dominated the verdict. Worse in the
+    /// direction that matters: a server ahead of the app made backups look NEWER than they were,
+    /// downgrading an alarm to a warning, or to nothing at all when the offset exceeded the age.
+    ///
+    /// Read from the same query, so it costs nothing and is per-server rather than per-estate.
+    /// Null only for a row the app fabricated because the server would not answer.
+    /// </summary>
+    public DateTime? ServerNow { get; init; }
 
     public DateTime? LastFull { get; init; }
     public DateTime? LastDifferential { get; init; }
@@ -76,6 +90,13 @@ public static class ExposureAdvisor
 
     public static void Judge(ExposureRow row, DateTime now)
     {
+        // The server's own clock when it answered, not this machine's (#414). msdb records
+        // backup_finish_date in the instance's local time, so judging it against DateTime.Now
+        // here was out by the offset between the two - and with a one-hour warning threshold the
+        // offset decided the verdict. The caller's clock is the fallback for a row no server
+        // answered for, where there is nothing to compare anyway.
+        now = row.ServerNow ?? now;
+
         // No full, no recovery - everything else is arithmetic on top of a full that must exist.
         if (row.LastFull == null)
         {
