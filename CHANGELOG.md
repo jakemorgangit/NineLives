@@ -8,7 +8,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.6.2] - 2026-08-12
 
 ### Fixed
 
