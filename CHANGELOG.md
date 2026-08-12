@@ -12,6 +12,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Ticking WITH MOVE no longer cancels a running chain verification** (#413). The server
+  operations on the Restore screen share one cancellation source so a single Stop button covers
+  them all, and starting one deliberately stops the last - which is right for the buttons, where
+  pressing another is a choice to do that instead. It was wrong for the checkbox: ticking WITH
+  MOVE fired the default-paths fetch as a convenience, and that threw away a chain verification
+  reading the header of every backup in the chain, for a value obtainable a moment later by
+  pressing Fetch from Server. The automatic trigger now defers when a query is in flight, and
+  says so rather than quietly leaving placeholder paths.
+
 - **Choosing a target on the Restore screen connects to it** (#420). Step 2 offers "otherwise
   pick a saved server here" as the alternative to connecting on the SQL Servers screen, and it
   set everything except the one flag that gates Execute - so every step ticked green, the script

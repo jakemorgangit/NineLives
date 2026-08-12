@@ -413,8 +413,19 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.FromResult(VolumeFreeSpace);
     }
 
-    public Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult((@"D:\Data", @"D:\Logs"));
+    /// <summary>How many times the default directories were asked for (#413).</summary>
+    public int DefaultPathsAsked { get; private set; }
+
+    /// <summary>Holds the call open, so a test can have a query in flight while it does something else.</summary>
+    public TaskCompletionSource? HoldDefaultPaths { get; set; }
+
+    public async Task<(string DataPath, string LogPath)> GetDefaultPathsAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        DefaultPathsAsked++;
+        if (HoldDefaultPaths != null) await HoldDefaultPaths.Task.WaitAsync(ct);
+        return (@"D:\Data", @"D:\Logs");
+    }
 
     public Task<DatabaseRecoveryState> GetDatabaseRecoveryStateAsync(
         ServerConnection server, string databaseName, CancellationToken ct = default)
