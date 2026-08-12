@@ -1274,11 +1274,20 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
+        // Captured before the await (#409), like every other server call on this screen. Reading
+        // it again afterwards attributed one instance's default directories to another when the
+        // connection changed mid-query - and those directories go into the WITH MOVE clauses, so
+        // the restore would look correct and fail at run time with a directory-not-found, after
+        // WITH REPLACE had already dropped the target. Disconnecting mid-query threw a
+        // NullReferenceException that surfaced as "Could not fetch paths: Object reference not
+        // set to an instance of an object."
+        var server = ConnectedServer;
+
+        PathSourceText = $"Querying {server.ServerName} for default paths...";
         try
         {
             var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(
-                ConnectedServer, _queryCancellation.Begin());
+                server, _queryCancellation.Begin());
             var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
 
             if (!string.IsNullOrEmpty(dataPath))
@@ -1290,7 +1299,7 @@ public partial class RestoreViewModel : ViewModelBase
                 MoveLogFilePath = Path.Combine(dataPath, $"{dbName}_log.ldf");
 
             PathsFromServer = true;
-            PathSourceText = $"Paths detected from {ConnectedServer.ServerName}. You can still override them.";
+            PathSourceText = $"Paths detected from {server.ServerName}. You can still override them.";
         }
         catch (Exception ex)
         {

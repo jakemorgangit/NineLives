@@ -256,10 +256,24 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Refuse the connection, for the screens that have to explain one (#357).</summary>
     public Exception? TestConnectionThrows { get; set; }
 
-    public Task<bool> TestConnectionAsync(ServerConnection server, CancellationToken ct = default)
-        => TestConnectionThrows != null
-            ? Task.FromException<bool>(TestConnectionThrows)
-            : Task.FromResult(true);
+    /// <summary>
+    /// Holds the connection open, so a test can do what a user does while one is slow: click
+    /// something else (#409). Set it, start the connect, change the selection, then release.
+    /// </summary>
+    public TaskCompletionSource? HoldConnection { get; set; }
+
+    /// <summary>Which server each call was actually made against, in order.</summary>
+    public List<string> Connected { get; } = [];
+
+    public async Task<bool> TestConnectionAsync(ServerConnection server, CancellationToken ct = default)
+    {
+        Connected.Add(server.ServerName);
+
+        if (HoldConnection != null) await HoldConnection.Task;
+        if (TestConnectionThrows != null) throw TestConnectionThrows;
+
+        return true;
+    }
 
     public Task<bool?> WouldConnectWithCertificateValidationAsync(ServerConnection server, CancellationToken ct = default)
         => Task.FromResult<bool?>(true);

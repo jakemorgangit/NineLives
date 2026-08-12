@@ -314,7 +314,14 @@ public partial class ServerCredentialViewModel : ObservableObject
     {
         if (Server == null || Container == null) return;
 
-        var sasToken = _store.GetSasToken(Container);
+        // Captured before the awaits below (#409). This writes a CREDENTIAL onto an instance, so
+        // it must be the instance and container the user was looking at when they pressed the
+        // button - both are set from the screen above and can change while the write is in
+        // flight.
+        var server = Server;
+        var container = Container;
+
+        var sasToken = _store.GetSasToken(container);
 
         // Only a SAS credential needs one. A managed-identity credential carries no secret at all,
         // which is the entire point for an estate that forbids them.
@@ -324,7 +331,7 @@ public partial class ServerCredentialViewModel : ObservableObject
             // Says which secret is missing (#370). An S3 container stores an access key pair,
             // and being told to refresh a SAS token it never had is a wild goose chase.
             Reported?.Invoke(
-                Container.IsS3
+                container.IsS3
                     ? "No access key pair stored for this bucket. Add or refresh the key id and " +
                       "secret key in Blob Storage config."
                     : "No SAS token stored for this container. Add or refresh the token in " +
@@ -341,7 +348,7 @@ public partial class ServerCredentialViewModel : ObservableObject
         try
         {
             var change = await _sql.EnsureCredentialExistsAsync(
-                Server, Name, Container.ContainerUrl, sasToken ?? string.Empty,
+                server, Name, container.ContainerUrl, sasToken ?? string.Empty,
                 IdentityToCreate, _writeCancellation.Begin());
 
             await RefreshAsync();

@@ -160,13 +160,17 @@ public partial class BackupViewModel : ViewModelBase
             return;
         }
 
+        // Captured before the await (#409): the list belongs to the server that was asked, and
+        // this dropdown is a click away from the one that produced it.
+        var server = Server;
+
         var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
         try
         {
-            var names = await _sql.GetDatabaseListAsync(Server, ct);
+            var names = await _sql.GetDatabaseListAsync(server, ct);
 
             Databases = new ObservableCollection<string>(names);
             DatabasePicks = new ObservableCollection<DatabasePick>(
@@ -177,7 +181,7 @@ public partial class BackupViewModel : ViewModelBase
             try
             {
                 EncryptionCertificates = new ObservableCollection<string>(
-                    await _sql.ListBackupCertificatesAsync(Server, ct));
+                    await _sql.ListBackupCertificatesAsync(server, ct));
             }
             catch
             {
@@ -189,7 +193,7 @@ public partial class BackupViewModel : ViewModelBase
             // the wrong choice means a production database read at full speed for several minutes.
             SelectedDatabase = null;
 
-            SetStatus($"{Server.ServerName} has {names.Count} database(s).");
+            SetStatus($"{server.ServerName} has {names.Count} database(s).");
         }
         catch (OperationCanceledException)
         {
