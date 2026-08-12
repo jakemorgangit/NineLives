@@ -558,17 +558,26 @@ public partial class ServerManagerViewModel : ViewModelBase
     {
         if (SelectedServer == null) return;
 
+        // Captured BEFORE the await (#409). A connection attempt is exactly the operation slow
+        // enough for somebody to click another entry in the list beside it - the full timeout
+        // against an unreachable host - and every line below used to read SelectedServer again
+        // afterwards. So the app proved it could reach one server and then announced the other:
+        // marked it connected, handed it out as ConnectedServer (which is the object the restore
+        // screen EXECUTES against), and wrote the proved server's version banner onto the other
+        // one's saved entry.
+        var server = SelectedServer;
+
         TestResult = string.Empty;
         IsBusy = true;
         try
         {
-            await _sqlService.TestConnectionAsync(SelectedServer);
+            await _sqlService.TestConnectionAsync(server);
 
             // Derive the product-version tag from the connection we just proved works. Best
             // effort: a server that connects but will not answer @@VERSION should still connect.
             try
             {
-                RecordDetectedVersion(SelectedServer, await _sqlService.GetServerVersionAsync(SelectedServer));
+                RecordDetectedVersion(server, await _sqlService.GetServerVersionAsync(server));
             }
             catch
             {
@@ -576,18 +585,18 @@ public partial class ServerManagerViewModel : ViewModelBase
             }
 
             IsConnected = true;
-            ConnectedServerDisplay = SelectedServer.DisplayText;
-            MarkConnected(SelectedServer);
+            ConnectedServerDisplay = server.DisplayText;
+            MarkConnected(server);
             ConnectionChanged?.Invoke(this, new ServerConnectionChangedEventArgs
             {
                 IsConnected = true,
-                ServerName = SelectedServer.ServerName,
-                ConnectedServer = SelectedServer
+                ServerName = server.ServerName,
+                ConnectedServer = server
             });
-            SetStatus($"Connected to {SelectedServer.ServerName}");
+            SetStatus($"Connected to {server.ServerName}");
 
             TestSuccess = true;
-            TestResult = $"Connected to {SelectedServer.DisplayText}.";
+            TestResult = $"Connected to {server.DisplayText}.";
         }
         catch (Exception ex)
         {

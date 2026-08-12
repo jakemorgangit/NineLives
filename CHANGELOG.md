@@ -12,6 +12,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Connecting announces the server it actually proved** (#409). `ConnectAsync` read the list's
+  selection again after its await, and so did every line after it - so clicking a different entry
+  while a connection hung meant the app proved it could reach one server and then announced the
+  other: marked it connected, handed it to the rest of the app as the connected server, and wrote
+  the proved server's version banner onto the other one's saved entry. That object is what the
+  restore screen executes against, so the end of it was a restore - `WITH REPLACE`, dropping the
+  target - aimed at an instance the app had never tested, with every label on screen naming it as
+  the one that was. A connection attempt is exactly the operation slow enough for somebody to
+  click elsewhere while it runs. Four more places asked the same question after the await and now
+  capture first, including the one that decides the WITH MOVE directories.
+
 - **The dot beside a container says something** (#407). It was drawn in the success colour
   unconditionally - a green light beside every container whether or not it had a credential,
   whether or not it had ever been tested, with no tooltip and no legend, so the only reading
