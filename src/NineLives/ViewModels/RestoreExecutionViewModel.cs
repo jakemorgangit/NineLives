@@ -723,7 +723,14 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     // ── the console's own actions ───────────────────────────────────────────────
 
     [RelayCommand]
-    private void CopyConsole() => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
+    private void CopyConsole()
+    {
+        // Flush, then read - the rule Flush's own comment states. In practice the 60ms timer has
+        // long since drained by the time a human clicks, but that is a timing argument, and the
+        // cost of not relying on one is a single synchronous call.
+        Console.Flush();
+        TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
+    }
 
     /// <summary>
     /// Builds the file Save output writes: the console, plus the context needed to read it a week
@@ -739,6 +746,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     [RelayCommand]
     private void SaveConsole()
     {
+        Console.Flush();
         if (string.IsNullOrEmpty(Console.Text)) return;
 
         var dialog = new SaveFileDialog
