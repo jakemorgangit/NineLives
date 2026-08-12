@@ -662,6 +662,40 @@
                                    Visibility="{Binding HasNoTargetServers, Converter={StaticResource BoolToVis}}">
                             <Run Text="No saved servers yet. Add one on the SQL Servers screen and it will appear here." />
                         </TextBlock>
+
+                        <!-- Whether the target was actually reached (#420). Picking one here used
+                             to name the instance without ever proving it, so every step ticked and
+                             Execute still said "connect on the SQL Servers tab" - sending somebody
+                             elsewhere to do what they had just done. Failing is a legitimate
+                             outcome and says so: the script still generates for an instance this
+                             machine cannot reach, which is what the runbook and Agent job exports
+                             are for. -->
+                        <TextBlock TextWrapping="Wrap"
+                                   MaxWidth="640"
+                                   HorizontalAlignment="Left"
+                                   Margin="0,8,0,0"
+                                   Text="{Binding TargetConnectionState}"
+                                   Visibility="{Binding TargetConnectionState, Converter={StaticResource NullToVis}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                    <Style.Triggers>
+                                        <!-- Reached nothing, and no longer trying. Not an error
+                                             style: generating a script for an instance this
+                                             machine cannot reach is a supported workflow. -->
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsConnectingToTarget}" Value="False" />
+                                                <Condition Binding="{Binding IsConnectedToServer}" Value="False" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                        </MultiDataTrigger>
+                                        <DataTrigger Binding="{Binding IsConnectedToServer}" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -2214,11 +2248,12 @@
                 </StackPanel>
             </Border>
 
-            <!-- Status -->
+            <!-- Status. The shared style, so an error stops being printed twice (#419):
+                 SetError writes this line as well as the banner, because not every screen
+                 surfaces both, and this one surfaces both. Same wrinkle as #392 and #404. -->
             <TextBlock Text="{Binding StatusMessage}"
-                       Style="{StaticResource SecondaryText}"
-                       Margin="0,4,0,16"
-                       Visibility="{Binding StatusMessage, Converter={StaticResource NullToVis}}" />
+                       Style="{StaticResource StatusLine}"
+                       Margin="0,4,0,16" />
         </StackPanel>
         </ScrollViewer>
     </DockPanel>
