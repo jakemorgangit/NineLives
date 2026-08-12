@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net.Http;
 using System.Xml.Linq;
 
@@ -170,7 +170,27 @@ public static class S3ListingClient
             }
         }
 
-        return new S3ListPage(objects, prefixes, Element(root, "NextContinuationToken"));
+        // Two independent reasons there is no next page, because relying on one of them alone is
+        // what made this loop forever (#416).
+        //
+        // IsTruncated is the authoritative flag in ListObjectsV2 and was not being consulted at
+        // all - the token's presence was standing in for it. And "present" was the wrong test:
+        // XElement.Value on an empty element is "", not null, so a provider that emits
+        // <NextContinuationToken/> rather than omitting it left a non-null token. The loop then
+        // asked for another page with an empty continuation-token, which means "from the start",
+        // got page one back, and went round again - accumulating duplicates until the process
+        // ran out of memory.
+        //
+        // AWS omits the element, so this never fires against S3 proper. This feature exists for
+        // the S3-COMPATIBLE providers, which is exactly where empty-versus-omitted differs, and
+        // none of them have been run against.
+        var truncated = string.Equals(
+            Element(root, "IsTruncated"), "true", StringComparison.OrdinalIgnoreCase);
+
+        var token = Element(root, "NextContinuationToken");
+        if (!truncated || string.IsNullOrWhiteSpace(token)) token = null;
+
+        return new S3ListPage(objects, prefixes, token);
     }
 
     private static string? Element(XElement? parent, string localName)

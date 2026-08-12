@@ -12,6 +12,16 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **An S3 listing cannot loop forever on the last page** (#416). The paging loops stopped when
+  the continuation token was null, and the token was read straight off the XML - but an element
+  that is present and empty reads as `""`, not null. A provider that writes
+  `<NextContinuationToken/>` on the last page instead of omitting it therefore left a non-null
+  token, so the loop asked for another page with an empty continuation token, which means "start
+  again", got page one back, and went round for ever - accumulating duplicates until the process
+  ran out of memory. AWS omits the element, so this never fired against S3 proper; this feature
+  exists for the S3-compatible providers, which is exactly where that detail differs. `IsTruncated`,
+  which is the authoritative flag, was not being consulted at all. Both are now.
+
 - **Exposure is judged on the clock the dates came from** (#414). msdb records a backup's finish
   time in the instance's own local time, and the sweep compared it against `DateTime.Now` on the
   machine running the app - so every age on the dashboard was out by the offset between the two,
