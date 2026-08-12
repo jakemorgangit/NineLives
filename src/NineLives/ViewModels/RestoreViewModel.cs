@@ -395,8 +395,34 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnUseWithMoveChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowMoveOptions));
+
+        // Ticking a checkbox does not cancel somebody's work (#413).
+        //
+        // Fetching the target's default directories is one of the mutually exclusive server
+        // operations on this screen - they share a cancellation source so that one Stop button
+        // covers them all, and starting one deliberately stops the last. That doctrine is right
+        // for the BUTTONS: pressing "Fetch from Server" while a chain verification runs is a
+        // choice to do the other thing instead.
+        //
+        // It is wrong here, because this is not a button. Ticking WITH MOVE is a request to see
+        // the move options, and it fired the fetch as a convenience - which cancelled a chain
+        // verification that reads the header of every backup in the chain, several minutes'
+        // work, for a value the user can ask for explicitly a moment later.
+        //
+        // So the automatic trigger defers, and says so. Deferring rather than queueing on
+        // purpose: a fetch that fires when the query finishes would answer for whatever is
+        // selected THEN, which is the stale-answer class fixed in #409.
         if (value)
-            _ = FetchDefaultPathsAsync();
+        {
+            if (_queryCancellation.CanCancel)
+                PathSourceText =
+                    "A server query is already running, so the default paths were not fetched - " +
+                    "stopping it for this would have been a poor trade. Press Fetch from Server " +
+                    "once it finishes, or type the paths in.";
+            else
+                _ = FetchDefaultPathsAsync();
+        }
+
         UpdateRestoreSummary();
     }
 
