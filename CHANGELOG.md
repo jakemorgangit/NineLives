@@ -12,6 +12,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Exposure is judged on the clock the dates came from** (#414). msdb records a backup's finish
+  time in the instance's own local time, and the sweep compared it against `DateTime.Now` on the
+  machine running the app - so every age on the dashboard was out by the offset between the two,
+  and with a one-hour warning threshold the offset decided the verdict. The dangerous direction is
+  a server ahead of the app: backups look newer than they are, so a database 28 hours without a
+  log computes as 23 and an alarm is downgraded to a warning - and where the offset exceeds the
+  real age the arithmetic goes negative and the row comes out green. The opposite offset produced
+  false alarms on healthy databases. Managing servers in another region is ordinary in exactly the
+  estates this tool is for, and it happens on its own twice a year where the two ends change to
+  daylight saving on different dates. Each server is now asked for its own clock in the same
+  query - no configuration, no extra round trip.
+
 - **Recovery actions cannot be started on top of each other** (#411). The same defect as #401 on
   the panel where it costs the most: the one somebody is looking at after a restore has failed,
   trying to get a database back. Both "Run this" buttons stayed live while one was running - the

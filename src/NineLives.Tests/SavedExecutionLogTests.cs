@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -50,6 +50,12 @@ public class SavedExecutionLogTests
         vm.TargetDatabaseName = "Sales_Restored";
         vm.Execution.Console.Append("RESTORE DATABASE ... 10 percent processed.");
 
+        // Append BUFFERS - it drains on a 60ms dispatcher timer, and only flushes inline when the
+        // calling thread has no dispatcher at all. Which thread xUnit hands this test therefore
+        // decided whether it passed, and it passed here and failed on CI. Flush, then read, is
+        // what ConsoleBuffer.Flush's own comment tells callers to do.
+        vm.Execution.Console.Flush();
+
         var saved = vm.Execution.BuildSavedDocument!();
 
         Assert.Contains("Nine Lives - restore execution log", saved);
@@ -71,6 +77,7 @@ public class SavedExecutionLogTests
         vm.TargetDatabaseName = "Sales_Restored";
         vm.Execution.Console.Append(
             "RESTORE FROM URL = N'https://acct.blob.core.windows.net/b/x.bak?sv=2022-11-02&sig=SECRETSIGNATUREVALUE'");
+        vm.Execution.Console.Flush();
 
         var saved = vm.Execution.BuildSavedDocument!();
 
