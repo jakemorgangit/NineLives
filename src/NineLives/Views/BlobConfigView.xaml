@@ -29,6 +29,9 @@
             <TextBlock Text="Configure the containers holding your backups - Azure Blob Storage, or any S3-compatible bucket."
                        Style="{StaticResource SecondaryText}"
                        Margin="0,4,0,0" />
+            <!-- What this screen just did. Its confirmations, instructions and
+                 consequences used to reach nothing at all (#404). -->
+            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource StatusLine}" />
         </StackPanel>
 
         <Grid Grid.Row="1">
@@ -79,10 +82,31 @@
                             <DataTemplate>
                                 <StackPanel Margin="4,6">
                                     <StackPanel Orientation="Horizontal">
+                                        <!-- Says something (#407). This was SuccessBrush
+                                             unconditionally: a green light beside every
+                                             container whether or not it had a credential, in an
+                                             app whose premise is that nothing is fine until
+                                             something has proved it. A config import arrives
+                                             with no secrets by design, so a whole list of them
+                                             used to come up green and reach nothing. -->
                                         <Ellipse Width="8" Height="8"
-                                                 Fill="{DynamicResource SuccessBrush}"
                                                  VerticalAlignment="Center"
-                                                 Margin="0,0,8,0" />
+                                                 Margin="0,0,8,0"
+                                                 ToolTip="{Binding CredentialStateNote}">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CredentialIsExpired}" Value="True">
+                                                            <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding CredentialIsMissing}" Value="True">
+                                                            <Setter Property="Fill" Value="{DynamicResource ErrorBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
                                         <TextBlock Text="{Binding Name}"
                                                    FontWeight="SemiBold"
                                                    Foreground="{DynamicResource PrimaryTextBrush}" />
@@ -92,6 +116,23 @@
                                                TextTrimming="CharacterEllipsis"
                                                Margin="16,2,0,0"
                                                MaxWidth="220" />
+
+                                    <!-- In words as well as in colour. The selected-row style in
+                                         this app already carries a note that high contrast makes
+                                         a tinted fill nearly invisible, so meaning must not ride
+                                         on colour alone - an 8px dot is the worst case of it. -->
+                                    <TextBlock Text="no credential stored"
+                                               Style="{StaticResource SecondaryText}"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource ErrorBrush}"
+                                               Margin="16,2,0,0"
+                                               Visibility="{Binding CredentialIsMissing, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock Text="credential expired"
+                                               Style="{StaticResource SecondaryText}"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               Margin="16,2,0,0"
+                                               Visibility="{Binding CredentialIsExpired, Converter={StaticResource BoolToVis}}" />
                                     <ItemsControl ItemsSource="{Binding TagChips}"
                                                   Style="{StaticResource TagChipList}"
                                                   Margin="16,2,0,0" />

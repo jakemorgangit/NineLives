@@ -160,13 +160,17 @@ public partial class BackupViewModel : ViewModelBase
             return;
         }
 
+        // Captured before the await (#409): the list belongs to the server that was asked, and
+        // this dropdown is a click away from the one that produced it.
+        var server = Server;
+
         var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
         try
         {
-            var names = await _sql.GetDatabaseListAsync(Server, ct);
+            var names = await _sql.GetDatabaseListAsync(server, ct);
 
             Databases = new ObservableCollection<string>(names);
             DatabasePicks = new ObservableCollection<DatabasePick>(
@@ -177,7 +181,7 @@ public partial class BackupViewModel : ViewModelBase
             try
             {
                 EncryptionCertificates = new ObservableCollection<string>(
-                    await _sql.ListBackupCertificatesAsync(Server, ct));
+                    await _sql.ListBackupCertificatesAsync(server, ct));
             }
             catch
             {
@@ -189,7 +193,7 @@ public partial class BackupViewModel : ViewModelBase
             // the wrong choice means a production database read at full speed for several minutes.
             SelectedDatabase = null;
 
-            SetStatus($"{Server.ServerName} has {names.Count} database(s).");
+            SetStatus($"{server.ServerName} has {names.Count} database(s).");
         }
         catch (OperationCanceledException)
         {
@@ -240,6 +244,24 @@ public partial class BackupViewModel : ViewModelBase
 
     [ObservableProperty]
     private ObservableCollection<BlobContainerConfig> _containers = [];
+    /// <summary>
+    /// Nothing to pick from, and where to go and fix that (#406).
+    ///
+    /// A fresh install put empty "Select..." dropdowns on this screen with no words at all, while
+    /// the Restore and Exposure screens both already named the missing thing, named the screen
+    /// that fills it, and said what would then happen. The app knows exactly what is absent; it
+    /// simply was not saying.
+    /// </summary>
+    public bool HasNoServers => Servers.Count == 0;
+
+    public bool HasNoContainers => Containers.Count == 0;
+
+    partial void OnServersChanged(ObservableCollection<ServerConnection> value) =>
+        OnPropertyChanged(nameof(HasNoServers));
+
+    partial void OnContainersChanged(ObservableCollection<BlobContainerConfig> value) =>
+        OnPropertyChanged(nameof(HasNoContainers));
+
 
     [ObservableProperty]
     private BlobContainerConfig? _container;
@@ -770,7 +792,31 @@ public partial class BackupViewModel : ViewModelBase
     /// WITH CHECKSUM follows the backup's own setting - verifying checksums that were never
     /// written fails the verify for a backup that is fine.
     /// </summary>
-    [RelayCommand]
+    /// <summary>
+    /// Pressable only when there is something to verify and nothing being verified (#402).
+    ///
+    /// The second half is what was missing. RESTORE VERIFYONLY reads the whole backup - minutes,
+    /// on a real database - and the button looked exactly as it had before, so the natural
+    /// response was to press it again. That call begins a new cancellation, which cancels the
+    /// verify in flight: every minute of reading thrown away, and a console reading "Verify
+    /// cancelled." immediately followed by "Verifying...", which looks like the app changed its
+    /// mind rather than like a button that should have been disabled.
+    /// </summary>
+    public bool CanVerify => CanVerifyLastBackup && !IsVerifying;
+
+    partial void OnIsVerifyingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanVerify));
+        VerifyLastBackupCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnCanVerifyLastBackupChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanVerify));
+        VerifyLastBackupCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanVerify))]
     private async Task VerifyLastBackupAsync()
     {
         if (Server == null || _lastWrittenDevices.Count == 0) return;

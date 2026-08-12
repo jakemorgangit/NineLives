@@ -181,10 +181,13 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <!-- This is the only view with no ErrorBanner, by design: SetError writes the
+                 status line too, precisely so an error here is not silent. But it was drawn in
+                 the same grey as everything else, so a refusal to destroy a restore's evidence
+                 looked exactly like "Script copied to clipboard" (#404). -->
             <TextBlock Grid.Column="0"
                        Text="{Binding StatusMessage}"
-                       Style="{StaticResource SecondaryText}"
-                       TextWrapping="Wrap"
+                       Style="{StaticResource StatusLineNoBanner}"
                        VerticalAlignment="Center" />
 
             <Button Grid.Column="1" Content="Keep it"

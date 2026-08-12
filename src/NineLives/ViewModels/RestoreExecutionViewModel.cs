@@ -180,8 +180,24 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// The server-side credential check (#115 seam 5). A refusal has written nothing, so the run is
     /// abandoned without a history entry - it was never attempted.
     /// </param>
+    /// <summary>
+    /// Stage a run in progress without one, for the screens that have to behave differently
+    /// while a restore is running (#401). A real run needs a server.
+    /// </summary>
+    internal void SetExecutingForTests(bool value) => IsExecuting = value;
+
     public async Task RunAsync(RestoreRun run, Func<Action<string>, Task<CredentialPreflight>> preflight)
     {
+        // The last line of defence (#401). The screen's button is gated, but this is also reached
+        // from the rehearsal path, and the cost of re-entering is not a wasted call: the first
+        // thing below is a cancellation Begin(), which would abandon the restore already running
+        // and leave its target mid-chain in RESTORING.
+        if (IsExecuting)
+        {
+            SetError("A restore is already running. Stop it first, or wait for it to finish.");
+            return;
+        }
+
         // What the notifications call the run. A rehearsal's TARGET is the scratch copy, which
         // is an implementation detail - the thing being PROVEN is the source database, and that
         // is the name a Teams channel can recognise.
@@ -597,11 +613,32 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     [ObservableProperty]
     private string _actionOutcome = string.Empty;
 
+    /// <summary>
+    /// One at a time (#411). The flag existed and drove only the progress panel's visibility, so
+    /// every action button stayed live while one ran - and the first thing this method does is
+    /// begin a new cancellation, which abandons the action already running.
+    ///
+    /// This is the panel somebody is on after a restore has FAILED, with two buttons side by side
+    /// and a RESTORE ... WITH RECOVERY that goes out at CommandTimeout = 0. Pressing the other one
+    /// because nothing seemed to be happening threw away the recovery they were waiting for.
+    /// </summary>
+    public bool CanRunRecoveryAction => !IsRunningAction;
+
+    partial void OnIsRunningActionChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunRecoveryAction));
+        RunRecoveryActionCommand.NotifyCanExecuteChanged();
+    }
+
     /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunRecoveryAction))]
     private async Task RunRecoveryActionAsync(RecoveryAction? action)
     {
         if (action == null || _lastServer == null) return;
+
+        // The command is gated, but this is the one place where re-entering does damage rather
+        // than wasting a call, so it is checked here too.
+        if (IsRunningAction) return;
 
         // Cancellable, and it needs it more than most: this runs when a restore has already failed,
         // RESTORE ... WITH RECOVERY can take a long time on a large database, and it goes out at
@@ -686,7 +723,14 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     // ── the console's own actions ───────────────────────────────────────────────
 
     [RelayCommand]
-    private void CopyConsole() => TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
+    private void CopyConsole()
+    {
+        // Flush, then read - the rule Flush's own comment states. In practice the 60ms timer has
+        // long since drained by the time a human clicks, but that is a timing argument, and the
+        // cost of not relying on one is a single synchronous call.
+        Console.Flush();
+        TryCopyToClipboard(Console.Text, "Execution log copied to clipboard.");
+    }
 
     /// <summary>
     /// Builds the file Save output writes: the console, plus the context needed to read it a week
@@ -702,6 +746,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     [RelayCommand]
     private void SaveConsole()
     {
+        Console.Flush();
         if (string.IsNullOrEmpty(Console.Text)) return;
 
         var dialog = new SaveFileDialog

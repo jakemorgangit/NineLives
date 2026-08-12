@@ -271,6 +271,89 @@ public partial class RestoreViewModel : ViewModelBase
         Steps.Target.Report(value != null, value?.Name ?? string.Empty);
         if (value != null && !ReferenceEquals(_connectedServer, value))
             ConnectedServer = value;
+
+        // Picking a target here PROVES it, rather than only naming it (#420).
+        //
+        // This step's own subtitle offers "otherwise pick a saved server here" as the equivalent
+        // of connecting on the SQL Servers screen. It set everything except the one flag that
+        // gates Execute - IsConnectedToServer, which only MainViewModel sets, and only when the
+        // Servers screen connects - so a user who did exactly what this screen invited them to do
+        // got every step ticked, a generated script, and "Connect to a SQL Server instance (SQL
+        // Servers tab)" telling them to go elsewhere and do it again.
+        if (value != null && !IsConnectedToServer)
+            _ = ConnectToTargetAsync(value);
+    }
+
+    /// <summary>
+    /// What the target connection is doing, or why it did not happen (#420).
+    ///
+    /// Failing is a legitimate outcome, not an error: generating a script for an instance this
+    /// machine cannot reach is exactly what Copy as Agent job, Export runbook and Save to File are
+    /// for. So a failure never blocks generation - it just stops being silent about why Execute is
+    /// unavailable.
+    /// </summary>
+    [ObservableProperty]
+    private string _targetConnectionState = string.Empty;
+
+    [ObservableProperty]
+    private bool _isConnectingToTarget;
+
+    partial void OnIsConnectingToTargetChanged(bool value) => RefreshExecuteBlockedReason();
+
+    /// <summary>Its own source: this is automatic, so it must not cancel a query somebody started.</summary>
+    private readonly OperationCancellation _targetConnectCancellation = new();
+
+    private async Task ConnectToTargetAsync(ServerConnection server)
+    {
+        var ct = _targetConnectCancellation.Begin();
+
+        IsConnectingToTarget = true;
+        TargetConnectionState = $"Connecting to {server.Name}...";
+
+        try
+        {
+            await _sqlService.TestConnectionAsync(server, ct);
+
+            // Captured before the await, and checked after it (#409): a connection attempt is
+            // slow enough for somebody to pick a different target while it runs, and the answer
+            // belongs to the server that was asked.
+            if (!ReferenceEquals(SelectedTargetServer, server)) return;
+
+            IsConnectedToServer = true;
+            ConnectedServerName = server.ServerName;
+            TargetConnectionState = $"Connected to {server.Name}. The restore can run from here.";
+
+            // The step collapses itself once answered, so the header is where this has to be
+            // legible - otherwise the outcome sits behind a chevron nobody has reason to open.
+            Steps.Target.Describe(server.Name);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a later selection, which will report for itself.
+        }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(SelectedTargetServer, server)) return;
+
+            IsConnectedToServer = false;
+            TargetConnectionState =
+                $"Could not connect to {server.Name}: {ex.Message} The script still generates - " +
+                "save it, copy it as an Agent job or export a runbook and run it where the " +
+                "instance can be reached.";
+
+            // On the COLLAPSED header, because choosing a target completes the step and folds it
+            // away. Without this the screen showed a green tick against a server it had just
+            // failed to reach, with the explanation hidden inside - worse than the bug being
+            // fixed. Found by rendering it, not by reading it.
+            Steps.Target.Describe($"{server.Name} - could not be reached");
+        }
+        finally
+        {
+            if (ReferenceEquals(SelectedTargetServer, server))
+                IsConnectingToTarget = false;
+
+            _targetConnectCancellation.End();
+        }
     }
 
     /// <summary>
@@ -312,8 +395,34 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnUseWithMoveChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowMoveOptions));
+
+        // Ticking a checkbox does not cancel somebody's work (#413).
+        //
+        // Fetching the target's default directories is one of the mutually exclusive server
+        // operations on this screen - they share a cancellation source so that one Stop button
+        // covers them all, and starting one deliberately stops the last. That doctrine is right
+        // for the BUTTONS: pressing "Fetch from Server" while a chain verification runs is a
+        // choice to do the other thing instead.
+        //
+        // It is wrong here, because this is not a button. Ticking WITH MOVE is a request to see
+        // the move options, and it fired the fetch as a convenience - which cancelled a chain
+        // verification that reads the header of every backup in the chain, several minutes'
+        // work, for a value the user can ask for explicitly a moment later.
+        //
+        // So the automatic trigger defers, and says so. Deferring rather than queueing on
+        // purpose: a fetch that fires when the query finishes would answer for whatever is
+        // selected THEN, which is the stale-answer class fixed in #409.
         if (value)
-            _ = FetchDefaultPathsAsync();
+        {
+            if (_queryCancellation.CanCancel)
+                PathSourceText =
+                    "A server query is already running, so the default paths were not fetched - " +
+                    "stopping it for this would have been a poor trade. Press Fetch from Server " +
+                    "once it finishes, or type the paths in.";
+            else
+                _ = FetchDefaultPathsAsync();
+        }
+
         UpdateRestoreSummary();
     }
 
@@ -322,9 +431,6 @@ public partial class RestoreViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _moveLogFilePath = string.Empty;
-
-    [ObservableProperty]
-    private bool _isFetchingPaths;
 
     [ObservableProperty]
     private bool _pathsFromServer;
@@ -1241,6 +1347,19 @@ public partial class RestoreViewModel : ViewModelBase
 
         Timeline.Load(points);
 
+        // Only judge an inventory that exists (#419). This runs off WorkingSetChanged, which is
+        // raised on the path taken when NOTHING has been loaded and when no database has been
+        // picked - so arriving at the screen used to put a red banner up saying there is no full
+        // backup, when the truth was that nobody had pressed Load Backups yet.
+        //
+        // The same confusion as #368 and #356, pointing the other way: "not asked yet" reported
+        // as "asked, and the answer is bad". Here it was the first thing on the screen.
+        if (Inventory.AllSets.Count == 0 || string.IsNullOrEmpty(Inventory.SelectedDatabaseName))
+        {
+            ClearStatus();
+            return;
+        }
+
         if (points.Count == 0)
         {
             SetError("No valid restore points found. Ensure there is at least one full backup.");
@@ -1277,12 +1396,20 @@ public partial class RestoreViewModel : ViewModelBase
             return;
         }
 
-        IsFetchingPaths = true;
-        PathSourceText = $"Querying {ConnectedServer.ServerName} for default paths...";
+        // Captured before the await (#409), like every other server call on this screen. Reading
+        // it again afterwards attributed one instance's default directories to another when the
+        // connection changed mid-query - and those directories go into the WITH MOVE clauses, so
+        // the restore would look correct and fail at run time with a directory-not-found, after
+        // WITH REPLACE had already dropped the target. Disconnecting mid-query threw a
+        // NullReferenceException that surfaced as "Could not fetch paths: Object reference not
+        // set to an instance of an object."
+        var server = ConnectedServer;
+
+        PathSourceText = $"Querying {server.ServerName} for default paths...";
         try
         {
             var (dataPath, logPath) = await _sqlService.GetDefaultPathsAsync(
-                ConnectedServer, _queryCancellation.Begin());
+                server, _queryCancellation.Begin());
             var dbName = string.IsNullOrWhiteSpace(TargetDatabaseName) ? "DatabaseName" : TargetDatabaseName;
 
             if (!string.IsNullOrEmpty(dataPath))
@@ -1294,7 +1421,7 @@ public partial class RestoreViewModel : ViewModelBase
                 MoveLogFilePath = Path.Combine(dataPath, $"{dbName}_log.ldf");
 
             PathsFromServer = true;
-            PathSourceText = $"Paths detected from {ConnectedServer.ServerName}. You can still override them.";
+            PathSourceText = $"Paths detected from {server.ServerName}. You can still override them.";
         }
         catch (Exception ex)
         {
@@ -1304,10 +1431,6 @@ public partial class RestoreViewModel : ViewModelBase
             MoveLogFilePath = Path.Combine(fallbackDir, $"{dbName}_log.ldf");
             PathsFromServer = false;
             PathSourceText = $"Could not fetch paths: {ex.Message}. Using generic placeholders.";
-        }
-        finally
-        {
-            IsFetchingPaths = false;
         }
     }
 
@@ -1712,7 +1835,17 @@ public partial class RestoreViewModel : ViewModelBase
         get
         {
             if (IsExecuting) return string.Empty;
-            if (!IsConnectedToServer) return "Connect to a SQL Server to execute this restore.";
+            // Says which state it is actually in (#420). "Connect to a SQL Server" was written for
+            // somebody who had chosen no target at all; to somebody who HAS chosen one and could
+            // not be reached, it reads as an instruction they have already followed.
+            if (!IsConnectedToServer)
+                return IsConnectingToTarget
+                    ? $"Connecting to {SelectedTargetServer?.Name}..."
+                    : SelectedTargetServer != null
+                        ? $"{SelectedTargetServer.Name} could not be reached, so this restore " +
+                          "cannot run from here. The script above is still valid - save it, or " +
+                          "export it as a runbook or an Agent job."
+                        : "Choose the target instance above to execute this restore.";
             if (!HasScript) return "No script yet - pick a restore point and a target database name.";
             if (HasChainErrors) return "This chain cannot restore. See the problems listed above.";
             return string.Empty;
@@ -1721,8 +1854,21 @@ public partial class RestoreViewModel : ViewModelBase
 
     public bool IsExecuteBlocked => ExecuteBlockedReason.Length > 0;
 
-    /// <summary>The button's own IsEnabled, so the reason and the enabled state cannot disagree.</summary>
-    public bool CanPressExecute => !IsExecuteBlocked;
+    /// <summary>
+    /// The button's own IsEnabled.
+    ///
+    /// NOT simply the inverse of the blocked reason (#401). That reason is deliberately empty
+    /// while a restore runs - there is nothing to nag about mid-run, the Stop button is what is
+    /// wanted then - and reading the enablement off it therefore left Execute LIVE during a
+    /// restore. Two presses armed it and called RunAsync again, whose cancellation source cancels
+    /// the run in flight: a production restore abandoned mid-chain, leaving the target in
+    /// RESTORING, and started over from the top.
+    ///
+    /// So the two questions are asked separately. Backup and Copy Database both had this right
+    /// already - CanExecute => HasScript &amp;&amp; !IsRunning - and this is the screen where
+    /// getting it wrong costs the most, because WITH REPLACE has already dropped the target.
+    /// </summary>
+    public bool CanPressExecute => !IsExecuteBlocked && !IsExecuting;
 
     private void RefreshExecuteBlockedReason()
     {

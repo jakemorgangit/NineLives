@@ -243,6 +243,52 @@
         <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
     </Style>
 
+    <!--
+        The screen's own status line: what it just did, or is doing (#404).
+
+        Four screens had an ErrorBanner and nothing bound to StatusMessage, so their failures
+        showed and every confirmation, instruction and consequence did not - a config import
+        reported what it had changed to nobody, and "Enter the new SAS token below" never appeared
+        beside the box it was talking about.
+
+        Collapses while there is an error. SetError deliberately writes the status line as well as
+        the banner, because not every screen surfaces both, so on a screen that surfaces both the
+        same sentence would appear twice - once in red and once in grey, which reads as two
+        separate things having gone wrong.
+    -->
+    <Style x:Key="StatusLine" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Margin" Value="0,8,0,0" />
+        <Setter Property="Visibility" Value="Visible" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                <Setter Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding HasError}" Value="True">
+                <Setter Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+        The same line for the one screen that has no banner (#404).
+
+        History renders only a status line, by design - SetError writes it too, precisely so an
+        error there is not silent. But it was drawn in the same grey as everything else, so
+        "This history could not be read, so there is no telling what clearing it would destroy"
+        looked exactly like "Script copied to clipboard". This one stays visible during an error
+        and turns red for it.
+    -->
+    <Style x:Key="StatusLineNoBanner" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding HasError}" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <Style x:Key="LabelText" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="FontSize" Value="12" />

@@ -277,7 +277,8 @@ public class SqlServerService : ISqlServerService
         // excludes master/tempdb/model/msdb; snapshots and restoring states still list, because
         // "it exists and is not backed up" is true of them too and the state column says why.
         cmd.CommandText = @"
-            SELECT d.name                 AS DatabaseName,
+            SELECT SYSDATETIME()          AS ServerNow,
+                   d.name                 AS DatabaseName,
                    d.recovery_model_desc  AS RecoveryModel,
                    d.state_desc           AS StateDescription,
                    MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END) AS LastFull,
@@ -300,6 +301,11 @@ public class SqlServerService : ISqlServerService
                 DatabaseName = reader["DatabaseName"]?.ToString() ?? string.Empty,
                 RecoveryModel = reader["RecoveryModel"]?.ToString() ?? string.Empty,
                 StateDescription = reader["StateDescription"]?.ToString() ?? string.Empty,
+
+                // The instance's own clock, read in the same breath as the dates it is compared
+                // with (#414). Both are the server's local time; this machine's is not.
+                ServerNow = GetDateTimeFromReader(reader, "ServerNow"),
+
                 LastFull = GetDateTimeFromReader(reader, "LastFull"),
                 LastDifferential = GetDateTimeFromReader(reader, "LastDifferential"),
                 LastLog = GetDateTimeFromReader(reader, "LastLog")

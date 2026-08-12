@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Globalization;
@@ -242,6 +242,63 @@ public class BlobContainerConfig : INotifyPropertyChanged
     /// </summary>
     public bool IsExpired => AuthMode.NeedsSasToken() && ReadSasExpiry().IsExpired;
 
+    /// <summary>
+    /// Whether this container has the secret it needs, as far as can be known without asking the
+    /// network (#407).
+    ///
+    /// The list used to draw a green dot beside every container unconditionally - a status light
+    /// that never checked anything, in an app whose whole premise is that a backup is not fine
+    /// until something has proved it. The case that makes it matter is one the app creates
+    /// itself: a config export carries no secrets by design, so the first thing somebody sees
+    /// after importing on a new machine is a list of green dots on containers that cannot reach
+    /// anything.
+    ///
+    /// Set by whoever loaded the container from the vault; Unknown until then, so nothing claims
+    /// an answer it has not looked up.
+    /// </summary>
+    public ContainerCredentialState CredentialState
+    {
+        get => _credentialState;
+        set
+        {
+            if (_credentialState == value) return;
+            _credentialState = value;
+
+            // Notifying, so fixing a credential repaints the dot rather than leaving it red until
+            // the screen is rebuilt - the list is bound live and Save does not reload it.
+            OnPropertyChanged(nameof(CredentialState));
+            OnPropertyChanged(nameof(CredentialStateNote));
+            OnPropertyChanged(nameof(CredentialIsMissing));
+            OnPropertyChanged(nameof(CredentialIsExpired));
+        }
+    }
+
+    private ContainerCredentialState _credentialState = ContainerCredentialState.Unknown;
+
+    /// <summary>What the dot means, in words, for its tooltip.</summary>
+    public string CredentialStateNote => CredentialState switch
+    {
+        ContainerCredentialState.Present => AuthMode.IsEntra()
+            ? $"Signs in with {AuthMode.Describe()} - no stored secret to go stale."
+            : IsS3
+                ? "An access key pair is stored for this bucket."
+                : "A SAS token is stored for this container.",
+        ContainerCredentialState.Expired =>
+            "The stored SAS token has passed its expiry. Refresh it before restoring - the " +
+            "listing and the restore will both be refused.",
+        ContainerCredentialState.Missing => IsS3
+            ? "No access key pair is stored for this bucket. Nothing here can be listed or " +
+              "restored until one is added - a config imported from another machine arrives " +
+              "this way, by design."
+            : "No SAS token is stored for this container. Nothing here can be listed or " +
+              "restored until one is added - a config imported from another machine arrives " +
+              "this way, by design.",
+        _ => "Not checked yet."
+    };
+
+    public bool CredentialIsMissing => CredentialState == ContainerCredentialState.Missing;
+    public bool CredentialIsExpired => CredentialState == ContainerCredentialState.Expired;
+
     public DateTime? SasExpiry => GetSasExpiry();
 
     public string? StorageAccountName
@@ -427,4 +484,22 @@ public class PathElement
 
     public static string BuildPattern(IEnumerable<PathElement> elements)
         => string.Join("/", elements.Select(e => $"{{{e.Token}}}"));
+}
+
+/// <summary>
+/// What is known about a container's stored secret, without touching the network (#407).
+/// </summary>
+public enum ContainerCredentialState
+{
+    /// <summary>Nobody has asked the vault yet. Claims nothing.</summary>
+    Unknown,
+
+    /// <summary>The secret is there - or none is needed, under Entra.</summary>
+    Present,
+
+    /// <summary>Stored, and past its expiry. Reads and restores will both be refused.</summary>
+    Expired,
+
+    /// <summary>Not in the vault. The state a config import leaves behind, by design.</summary>
+    Missing
 }

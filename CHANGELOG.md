@@ -8,6 +8,122 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.6.2] - 2026-08-12
+
+### Fixed
+
+- **Ticking WITH MOVE no longer cancels a running chain verification** (#413). The server
+  operations on the Restore screen share one cancellation source so a single Stop button covers
+  them all, and starting one deliberately stops the last - which is right for the buttons, where
+  pressing another is a choice to do that instead. It was wrong for the checkbox: ticking WITH
+  MOVE fired the default-paths fetch as a convenience, and that threw away a chain verification
+  reading the header of every backup in the chain, for a value obtainable a moment later by
+  pressing Fetch from Server. The automatic trigger now defers when a query is in flight, and
+  says so rather than quietly leaving placeholder paths.
+
+- **Choosing a target on the Restore screen connects to it** (#420). Step 2 offers "otherwise
+  pick a saved server here" as the alternative to connecting on the SQL Servers screen, and it
+  set everything except the one flag that gates Execute - so every step ticked green, the script
+  generated, and the button said "Connect to a SQL Server instance (SQL Servers tab)", sending
+  somebody to another screen to do what they had just done. Picking a target now attempts the
+  connection and says what happened: reached, or the reason it was not, along with the reminder
+  that the script is still worth having - saved, exported as a runbook, or copied as an Agent job
+  for wherever the instance can be reached. A failed connection never blocks generation.
+
+- **The Restore screen stops claiming there are no restore points before anything is loaded**
+  (#419). Arriving at it put a red banner up saying there was no full backup, when the truth was
+  that nobody had pressed Load Backups yet - the check runs whenever the working set changes,
+  including on the path taken when nothing has been loaded at all. The same confusion as #368 and
+  #356, pointing the other way, and it was the first thing on the screen. It also appeared twice,
+  once in red and once in grey, which the shared status-line style from #404 now prevents.
+
+- **An S3 listing cannot loop forever on the last page** (#416). The paging loops stopped when
+  the continuation token was null, and the token was read straight off the XML - but an element
+  that is present and empty reads as `""`, not null. A provider that writes
+  `<NextContinuationToken/>` on the last page instead of omitting it therefore left a non-null
+  token, so the loop asked for another page with an empty continuation token, which means "start
+  again", got page one back, and went round for ever - accumulating duplicates until the process
+  ran out of memory. AWS omits the element, so this never fired against S3 proper; this feature
+  exists for the S3-compatible providers, which is exactly where that detail differs. `IsTruncated`,
+  which is the authoritative flag, was not being consulted at all. Both are now.
+
+- **Exposure is judged on the clock the dates came from** (#414). msdb records a backup's finish
+  time in the instance's own local time, and the sweep compared it against `DateTime.Now` on the
+  machine running the app - so every age on the dashboard was out by the offset between the two,
+  and with a one-hour warning threshold the offset decided the verdict. The dangerous direction is
+  a server ahead of the app: backups look newer than they are, so a database 28 hours without a
+  log computes as 23 and an alarm is downgraded to a warning - and where the offset exceeds the
+  real age the arithmetic goes negative and the row comes out green. The opposite offset produced
+  false alarms on healthy databases. Managing servers in another region is ordinary in exactly the
+  estates this tool is for, and it happens on its own twice a year where the two ends change to
+  daylight saving on different dates. Each server is now asked for its own clock in the same
+  query - no configuration, no extra round trip.
+
+- **Recovery actions cannot be started on top of each other** (#411). The same defect as #401 on
+  the panel where it costs the most: the one somebody is looking at after a restore has failed,
+  trying to get a database back. Both "Run this" buttons stayed live while one was running - the
+  flag that would have disabled them existed and drove only a progress panel's visibility - and
+  the first thing the handler does is begin a new cancellation, so pressing the other button
+  abandoned the `RESTORE ... WITH RECOVERY` already in flight. That statement goes out with no
+  timeout on purpose, because it can take a long time; "nothing seems to be happening, press the
+  other one" is exactly how somebody would lose it.
+
+- **Connecting announces the server it actually proved** (#409). `ConnectAsync` read the list's
+  selection again after its await, and so did every line after it - so clicking a different entry
+  while a connection hung meant the app proved it could reach one server and then announced the
+  other: marked it connected, handed it to the rest of the app as the connected server, and wrote
+  the proved server's version banner onto the other one's saved entry. That object is what the
+  restore screen executes against, so the end of it was a restore - `WITH REPLACE`, dropping the
+  target - aimed at an instance the app had never tested, with every label on screen naming it as
+  the one that was. A connection attempt is exactly the operation slow enough for somebody to
+  click elsewhere while it runs. Four more places asked the same question after the await and now
+  capture first, including the one that decides the WITH MOVE directories.
+
+- **The dot beside a container says something** (#407). It was drawn in the success colour
+  unconditionally - a green light beside every container whether or not it had a credential,
+  whether or not it had ever been tested, with no tooltip and no legend, so the only reading
+  available was "fine". The case that makes it matter is one the app creates itself: a config
+  export carries no secrets by design, so the first thing somebody saw after importing on a new
+  machine was a list of green dots on containers that could not reach anything. It now reports
+  what the vault actually holds - present, expired or missing - in words as well as in colour,
+  since this app's own styles already note that meaning must not ride on colour alone. Entra
+  containers are not reported as missing anything, having no stored secret to miss.
+
+- **A fresh install says what is missing and where to fix it** (#406). Rendering every screen
+  with no containers and no servers found three that did not. Browse Backups said "Select a
+  container and click Load Backups to browse" when there were no containers to select - an
+  instruction nobody could follow, on the screen that is the natural thing to press when you want
+  to look before committing to anything. Back Up showed two empty dropdowns and no words at all;
+  Copy Database showed three, and since a copy needs two servers, somebody with one configured
+  hit the same wall. The Restore and Exposure screens already named the missing thing, named the
+  screen that fills it and said what would then happen; the other three now do too.
+
+- **Five screens now say what they just did** (#404). Four of them - Settings, SQL Servers,
+  Blob Storage and Exposure - carried an error banner and bound nothing to their status line, so
+  failures showed and every confirmation, instruction and consequence did not. A config import
+  reported what it had added and updated to nobody, and the sentence telling you where to go and
+  look went with it. An export's "the file holds no secrets" - the one thing worth knowing before
+  emailing it to a colleague - was never shown. "Enter the new SAS token below" never appeared
+  beside the box it was about. Pressing Stop on an exposure sweep looked like it had done
+  nothing. And on History, the one screen with no banner by design, an error was drawn in exactly
+  the same grey as a success, so a refusal to destroy a restore's evidence read like "Script
+  copied to clipboard".
+
+- **Execute is no longer live while a restore is running** (#401). The button took its enabled
+  state from the same property that supplies the "why you cannot press this" sentence - and that
+  sentence is deliberately empty during a run, because mid-restore the control anybody wants is
+  Stop. Empty read as "not blocked", so the button stayed pressable, and two presses armed it and
+  called the run again: the first thing that does is begin a new cancellation, which abandons the
+  restore in flight and starts the chain over, leaving the target mid-restore in RESTORING. The
+  Backup and Copy Database screens both had this right already; this was the one where WITH
+  REPLACE has already dropped the target. The run itself now refuses to re-enter as well, since
+  the rehearsal path reaches it too.
+
+- **Verify Last Backup says it is running, and cannot be started twice** (#402). RESTORE
+  VERIFYONLY reads the whole backup - minutes on a real database - and the button looked exactly
+  as it had before, so the natural response was to press it again, which cancelled the verify and
+  started it over. The flag that would have said so existed and was bound to nothing.
+
 ## [1.6.1] - 2026-08-11
 
 ### Added
