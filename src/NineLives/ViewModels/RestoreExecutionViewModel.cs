@@ -613,11 +613,32 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     [ObservableProperty]
     private string _actionOutcome = string.Empty;
 
+    /// <summary>
+    /// One at a time (#411). The flag existed and drove only the progress panel's visibility, so
+    /// every action button stayed live while one ran - and the first thing this method does is
+    /// begin a new cancellation, which abandons the action already running.
+    ///
+    /// This is the panel somebody is on after a restore has FAILED, with two buttons side by side
+    /// and a RESTORE ... WITH RECOVERY that goes out at CommandTimeout = 0. Pressing the other one
+    /// because nothing seemed to be happening threw away the recovery they were waiting for.
+    /// </summary>
+    public bool CanRunRecoveryAction => !IsRunningAction;
+
+    partial void OnIsRunningActionChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunRecoveryAction));
+        RunRecoveryActionCommand.NotifyCanExecuteChanged();
+    }
+
     /// <summary>Runs one remediation the user picked, then re-reads the state.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunRecoveryAction))]
     private async Task RunRecoveryActionAsync(RecoveryAction? action)
     {
         if (action == null || _lastServer == null) return;
+
+        // The command is gated, but this is the one place where re-entering does damage rather
+        // than wasting a call, so it is checked here too.
+        if (IsRunningAction) return;
 
         // Cancellable, and it needs it more than most: this runs when a restore has already failed,
         // RESTORE ... WITH RECOVERY can take a long time on a large database, and it goes out at

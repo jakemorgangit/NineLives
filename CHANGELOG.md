@@ -12,6 +12,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Recovery actions cannot be started on top of each other** (#411). The same defect as #401 on
+  the panel where it costs the most: the one somebody is looking at after a restore has failed,
+  trying to get a database back. Both "Run this" buttons stayed live while one was running - the
+  flag that would have disabled them existed and drove only a progress panel's visibility - and
+  the first thing the handler does is begin a new cancellation, so pressing the other button
+  abandoned the `RESTORE ... WITH RECOVERY` already in flight. That statement goes out with no
+  timeout on purpose, because it can take a long time; "nothing seems to be happening, press the
+  other one" is exactly how somebody would lose it.
+
 - **Connecting announces the server it actually proved** (#409). `ConnectAsync` read the list's
   selection again after its await, and so did every line after it - so clicking a different entry
   while a connection hung meant the app proved it could reach one server and then announced the
