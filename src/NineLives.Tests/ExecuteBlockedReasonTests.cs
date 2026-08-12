@@ -56,14 +56,40 @@ public class ExecuteBlockedReasonTests
         return vm;
     }
 
+    /// <summary>
+    /// With no target chosen at all, the instruction is to choose one - here, on this screen
+    /// (#420). It used to say "Connect to a SQL Server", which sent somebody to a different
+    /// screen to do what step 2 offers to do for them.
+    /// </summary>
     [Fact]
-    public async Task NotConnectedSaysSo()
+    public async Task NoTargetChosenSaysToChooseOne()
     {
         var vm = await Loaded();
         vm.TargetDatabaseName = "MyDb_Restored";
 
+        Assert.Null(vm.SelectedTargetServer);
         Assert.False(vm.CanPressExecute);
-        Assert.Contains("Connect", vm.ExecuteBlockedReason);
+        Assert.Contains("Choose the target instance", vm.ExecuteBlockedReason);
+    }
+
+    /// <summary>
+    /// A target chosen and unreachable is a different state, and the sentence for it says so -
+    /// including that the script is still worth having.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreachableTargetSaysTheScriptIsStillValid()
+    {
+        var vm = await Loaded();
+        vm.TargetDatabaseName = "MyDb_Restored";
+        vm.SelectedTargetServer = new ServerConnection
+        { Id = ServerConnection.NewId(), Name = "SQLEXPRESS", ServerName = "SQLEXPRESS" };
+        vm.IsConnectedToServer = false;
+        vm.IsConnectingToTarget = false;
+
+        Assert.False(vm.CanPressExecute);
+        Assert.Contains("SQLEXPRESS", vm.ExecuteBlockedReason);
+        Assert.Contains("could not be reached", vm.ExecuteBlockedReason);
+        Assert.Contains("still valid", vm.ExecuteBlockedReason);
     }
 
     [Fact]
@@ -108,7 +134,7 @@ public class ExecuteBlockedReasonTests
         var vm = await Loaded();
         vm.TargetDatabaseName = "MyDb_Restored";
 
-        Assert.Contains("Connect", vm.ExecuteBlockedReason);
+        Assert.Contains("Choose the target instance", vm.ExecuteBlockedReason);
 
         vm.IsConnectedToServer = true;
         Assert.Empty(vm.ExecuteBlockedReason);

@@ -12,6 +12,22 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Choosing a target on the Restore screen connects to it** (#420). Step 2 offers "otherwise
+  pick a saved server here" as the alternative to connecting on the SQL Servers screen, and it
+  set everything except the one flag that gates Execute - so every step ticked green, the script
+  generated, and the button said "Connect to a SQL Server instance (SQL Servers tab)", sending
+  somebody to another screen to do what they had just done. Picking a target now attempts the
+  connection and says what happened: reached, or the reason it was not, along with the reminder
+  that the script is still worth having - saved, exported as a runbook, or copied as an Agent job
+  for wherever the instance can be reached. A failed connection never blocks generation.
+
+- **The Restore screen stops claiming there are no restore points before anything is loaded**
+  (#419). Arriving at it put a red banner up saying there was no full backup, when the truth was
+  that nobody had pressed Load Backups yet - the check runs whenever the working set changes,
+  including on the path taken when nothing has been loaded at all. The same confusion as #368 and
+  #356, pointing the other way, and it was the first thing on the screen. It also appeared twice,
+  once in red and once in grey, which the shared status-line style from #404 now prevents.
+
 - **An S3 listing cannot loop forever on the last page** (#416). The paging loops stopped when
   the continuation token was null, and the token was read straight off the XML - but an element
   that is present and empty reads as `""`, not null. A provider that writes
