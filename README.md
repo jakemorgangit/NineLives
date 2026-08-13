@@ -640,4 +640,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgements
 
 - UI design inspired by [Erik Darling's SQL Performance tools](https://github.com/erikdarlingdata/PerformanceMonitor)
+- Hannah Vernon's [10 step Backup & Recovery from First Principles](https://www.sqlserverscience.com/basics/backup-recovery-part-1-recovery-models/)
 - Built with [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)
