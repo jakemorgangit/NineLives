@@ -10,7 +10,7 @@
   <a href="https://github.com/jakemorgangit/NineLives/commits/main"><img src="https://img.shields.io/github/last-commit/jakemorgangit/NineLives?style=for-the-badge" alt="Last Commit"></a>
 </p>
 <p align="center">
-  <a href="https://www.linkedin.com/in/ACoAAAIlOaYB5KQSv94bd4jyCl9Q4Mf505n40wk"><img src="https://img.shields.io/badge/LinkedIn-Connect-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn Connect"></a>
+  <a href="https://www.linkedin.com/in/jakemorgan"><img src="https://img.shields.io/badge/LinkedIn-Connect-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn Connect"></a>
   <a href="https://jakemorgan.co.uk"><img src="https://img.shields.io/badge/Website-jakemorgan.co.uk-FF6B35?style=for-the-badge&logo=aboutdotme&logoColor=white" alt="jakemorgan.co.uk"></a>
   <a href="https://blackcat.wales"><img src="https://img.shields.io/badge/Blackcat_Data-blackcat.wales-black?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Blackcat Data Solutions"></a>
 </p>
