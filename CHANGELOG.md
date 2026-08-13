@@ -8,6 +8,26 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.6.3] - 2026-08-13
+
+### Fixed
+
+- **Pressing Stop on a recovery step reads as a cancellation, not a severe error** (#427).
+  Reported from the field. A restore has already failed, somebody is on the recovery panel with a
+  `RESTORE ... WITH RECOVERY` running against a large database, and they press Stop. SQL Server
+  cancels the command, and SqlClient raises a cancelled command as a SqlException - "A severe error
+  occurred on the current command" - rather than the cancellation the panel was watching for. The
+  panel's correct handler was stepped over and the general failure handler answered instead:
+  "FAILED at HH:mm:ss: A severe error occurred". It had not failed. It had done exactly what was
+  asked, and said otherwise at the one moment an operator is trying to recover a broken database
+  and needs the truth about what state it is in. The method behind that panel was added after the
+  three call sites carrying the translation and never got one; it does now, and the panel
+  additionally trusts the token, so whatever the driver throws on the way out, pressing Stop can no
+  longer be reported as a failure. Both guards read the token and never the message, so a genuine
+  severe error still reports as the failure it is - the same mistake pointing the other way would
+  be worse, telling somebody their database was untouched when a recovery step had just failed
+  against it.
+
 ## [1.6.2] - 2026-08-12
 
 ### Fixed

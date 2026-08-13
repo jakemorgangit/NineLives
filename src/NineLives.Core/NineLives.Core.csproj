@@ -11,7 +11,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>NineLives.Core</AssemblyName>
     <RootNamespace>Blackcat.NineLives</RootNamespace>
-    <Version>1.6.2</Version>
+    <Version>1.6.3</Version>
     <Product>Nine Lives</Product>
     <Authors>Jake Morgan</Authors>
     <Company>Blackcat Data Solutions Ltd</Company>
