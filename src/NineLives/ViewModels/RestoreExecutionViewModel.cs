@@ -685,7 +685,13 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             if (!HasRecoveryActions)
                 SetStatus($"[{_lastTarget}] is back to a usable state.");
         }
-        catch (OperationCanceledException)
+        // Two ways in, one answer (#427). The service translates a cancelled command into an
+        // OperationCanceledException, and this also trusts the token directly: if the user pressed
+        // Stop then, whatever the driver chose to throw on the way out, what happened is that they
+        // pressed Stop. Nothing reaching this panel should be able to call that a failure - it is
+        // the screen somebody is on when a restore has already gone wrong, and the one place where
+        // a wrong word about the database's state costs the most.
+        catch (Exception ex) when (ex is OperationCanceledException || ct.IsCancellationRequested)
         {
             // SQL Server rolls back the statement that was in flight, so the database is where it
             // was before this step - which is still whatever the failed restore left behind.

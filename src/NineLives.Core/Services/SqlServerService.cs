@@ -1025,7 +1025,11 @@ public class SqlServerService : ISqlServerService
         await using var cmd = conn.CreateCommand();
         cmd.CommandTimeout = 0;
         cmd.CommandText = sql;
-        await cmd.ExecuteNonQueryAsync(ct);
+
+        // No production caller today, but it is the same shape as the one that bit us in #427 -
+        // public, CommandTimeout = 0, takes a token - so it gets the trap now rather than the
+        // next time somebody reaches for it.
+        await CancellableAsync(() => cmd.ExecuteNonQueryAsync(ct), ct, "The statement");
     }
 
     public async Task ExecuteWithProgressAsync(
@@ -1432,9 +1436,25 @@ public class SqlServerService : ISqlServerService
         return marks;
     }
 
+    /// <summary>
+    /// Runs one statement with a percent bar, and reports a cancellation as a cancellation.
+    ///
+    /// The trap CancellableAsync exists for, caught a fourth time (#427). This method is what the
+    /// recovery panel runs, so it is the one place where getting it wrong is worst: a restore has
+    /// already failed, the user presses Stop on a RESTORE ... WITH RECOVERY, and SqlClient raises
+    /// the cancelled command as a SqlException. Untranslated, the panel reported "FAILED: A severe
+    /// error occurred" - telling somebody mid-recovery that their database is in a state it is
+    /// not, at the exact moment they need the truth about it.
+    /// </summary>
     public async Task ExecuteWithPercentPollingAsync(
         ServerConnection server, string sql, IProgress<double>? percent = null,
         CancellationToken ct = default)
+        => await CancellableAsync(
+            () => RunWithPercentPollingAsync(server, sql, percent, ct), ct, "The statement");
+
+    private async Task RunWithPercentPollingAsync(
+        ServerConnection server, string sql, IProgress<double>? percent,
+        CancellationToken ct)
     {
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
