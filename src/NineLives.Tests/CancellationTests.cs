@@ -165,6 +165,33 @@ public class SqlCancellationTests
     }
 
     /// <summary>
+    /// The same pin for the polling execute, which is what the recovery panel runs (#427).
+    ///
+    /// That method was added after the three carrying the guard and never got one, so a cancelled
+    /// recovery step reached the panel as a raw SqlException and was reported as "FAILED: A severe
+    /// error occurred". Reported from the field. The test above proves the translation for the
+    /// statement-loop path; this proves it for the one the recovery panel actually calls.
+    /// </summary>
+    [RequiresSqlFact]
+    public async Task ACancelledPollingStatementIsAlsoACancellation()
+    {
+        using var cts = new CancellationTokenSource();
+
+        var started = Stopwatch.StartNew();
+        var run = Service().ExecuteWithPercentPollingAsync(
+            TestServer(), "WAITFOR DELAY '00:00:30'", null, cts.Token);
+
+        await Task.Delay(1000);
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        started.Stop();
+
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(15),
+            $"Cancellation did not reach the server - the statement ran for {started.Elapsed}.");
+    }
+
+    /// <summary>
     /// The other half of the translation: a genuine SqlException must still surface as a failure.
     /// Guarding only on the token means an unrelated severe error is not mislabelled as the user
     /// having pressed Stop.

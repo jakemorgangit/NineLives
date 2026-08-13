@@ -626,6 +626,15 @@ public sealed class FakeSqlServerService : ISqlServerService
 
     public Exception? PollingExecuteThrows { get; set; }
 
+    /// <summary>
+    /// Runs once the statement is notionally in flight, before it throws (#427). It is how a test
+    /// reproduces the real sequence - the user presses Stop while the command is running, and what
+    /// comes back is the driver's own exception rather than an OperationCanceledException. Nothing
+    /// here can construct a SqlException, which has no public constructor, so the test supplies
+    /// the cancel through this and the exception through PollingExecuteThrows.
+    /// </summary>
+    public Action? DuringPollingExecute { get; set; }
+
     public List<string> PolledScripts { get; } = [];
 
     public Task ExecuteWithPercentPollingAsync(
@@ -634,6 +643,8 @@ public sealed class FakeSqlServerService : ISqlServerService
     {
         PolledScripts.Add(sql);
         ct.ThrowIfCancellationRequested();
+
+        DuringPollingExecute?.Invoke();
         if (PollingExecuteThrows != null) throw PollingExecuteThrows;
 
         if (percent != null)
