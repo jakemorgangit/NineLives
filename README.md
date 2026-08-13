@@ -1,6 +1,19 @@
 # Nine Lives 🐈‍⬛
 
-[![Build](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml/badge.svg)](https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml)
+<p align="center">
+  <a href="https://github.com/jakemorgangit/NineLives/stargazers"><img src="https://img.shields.io/github/stars/jakemorgangit/NineLives?style=for-the-badge&logo=github&color=gold&logoColor=black" alt="GitHub Stars"></a>
+  <a href="https://github.com/jakemorgangit/NineLives/network/members"><img src="https://img.shields.io/github/forks/jakemorgangit/NineLives?style=for-the-badge&logo=github" alt="GitHub Forks"></a>
+  <a href="https://github.com/jakemorgangit/NineLives/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/jakemorgangit/NineLives/build.yml?branch=main&style=for-the-badge&label=Build" alt="Build"></a>
+  <a href="https://github.com/jakemorgangit/NineLives/releases/latest"><img src="https://img.shields.io/github/v/release/jakemorgangit/NineLives?style=for-the-badge&color=blueviolet" alt="Latest Release"></a>
+  <a href="https://github.com/jakemorgangit/NineLives/issues"><img src="https://img.shields.io/github/issues/jakemorgangit/NineLives?style=for-the-badge" alt="Open Issues"></a>
+  <a href="https://github.com/jakemorgangit/NineLives/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/jakemorgangit/NineLives?style=for-the-badge&color=success" alt="Closed Issues"></a>
+  <a href="https://github.com/jakemorgangit/NineLives/commits/main"><img src="https://img.shields.io/github/last-commit/jakemorgangit/NineLives?style=for-the-badge" alt="Last Commit"></a>
+</p>
+<p align="center">
+  <a href="https://www.linkedin.com/in/ACoAAAIlOaYB5KQSv94bd4jyCl9Q4Mf505n40wk"><img src="https://img.shields.io/badge/LinkedIn-Connect-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn Connect"></a>
+  <a href="https://jakemorgan.co.uk"><img src="https://img.shields.io/badge/Website-jakemorgan.co.uk-FF6B35?style=for-the-badge&logo=aboutdotme&logoColor=white" alt="jakemorgan.co.uk"></a>
+  <a href="https://blackcat.wales"><img src="https://img.shields.io/badge/Blackcat_Data-blackcat.wales-black?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Blackcat Data Solutions"></a>
+</p>
 
 **Every database deserves nine lives.**
 
