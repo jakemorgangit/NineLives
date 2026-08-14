@@ -16,7 +16,7 @@ namespace Blackcat.NineLives.Cli;
 /// </summary>
 internal sealed class CliServices(
     ICredentialStore store, ISqlServerService sql, IBlobStorageService blobs,
-    IRestoreHistoryStore history, IRunNotifier notifier,
+    IOperationHistoryStore history, IRunNotifier notifier,
     ServerConnection? ephemeralServer = null, BlobContainerConfig? ephemeralContainer = null)
 {
     /// <summary>The --ephemeral definitions (#302), consulted before config, persisted nowhere.</summary>
@@ -26,7 +26,7 @@ internal sealed class CliServices(
     public ICredentialStore Store { get; } = store;
     public ISqlServerService Sql { get; } = sql;
     public IBlobStorageService Blobs { get; } = blobs;
-    public IRestoreHistoryStore History { get; } = history;
+    public IOperationHistoryStore History { get; } = history;
     public IRunNotifier Notifier { get; } = notifier;
 
     public AppConfig Config => _config ??= Store.LoadConfig();

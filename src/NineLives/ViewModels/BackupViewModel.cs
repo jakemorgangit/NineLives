@@ -32,15 +32,17 @@ public partial class BackupViewModel : ViewModelBase
     private readonly OperationCancellation _runCancellation = new();
     private readonly OperationCancellation _verifyCancellation = new();
     private readonly OperationLog _log;
+    private readonly IOperationHistoryStore _history;
 
     public BackupViewModel(
         ICredentialStore store, ISqlServerService sql, OperationLog? log = null,
-        IRunNotifier? notifier = null)
+        IRunNotifier? notifier = null, IOperationHistoryStore? history = null)
     {
         _notifier = notifier ?? NullRunNotifier.Instance;
         _store = store;
         _sql = sql;
         _log = log ?? App.Log;
+        _history = history ?? new OperationHistoryStore();
 
         Refresh();
     }
@@ -147,8 +149,92 @@ public partial class BackupViewModel : ViewModelBase
         foreach (var pick in DatabasePicks) pick.IsPicked = false;
     }
 
+    /// <summary>
+    /// One receipt per database (#434).
+    ///
+    /// Per database rather than per run, matching the semantics the loop already commits to: a
+    /// failure on the sixth database is the sixth database's failure and the rest still run
+    /// (#208). One entry per run would have to describe five successes and one failure in a single
+    /// outcome, which is exactly the summarising that loses the detail somebody came looking for.
+    ///
+    /// Never allowed to fail the backup. The store's own rule, and it matters more here than on
+    /// the restore screen: the backup has already happened by the time this is called, and
+    /// throwing now would turn a completed backup into a reported failure.
+    /// </summary>
+    private async Task Record(
+        string database, string script, List<string> destinations,
+        DateTime startedAt, OperationOutcome outcome, string? error)
+    {
+        try
+        {
+            await _history.AppendAsync(new OperationHistoryEntry
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTime.Now,
+                ServerName = Server?.ServerName ?? string.Empty,
+                TargetDatabase = database,
+                ContainerName = MediumIsBlob ? Container?.Name : null,
+                Medium = MediumDescription(destinations),
+                FileCount = destinations.Count,
+                OptionsSummary = OptionsDescription(),
+                Kind = OperationKind.Backup,
+                Outcome = outcome,
+                ErrorMessage = error,
+                Script = script,
+
+                // This screen's console is a line collection rather than the restore screen's
+                // ConsoleBuffer, and it is shared by every database in a multi-database run - so
+                // each entry carries the run's output up to its own moment, which is what a
+                // failure on the sixth database needs to be readable.
+                Log = string.Join(Environment.NewLine, Console)
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Could not record the backup of {database} in history: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// S3 and Azure are both "cloud storage" on screen but not in a receipt - the URL scheme is
+    /// what a later restore has to match, so the two are told apart here.
+    /// </summary>
+    private string MediumDescription(List<string> destinations) =>
+        MediumIsBlob
+            ? destinations.FirstOrDefault()?.StartsWith("s3://", StringComparison.OrdinalIgnoreCase) == true
+                ? "S3"
+                : "Cloud storage"
+            : "A path the server can write to";
+
+    /// <summary>
+    /// COPY_ONLY first and always stated, including when it is OFF.
+    ///
+    /// "Was the differential base moved?" is the question this exists to answer, and it is
+    /// unanswerable from anywhere else months later. The others are only worth the words when
+    /// they are on.
+    /// </summary>
+    private string OptionsDescription()
+    {
+        var options = new List<string> { CopyOnly ? "COPY_ONLY" : "NOT copy-only" };
+
+        if (Compression) options.Add("COMPRESSION");
+        if (Checksum) options.Add("CHECKSUM");
+        if (Encrypt) options.Add("ENCRYPTION");
+
+        return string.Join(", ", options);
+    }
+
     /// <summary>The list is not fetchable mid-run: it can wait; the backup cannot re-run (#281).</summary>
     public bool CanLoadDatabases => !IsRunning;
+
+    /// <summary>
+    /// Which listing owns the screen. Choosing a server now starts one automatically, so being
+    /// overtaken went from something you had to double-click to cause, to the ordinary result of
+    /// changing your mind about the server - and the loser must not write its answer, nor tidy up
+    /// after the winner. OperationCancellation.End() disposes unconditionally, so a superseded
+    /// run reaching its finally would dispose the live run's token source.
+    /// </summary>
+    private int _listGeneration;
 
     /// <summary>Asks the chosen instance what it has, rather than making somebody type a name.</summary>
     [RelayCommand(CanExecute = nameof(CanLoadDatabases))]
@@ -164,6 +250,7 @@ public partial class BackupViewModel : ViewModelBase
         // this dropdown is a click away from the one that produced it.
         var server = Server;
 
+        var generation = ++_listGeneration;
         var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
@@ -171,6 +258,10 @@ public partial class BackupViewModel : ViewModelBase
         try
         {
             var names = await _sql.GetDatabaseListAsync(server, ct);
+
+            // Overtaken while this was in flight: the newer selection owns the screen, and this
+            // answer is about a server the user has already moved on from.
+            if (generation != _listGeneration) return;
 
             Databases = new ObservableCollection<string>(names);
             DatabasePicks = new ObservableCollection<DatabasePick>(
@@ -197,16 +288,29 @@ public partial class BackupViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Stopped.");
+            // A cancel here is almost always this run being replaced by a newer selection, and the
+            // newer one is about to say what it found. Only the current generation speaks.
+            if (generation == _listGeneration) SetStatus("Stopped.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (generation == _listGeneration)
         {
             SetError($"Could not list the databases: {ex.Message}");
         }
+        catch
+        {
+            // Superseded, and its server is no longer on screen - reporting it would put an error
+            // about the old server over the new server's list.
+        }
         finally
         {
-            _listCancellation.End();
-            IsBusy = false;
+            // Only the newest listing tidies up. End() disposes whatever source is current, so a
+            // superseded run doing this would dispose the live one's - the same shape as the
+            // cross-operation version of this bug in #281.
+            if (generation == _listGeneration)
+            {
+                _listCancellation.End();
+                IsBusy = false;
+            }
         }
     }
 
@@ -223,6 +327,16 @@ public partial class BackupViewModel : ViewModelBase
         EncryptionCertificates = [];
         SelectedEncryptionCertificate = null;
         Invalidate();
+
+        // Choosing the server IS the request to see its databases. Pressing a button afterwards to
+        // ask the obvious follow-up question was a step that only ever had one right answer.
+        //
+        // Unlike the automatic fetch in #413, this cancels nothing anyone would miss: the only
+        // thing sharing _listCancellation is a previous listing of this same dropdown, which the
+        // new selection has just made irrelevant. It stays out of the way mid-run, where the list
+        // is deliberately unfetchable (#281) and the backup must not be disturbed.
+        if (value != null && CanLoadDatabases)
+            _ = LoadDatabasesAsync();
     }
 
     partial void OnSelectedDatabaseChanged(string? value) => Invalidate();
@@ -617,17 +731,32 @@ public partial class BackupViewModel : ViewModelBase
 
             foreach (var (database, script, destinations) in run)
             {
+                // Before the statement goes out, so a database the cancel arrived before is not
+                // recorded at all - the receipt is for what was performed, not what was planned.
                 ct.ThrowIfCancellationRequested();
                 Append($"Backing up {database} on {Server.ServerName}...");
+
+                var databaseStarted = DateTime.Now;
 
                 try
                 {
                     await _sql.ExecuteWithProgressAsync(Server, script, Append, ct);
                     Append($"{database}: done.");
                     succeededDevices.AddRange(destinations);
+                    await Record(database, script, destinations, databaseStarted,
+                        OperationOutcome.Succeeded, null);
                 }
                 catch (OperationCanceledException)
                 {
+                    // This one was in flight when the stop arrived, so it happened - and a partial
+                    // file that cannot be restored from is precisely what somebody needs to find
+                    // in the history later.
+                    // Awaited even though a stop is in flight: this write is why Stop used to
+                    // freeze the window, and it is also the receipt that says the file on disk is
+                    // a partial one. Off the dispatcher it is no longer felt.
+                    await Record(database, script, destinations, databaseStarted,
+                        OperationOutcome.Cancelled,
+                        "Cancelled by the user. Any file already written is incomplete.");
                     throw;
                 }
                 catch (Exception ex)
@@ -638,6 +767,8 @@ public partial class BackupViewModel : ViewModelBase
                     failed.Add(database);
                     lastFailureMessage = ex.Message;
                     _log.Error($"Backup failed: {database}: {ex.Message}");
+                    await Record(database, script, destinations, databaseStarted,
+                        OperationOutcome.Failed, ex.Message);
 
                     // At the moment of the problem, not minutes later in the summary (#242): the
                     // rest of the run continues, and whoever is off watching something else can

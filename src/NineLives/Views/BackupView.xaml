@@ -68,12 +68,16 @@
                                        Visibility="{Binding HasNoServers, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
 
+                        <!-- Choosing a server now lists its databases by itself, so this is a
+                             refresh rather than the step it used to be: for a database created
+                             since, or a list the instance could not give the first time. -->
                         <Button Grid.Column="1"
-                                Content="List databases"
+                                Content="Refresh list"
                                 Command="{Binding LoadDatabasesCommand}"
                                 Style="{StaticResource SecondaryButton}"
                                 Padding="16,8"
-                                VerticalAlignment="Bottom" />
+                                VerticalAlignment="Bottom"
+                                ToolTip="Ask the server for its databases again - for one created since, or if the list could not be fetched." />
                     </Grid>
 
                     <StackPanel Margin="0,12,0,0">
@@ -305,22 +309,12 @@
                                    Visibility="{Binding IsVerifying, Converter={StaticResource BoolToVis}}" />
                     </WrapPanel>
 
-                    <!-- Where the files will land, readable before anything is written. -->
-                    <StackPanel Margin="0,8,0,0"
-                                Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="WRITING TO" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
-                        <ItemsControl ItemsSource="{Binding Destinations}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}"
-                                               TextWrapping="Wrap"
-                                               FontFamily="{StaticResource ConsoleFont}"
-                                               FontSize="12"
-                                               Margin="0,0,0,2" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
+                    <!-- The destination list used to be repeated here above the script, under
+                         "WRITING TO". The script itself names every file it writes, in the
+                         statement that writes it, so this said the same thing twice - and it
+                         appeared at exactly the moment the script did, which is when the reader is
+                         already looking at the authoritative copy. Destinations remains on the
+                         viewmodel: it drives the script, the too-long check, and the run. -->
 
                     <Border Background="{DynamicResource ConsoleBackgroundBrush}"
                             BorderBrush="{DynamicResource ConsoleBorderBrush}"

@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -58,7 +58,7 @@ public class AuditIsVisibleOnTheRowsTests
                         : BackupType.Full)
             },
             new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
+            new FakeOperationHistoryStore(), TestLogs.Temp(), TestAuditStores.Temp());
 
         vm.ConnectedServer = new ServerConnection
         { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };

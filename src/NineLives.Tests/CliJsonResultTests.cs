@@ -18,7 +18,7 @@ public class CliJsonResultTests
 {
     private static readonly DateTime T0 = new(2026, 8, 1, 22, 0, 0);
 
-    private static (CliServices services, FakeSqlServerService sql, FakeRestoreHistoryStore history)
+    private static (CliServices services, FakeSqlServerService sql, FakeOperationHistoryStore history)
         Stage()
     {
         var store = new FakeCredentialStore();
@@ -43,7 +43,7 @@ public class CliJsonResultTests
                 }
             ]
         };
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var services = new CliServices(
             store, sql, new FakeBlobStorageService(), history, new FakeRunNotifier());
         return (services, sql, history);
@@ -200,7 +200,7 @@ public class CliJsonResultTests
     [Fact]
     public void AppReceiptsReadAsAppAndTheRowSaysNothingExtra()
     {
-        var entry = new RestoreHistoryEntry { TargetDatabase = "MyDb", ServerName = "SRV01" };
+        var entry = new OperationHistoryEntry { TargetDatabase = "MyDb", ServerName = "SRV01" };
 
         Assert.Equal("App", entry.Origin);
         Assert.DoesNotContain("via", entry.Detail);

@@ -892,12 +892,23 @@ public partial class RestoreViewModel : ViewModelBase
         BackupChainBuilder chainBuilder,
         RestoreScriptGenerator scriptGenerator,
         ICredentialStore credentialStore,
+        // Required, and ahead of the optionals, matching RestoreExecutionViewModel (#440).
+        //
+        // It used to default to `new OperationHistoryStore()`, which resolves to the real
+        // %LOCALAPPDATA% file the installed app uses - and this instance is handed straight to
+        // RestoreExecutionViewModel, which is the thing that writes. So one forgotten argument
+        // meant a test appending invented runs to the developer's own audit trail, with the entry
+        // cap trimming real receipts off the end to make room. The same defaulted-store pattern on
+        // the Backup and Copy screens did exactly that once those screens started writing.
+        //
+        // C# forbids a required parameter after an optional one, so this cannot be fixed in place -
+        // it has to move ahead of `log`, which is why the call sites shift with it.
+        IOperationHistoryStore history,
         OperationLog? log = null,
-        IRestoreHistoryStore? history = null,
         IBackupAuditStore? auditStore = null,
         IRunNotifier? notifier = null)
     {
-        _history = history ?? new RestoreHistoryStore();
+        _history = history;
 
         _blobService = blobService;
         _sqlService = sqlService;
@@ -1071,7 +1082,7 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     private readonly OperationLog _log;
-    private readonly IRestoreHistoryStore _history;
+    private readonly IOperationHistoryStore _history;
 
     public void RefreshContainers()
     {

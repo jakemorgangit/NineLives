@@ -8,6 +8,57 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.6.4] - 2026-08-14
+
+### Fixed
+
+- **Recovery actions are recorded** (#438). The panel that appears after a restore has failed
+  runs `RESTORE ... WITH RECOVERY` and `DBCC CHECKDB` against a production database - the
+  highest-stakes statement this app sends, at the worst possible moment - and it wrote nothing to
+  the history at all. An incident write-up showed the failed restore but not the statement that
+  brought the database back. All three endings are now filed, cancelled included, because "I
+  stopped it and the database was left alone" is exactly what a change ticket needs; the panel
+  said that only on screen, where it scrolls away. Recovery is also offered in the History
+  screen's filter, and a test now enumerates the kinds of run from the source of truth so the
+  next one added without a receipt fails the build rather than shipping silently.
+
+- **The test double for the config store now behaves like the real one** (#439). Nothing a user
+  sees changes today, but this is why a real defect reached `dev` with a fully green suite. The
+  real store re-reads and deserializes on every call, so every caller gets fresh objects; the
+  fake handed back its cached instances. That one difference meant a screen which rebuilds its
+  list and reselects by id saw "no change" in tests and a genuine change in production - so
+  every visit to the Backup or Copy screen silently opened a connection to a production instance
+  and wiped the user's selections, and no test could see it. The fake now hands out copies, and
+  five tests that were leaning on the old behaviour say what they mean instead.
+
+- **Recording a run no longer blocks the window** (#437). Writing a receipt is synchronous file
+  I/O - a cross-process lock whose backoff sleeps up to ten seconds when a scheduled CLI run
+  holds it, a whole-file read, a redaction pass over every script and log, then a serialize and
+  a replace - and the screens did it on the UI thread, once per database. A fifty-database
+  backup did fifty of them, so the window could stop repainting for minutes. The same write sat
+  in the cancellation handler, which meant pressing Stop froze the app instead of stopping the
+  run. Receipts are now written off the dispatcher, and still awaited one at a time: a run that
+  dies on the sixth database leaves the first five receipts on disk, because that half-finished
+  run is exactly the incident somebody opens the history for.
+
+- **The Restore screen can no longer default its history store to the real file** (#440).
+  Nothing a user sees changes. The store was an optional constructor argument defaulting to the
+  installed app's own `%LOCALAPPDATA%` audit trail, and this screen hands it straight to the
+  thing that writes - so a single forgotten argument meant a test appending invented runs to a
+  developer's real history, with the entry cap trimming genuine receipts off the end to make
+  room. The issue recorded this as latent because every call site passed a fake; one did not.
+  It is now required, which C# forces to sit ahead of the optional log, hence the call-site churn.
+
+- **A differential's file name no longer claims COPY_ONLY** (#441). COPY_ONLY is the default for
+  backups this app takes, and the marker went into every destination name - but the generated
+  statement omits the keyword on a differential, and rightly so: there is no copy-only
+  differential, because what COPY_ONLY protects is the differential base and a differential does
+  not move it. So the name asserted something about the statement that the statement did not.
+  That marker is load-bearing - the listing reads it back out of the name to classify what it
+  finds - and it read oddly in an audit, where the receipt said NOT copy-only beside a file
+  called `_COPY_ONLY_`. Backups already written keep their names and are still read correctly;
+  this only changes what gets written from here.
+
 ## [1.6.3] - 2026-08-13
 
 ### Fixed

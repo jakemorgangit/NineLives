@@ -37,15 +37,17 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     private readonly OperationCancellation _listCancellation = new();
     private readonly OperationCancellation _runCancellation = new();
     private readonly OperationLog _log;
+    private readonly IOperationHistoryStore _history;
 
     public CopyDatabaseViewModel(
         ICredentialStore store, ISqlServerService sql, OperationLog? log = null,
-        IRunNotifier? notifier = null)
+        IRunNotifier? notifier = null, IOperationHistoryStore? history = null)
     {
         _notifier = notifier ?? NullRunNotifier.Instance;
         _store = store;
         _sql = sql;
         _log = log ?? App.Log;
+        _history = history ?? new OperationHistoryStore();
 
         Refresh();
     }
@@ -153,6 +155,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// <summary>The list is not fetchable mid-run: it can wait; the copy cannot re-run (#281).</summary>
     public bool CanLoadSourceDatabases => !IsRunning;
 
+    /// <summary>Which listing owns the screen - see the note on the same field in BackupViewModel.</summary>
+    private int _listGeneration;
+
     [RelayCommand(CanExecute = nameof(CanLoadSourceDatabases))]
     private async Task LoadSourceDatabasesAsync()
     {
@@ -162,33 +167,50 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             return;
         }
 
+        // Captured before the await, the fix the Backup screen already had (#409). Read afterwards,
+        // the status line named whatever was selected by then rather than the server that answered
+        // - and threw outright if the selection had been cleared meanwhile.
+        var server = SourceServer;
+
+        var generation = ++_listGeneration;
         var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
         try
         {
-            var names = await _sql.GetDatabaseListAsync(SourceServer, ct);
+            var names = await _sql.GetDatabaseListAsync(server, ct);
+
+            // Overtaken while this was in flight; the newer selection owns the screen.
+            if (generation != _listGeneration) return;
+
             SourceDatabases = new ObservableCollection<string>(names);
 
             // Nothing is chosen for the user. Here the wrong choice reads a production database at
             // full speed AND overwrites a database on another server.
             SourceDatabase = null;
 
-            SetStatus($"{SourceServer.ServerName} has {names.Count} database(s).");
+            SetStatus($"{server.ServerName} has {names.Count} database(s).");
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Stopped.");
+            if (generation == _listGeneration) SetStatus("Stopped.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (generation == _listGeneration)
         {
             SetError($"Could not list the databases: {ex.Message}");
         }
+        catch
+        {
+            // Superseded - an error about the old server does not belong over the new one's list.
+        }
         finally
         {
-            _listCancellation.End();
-            IsBusy = false;
+            if (generation == _listGeneration)
+            {
+                _listCancellation.End();
+                IsBusy = false;
+            }
         }
     }
 
@@ -197,6 +219,11 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         SourceDatabases = [];
         SourceDatabase = null;
         Invalidate();
+
+        // Choosing the source server is the request to see what it holds - same reasoning as the
+        // Backup screen, and the same restraint mid-run.
+        if (value != null && CanLoadSourceDatabases)
+            _ = LoadSourceDatabasesAsync();
     }
 
     partial void OnTargetServerChanged(ServerConnection? value) => Invalidate();
@@ -766,6 +793,8 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         var run = (Backup: BackupScript, Restore: RestoreScript,
                    Destinations: (IReadOnlyList<string>)Destinations.ToList());
 
+        var startedAt = DateTime.Now;
+
         try
         {
             await RunBothHalvesAsync(run.Backup, run.Restore, run.Destinations, ct);
@@ -776,6 +805,8 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             IsRunning = false;
             OutcomeText = CopyOutcomeText.Describe(Outcome, run.Destinations.FirstOrDefault());
 
+            await Record(run.Backup, run.Restore, run.Destinations, startedAt, ct.IsCancellationRequested);
+
             // Told, not interrupted (#289): same taskbar flash as the restore and the backup
             // when the copy finishes while the app is behind another window.
             WindowAttention.FlashIfInBackground();
@@ -784,6 +815,71 @@ public partial class CopyDatabaseViewModel : ViewModelBase
                 SetStatus($"Copied {SourceDatabase} to {TargetServer.ServerName} as {TargetDatabaseName}.");
             else if (Outcome != CopyOutcome.NotStarted)
                 SetError(OutcomeText);
+        }
+    }
+
+    /// <summary>
+    /// The receipt for a copy (#434).
+    ///
+    /// One entry for the run, not one per half, because a copy is one decision: somebody chose to
+    /// overwrite a database on another server. Which half it got to is the interesting part and
+    /// that is what the outcome text carries.
+    ///
+    /// StoppedBeforeAnythingHappened writes nothing - a guard rail that refused before the source
+    /// was touched is not something that was performed, and filling the history with refusals
+    /// would bury the runs that did happen.
+    ///
+    /// Never allowed to throw. By the time this runs the copy is over, and a history write that
+    /// failed here would surface as the copy failing.
+    /// </summary>
+    private async Task Record(
+        string backupScript, string restoreScript, IReadOnlyList<string> destinations,
+        DateTime startedAt, bool wasCancelled)
+    {
+        if (Outcome is CopyOutcome.NotStarted or CopyOutcome.StoppedBeforeAnythingHappened) return;
+
+        try
+        {
+            await _history.AppendAsync(new OperationHistoryEntry
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTime.Now,
+
+                // The server WRITTEN TO, matching every other kind - and the source named beside
+                // it, because which machine was read is the first question asked about a copy.
+                ServerName = TargetServer?.ServerName ?? string.Empty,
+                SourceServerName = SourceServer?.ServerName,
+                TargetDatabase = TargetDatabaseName ?? string.Empty,
+                SourceDatabase = SourceDatabase,
+                ContainerName = MediumIsBlob ? Container?.Name : null,
+                Medium = MediumIsBlob ? "Cloud storage" : "A path both servers can reach",
+                FileCount = destinations.Count,
+                OptionsSummary = string.Join(", ", new[]
+                {
+                    CopyOnly ? "COPY_ONLY" : "NOT copy-only",
+                    WithReplace ? "WITH REPLACE" : null
+                }.Where(o => o != null)),
+
+                Kind = OperationKind.Copy,
+                Outcome = Outcome == CopyOutcome.Copied
+                    ? OperationOutcome.Succeeded
+                    : wasCancelled ? OperationOutcome.Cancelled : OperationOutcome.Failed,
+
+                // The outcome text, not a bare exception: "the backup is real and usable, restore
+                // from it rather than running this again" is the whole value of the distinction
+                // this screen draws, and it is worth exactly as much read back months later.
+                ErrorMessage = Outcome == CopyOutcome.Copied ? null : OutcomeText,
+
+                // Both halves, in the order they ran. A copy that half-worked is re-run from the
+                // restore script alone, and that is the reason to keep them.
+                Script = $"-- ON THE SOURCE{Environment.NewLine}{backupScript}" +
+                         $"{Environment.NewLine}{Environment.NewLine}-- ON THE TARGET{Environment.NewLine}{restoreScript}",
+                Log = string.Join(Environment.NewLine, Console)
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Could not record the copy in history: {ex.Message}");
         }
     }
 

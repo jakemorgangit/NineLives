@@ -4,10 +4,10 @@ using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
-public interface IRestoreHistoryStore
+public interface IOperationHistoryStore
 {
     /// <summary>Most recent first. Never throws - an unreadable history is not worth an error dialog.</summary>
-    List<RestoreHistoryEntry> Load();
+    List<OperationHistoryEntry> Load();
 
     /// <summary>
     /// True when the file is there and could not be read (#370).
@@ -20,7 +20,28 @@ public interface IRestoreHistoryStore
     bool CouldNotRead { get; }
 
     /// <summary>Adds one execution. Never throws: recording history must not be able to fail a restore.</summary>
-    void Append(RestoreHistoryEntry entry);
+    void Append(OperationHistoryEntry entry);
+
+    /// <summary>
+    /// The same append, off the calling thread - what a UI caller must use (#437).
+    ///
+    /// <see cref="Append"/> is fully synchronous blocking I/O: a cross-process lock whose backoff
+    /// can sleep for ten seconds when a scheduled CLI run holds it, a whole-file read and
+    /// deserialize, a redaction pass over every script and log, then a serialize and a file
+    /// replace. On the dispatcher that stops the window repainting, and a backup records once per
+    /// database - fifty databases, fifty rewrites. The same call sits in the cancellation handler
+    /// too, so pressing Stop froze the app instead of stopping it.
+    ///
+    /// Awaited rather than fired and forgotten, deliberately. Ordering and per-database durability
+    /// are the whole point of one receipt per database: a run that dies on the sixth still leaves
+    /// the first five on disk, and that half-finished run is exactly the incident somebody opens
+    /// the history for.
+    ///
+    /// Defaulted here so a fake inherits it, and so a new UI call site cannot get it wrong by
+    /// forgetting - the fault it would reintroduce is invisible until somebody backs up fifty
+    /// databases at once.
+    /// </summary>
+    Task AppendAsync(OperationHistoryEntry entry) => Task.Run(() => Append(entry));
 
     void Clear();
 
@@ -38,7 +59,7 @@ public interface IRestoreHistoryStore
 ///   - a history that cannot be read returns empty and is NOT then overwritten blindly
 ///   - writes go through a temp file and an atomic swap, so a crash mid-write cannot truncate it
 /// </summary>
-public sealed class RestoreHistoryStore : IRestoreHistoryStore
+public sealed class OperationHistoryStore : IOperationHistoryStore
 {
     /// <summary>
     /// Older entries fall off the end. Each carries a script and a console log, so this is a cap
@@ -110,7 +131,7 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
         }
     }
 
-    public RestoreHistoryStore() : this(Path.Combine(
+    public OperationHistoryStore() : this(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "NineLives"))
     { }
@@ -119,8 +140,12 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
     /// Lets the tests write somewhere disposable instead of the real profile, and shorten the
     /// lock wait so the refusal path can be exercised without a ten-second test.
     /// </summary>
-    internal RestoreHistoryStore(string directory, int lockTimeoutMs = LockTimeoutMs)
+    internal OperationHistoryStore(string directory, int lockTimeoutMs = LockTimeoutMs)
     {
+        // Still restore-history.json, though this now holds backups and copies too. The name is
+        // stale and the file is somebody's audit trail: renaming it would silently orphan every
+        // record already on disk, on an upgrade nobody was warned about. A wrong file name costs
+        // one comment; a lost history costs the thing this feature exists to provide.
         _path = Path.Combine(directory, "restore-history.json");
         _lockTimeoutMs = lockTimeoutMs;
     }
@@ -130,7 +155,7 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
     /// <inheritdoc />
     public bool CouldNotRead { get; private set; }
 
-    public List<RestoreHistoryEntry> Load()
+    public List<OperationHistoryEntry> Load()
     {
         lock (_gate)
         {
@@ -140,7 +165,7 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
         }
     }
 
-    public void Append(RestoreHistoryEntry entry)
+    public void Append(OperationHistoryEntry entry)
     {
         try
         {
@@ -203,14 +228,14 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
     }
 
     /// <summary>Null when the file exists but could not be read; empty list when there is no file.</summary>
-    private List<RestoreHistoryEntry>? ReadUnlocked()
+    private List<OperationHistoryEntry>? ReadUnlocked()
     {
         if (!File.Exists(_path)) return [];
 
         try
         {
             var json = File.ReadAllText(_path);
-            return JsonSerializer.Deserialize<List<RestoreHistoryEntry>>(json);
+            return JsonSerializer.Deserialize<List<OperationHistoryEntry>>(json);
         }
         catch
         {
@@ -218,7 +243,7 @@ public sealed class RestoreHistoryStore : IRestoreHistoryStore
         }
     }
 
-    private void WriteUnlocked(List<RestoreHistoryEntry> entries)
+    private void WriteUnlocked(List<OperationHistoryEntry> entries)
     {
         var directory = Path.GetDirectoryName(_path)!;
         Directory.CreateDirectory(directory);

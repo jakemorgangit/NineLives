@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -56,7 +56,7 @@ public class SpaceCheckOnTheScreenTests
 
         var vm = new RestoreViewModel(
             blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
+            new FakeOperationHistoryStore(), TestLogs.Temp(), TestAuditStores.Temp());
 
         vm.RefreshContainers();
         vm.ConnectedServer = new ServerConnection

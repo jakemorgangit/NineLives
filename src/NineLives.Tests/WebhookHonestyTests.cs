@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -109,6 +109,13 @@ public class WebhookHonestyTests
             WebhookTransport.ResolveUrl(model, store));
     }
 
+    /// <summary>
+    /// The endpoint as the STORE holds it (#439). RecordDelivery loads fresh, stamps and saves,
+    /// so the stamp is on the saved config rather than on whichever instance the test handed in.
+    /// </summary>
+    private static WebhookEndpoint Saved(FakeCredentialStore store, string id) =>
+        store.Config.Webhooks.Single(w => w.Id == id);
+
     // ── every attempt stamps the endpoint (#292) ────────────────────────────────
 
     [Fact]
@@ -120,11 +127,15 @@ public class WebhookHonestyTests
 
         WebhookTransport.RecordDelivery(store, model.Id, null);
 
-        Assert.NotNull(model.LastDeliveryAt);
-        Assert.Equal("delivered", model.LastDeliveryOutcome);
+        // Read back OUT of the store rather than off the instance handed in (#439). RecordDelivery
+        // loads fresh, stamps, and saves - correctly, because the config may have moved on since
+        // the delivery started - so the stamp lands on the saved config, not on this object. The
+        // old assertion only passed because the fake handed back the very instance it was given.
+        Assert.NotNull(Saved(store, model.Id).LastDeliveryAt);
+        Assert.Equal("delivered", Saved(store, model.Id).LastDeliveryOutcome);
 
         WebhookTransport.RecordDelivery(store, model.Id, "410 Gone");
-        Assert.Equal("410 Gone", model.LastDeliveryOutcome);
+        Assert.Equal("410 Gone", Saved(store, model.Id).LastDeliveryOutcome);
     }
 
     [Fact]
@@ -153,8 +164,8 @@ public class WebhookHonestyTests
         notifier.Notify(new RunNotification(RunPhase.Succeeded, "Restore", "MyDb", "SRV01"));
         await notifier.DrainAsync(TimeSpan.FromSeconds(5));
 
-        Assert.NotNull(model.LastDeliveryAt);
-        Assert.Equal("delivered", model.LastDeliveryOutcome);
+        Assert.NotNull(Saved(store, model.Id).LastDeliveryAt);
+        Assert.Equal("delivered", Saved(store, model.Id).LastDeliveryOutcome);
     }
 
     /// <summary>Invokes the outcome callback the way the real notifier does after a post.</summary>

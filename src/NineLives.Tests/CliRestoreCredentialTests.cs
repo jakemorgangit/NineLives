@@ -59,7 +59,7 @@ public class CliRestoreCredentialTests
 
         var sql = new FakeSqlServerService();
         var services = new CliServices(
-            store, sql, blobs, new FakeRestoreHistoryStore(), new FakeRunNotifier());
+            store, sql, blobs, new FakeOperationHistoryStore(), new FakeRunNotifier());
 
         return (services, sql, store);
     }

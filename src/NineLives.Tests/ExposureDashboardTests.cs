@@ -99,7 +99,7 @@ public class ExposureDashboardTests
 
     // ── the sweep ───────────────────────────────────────────────────────────────
 
-    private static (ExposureViewModel vm, FakeSqlServerService sql, FakeRestoreHistoryStore history)
+    private static (ExposureViewModel vm, FakeSqlServerService sql, FakeOperationHistoryStore history)
         New(params string[] servers)
     {
         var store = new FakeCredentialStore();
@@ -108,7 +108,7 @@ public class ExposureDashboardTests
             { Id = ServerConnection.NewId(), Name = name, ServerName = name });
 
         var sql = new FakeSqlServerService();
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         return (new ExposureViewModel(store, sql, history, TestLogs.Temp()), sql, history);
     }
 
@@ -159,13 +159,13 @@ public class ExposureDashboardTests
         sql.ExposureByServer["SRV01"] =
             [Row(db: "MyDb", full: DateTime.Now.AddDays(-1), log: DateTime.Now.AddMinutes(-10))];
 
-        history.Entries.Add(new RestoreHistoryEntry
+        history.Entries.Add(new OperationHistoryEntry
         {
             ServerName = "SRV01",
             SourceDatabase = "MyDb",
             TargetDatabase = "MyDb_rehearsal_20260809_2100",
             Kind = "Rehearsal",
-            Outcome = RestoreOutcome.Succeeded,
+            Outcome = OperationOutcome.Succeeded,
             StartedAt = new DateTime(2026, 8, 9, 21, 16, 0),
             CompletedAt = new DateTime(2026, 8, 9, 21, 30, 0)
         });

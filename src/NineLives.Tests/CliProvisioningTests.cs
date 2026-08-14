@@ -22,7 +22,7 @@ public class CliProvisioningTests
         var sql = new FakeSqlServerService();
         var blobs = new FakeBlobStorageService();
         return (new CliServices(store, sql, blobs,
-            new FakeRestoreHistoryStore(), new FakeRunNotifier()), store, sql, blobs);
+            new FakeOperationHistoryStore(), new FakeRunNotifier()), store, sql, blobs);
     }
 
     private static async Task<(int exit, string errors)> Run(

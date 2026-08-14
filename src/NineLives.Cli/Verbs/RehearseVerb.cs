@@ -269,7 +269,7 @@ internal static class RehearseVerb
             await services.Sql.ExecuteWithProgressAsync(target, script, Progress, ct);
 
             var completedAt = DateTime.Now;
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
                 StartedAt = startedAt,
@@ -281,7 +281,7 @@ internal static class RehearseVerb
                 RestorePointTimestamp = stopAt ?? point.Timestamp,
                 ChainSummary = point.TypeDisplay,
                 Kind = "Rehearsal",
-                Outcome = RestoreOutcome.Succeeded,
+                Outcome = OperationOutcome.Succeeded,
                 Script = script,
                 Log = log.ToString()
             };
@@ -319,7 +319,7 @@ internal static class RehearseVerb
             // interruption may have landed after its restore began.
             var completedAt = DateTime.Now;
             log.AppendLine("Cancelled from the terminal.");
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
                 StartedAt = startedAt,
@@ -331,7 +331,7 @@ internal static class RehearseVerb
                 RestorePointTimestamp = stopAt ?? point.Timestamp,
                 ChainSummary = point.TypeDisplay,
                 Kind = "Rehearsal",
-                Outcome = RestoreOutcome.Cancelled,
+                Outcome = OperationOutcome.Cancelled,
                 ErrorMessage = "Cancelled from the terminal.",
                 Script = script,
                 Log = log.ToString()
@@ -361,7 +361,7 @@ internal static class RehearseVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine(ex.Message);
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
                 StartedAt = startedAt,
@@ -373,7 +373,7 @@ internal static class RehearseVerb
                 RestorePointTimestamp = stopAt ?? point.Timestamp,
                 ChainSummary = point.TypeDisplay,
                 Kind = "Rehearsal",
-                Outcome = RestoreOutcome.Failed,
+                Outcome = OperationOutcome.Failed,
                 ErrorMessage = ex.Message,
                 Script = script,
                 Log = log.ToString()

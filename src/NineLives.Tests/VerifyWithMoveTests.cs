@@ -137,9 +137,9 @@ public class VerifyWithMoveViewModelTests(WpfFixture wpf)
 
         var vm = new RestoreViewModel(
             blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
+            new FakeOperationHistoryStore(),
             new OperationLog(System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))),
-            new FakeRestoreHistoryStore())
+                System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))))
         {
             SelectedContainer = new BlobContainerConfig
             {

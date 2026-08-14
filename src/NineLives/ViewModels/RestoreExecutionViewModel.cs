@@ -49,7 +49,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 {
     private readonly IRunNotifier _notifier;
     private readonly ISqlServerService _sql;
-    private readonly IRestoreHistoryStore _history;
+    private readonly IOperationHistoryStore _history;
     private readonly OperationLog _log;
 
     /// <summary>Its own source: the Stop button during a restore is not the same button as the
@@ -64,7 +64,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
     public RestoreExecutionViewModel(
         ISqlServerService sql,
-        IRestoreHistoryStore history,
+        IOperationHistoryStore history,
         OperationLog log,
         OperationCancellation queryCancellation,
         IRunNotifier? notifier = null)
@@ -213,7 +213,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         _lastTarget = run.TargetDatabase;
 
         var startedAt = DateTime.Now;
-        var outcome = RestoreOutcome.Failed;
+        var outcome = OperationOutcome.Failed;
         string? failure = null;
 
         // Set false when the run is abandoned before anything was attempted, so the history
@@ -289,7 +289,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
                 executeToken);
 
             ExecutionSuccess = true;
-            outcome = RestoreOutcome.Succeeded;
+            outcome = OperationOutcome.Succeeded;
 
             // The run IS over, whatever the last STATS line said - a small final statement often
             // finishes without reporting 100.
@@ -321,7 +321,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            outcome = RestoreOutcome.Cancelled;
+            outcome = OperationOutcome.Cancelled;
             failure = "Cancelled by the user part-way through the chain.";
 
             // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
@@ -348,7 +348,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         catch (Exception ex)
         {
             ExecutionSuccess = false;
-            outcome = RestoreOutcome.Failed;
+            outcome = OperationOutcome.Failed;
             failure = ex.Message;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
@@ -386,7 +386,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // After the flush, so the recorded log is the whole console rather than whatever had
             // made it out of the batching buffer. Recorded for every outcome including cancelled -
             // "I stopped it" is exactly the kind of thing a change ticket needs to say.
-            if (attempted) RecordHistory(run, startedAt, outcome, failure);
+            if (attempted) await RecordHistory(run, startedAt, outcome, failure);
         }
     }
 
@@ -394,8 +394,41 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// Files this execution in the history (#31). Never throws: the store swallows its own
     /// failures, and a restore must not be reported as failed because a record could not be kept.
     /// </summary>
-    private void RecordHistory(RestoreRun run, DateTime startedAt, RestoreOutcome outcome, string? failure)
-        => _history.Append(new RestoreHistoryEntry
+    /// <summary>
+    /// Files a remediation run from the failed-restore panel (#438).
+    ///
+    /// This recorded nothing at all, which is exactly the wrong way round: it is the highest-stakes
+    /// statement the app sends. RESTORE ... WITH RECOVERY and DBCC CHECKDB go to a production
+    /// database at the moment a restore has already gone wrong, and an incident write-up showing
+    /// the failed restore but not the statement that brought the database back is missing the half
+    /// somebody will be asked about.
+    ///
+    /// All three endings, cancelled included - "I stopped it and the database was left alone" is
+    /// precisely what a change ticket needs, and the panel currently says it only on screen, where
+    /// it scrolls away.
+    /// </summary>
+    private Task RecordRecovery(
+        RecoveryAction action, DateTime startedAt, OperationOutcome outcome, string? error)
+    {
+        Console.Flush();
+
+        return _history.AppendAsync(new OperationHistoryEntry
+        {
+            StartedAt = startedAt,
+            CompletedAt = DateTime.Now,
+            ServerName = _lastServer?.ServerName ?? string.Empty,
+            TargetDatabase = _lastTarget ?? string.Empty,
+            Kind = OperationKind.Recovery,
+            ChainSummary = action.Title,
+            Outcome = outcome,
+            ErrorMessage = error,
+            Script = action.Sql,
+            Log = Console.Text
+        });
+    }
+
+    private Task RecordHistory(RestoreRun run, DateTime startedAt, OperationOutcome outcome, string? failure)
+        => _history.AppendAsync(new OperationHistoryEntry
         {
             StartedAt = startedAt,
             CompletedAt = DateTime.Now,
@@ -405,7 +438,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SourceDatabase = run.SourceDatabase,
             RestorePointTimestamp = run.RestorePointTimestamp,
             ChainSummary = run.ChainSummary,
-            Kind = run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+            Kind = run.Kind == RunKind.Rehearsal ? OperationKind.Rehearsal : OperationKind.Restore,
             Outcome = outcome,
             ErrorMessage = failure,
             Script = run.Script,
@@ -654,6 +687,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         TaskbarState = System.Windows.Shell.TaskbarItemProgressState.Normal;
         TaskbarValue = 0;
 
+        var actionStarted = DateTime.Now;
+
         try
         {
             AppendLog($"\nRunning: {action.Sql}");
@@ -684,6 +719,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             if (!HasRecoveryActions)
                 SetStatus($"[{_lastTarget}] is back to a usable state.");
+
+            await RecordRecovery(action, actionStarted, OperationOutcome.Succeeded, null);
         }
         // Two ways in, one answer (#427). The service translates a cancelled command into an
         // OperationCanceledException, and this also trusts the token directly: if the user pressed
@@ -698,12 +735,18 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             AppendLog("\nCancelled. The database is in the same state as before this step.");
             ActionOutcome = $"Cancelled at {DateTime.Now:HH:mm:ss} - the database is unchanged by this step.";
             SetStatus("Recovery step cancelled.");
+
+            await RecordRecovery(action, actionStarted, OperationOutcome.Cancelled,
+                "Cancelled by the user. SQL Server rolled the statement back, so the database is " +
+                "in the same state as before this step.");
         }
         catch (Exception ex)
         {
             AppendLog($"\nERROR: {ex.Message}");
             ActionOutcome = $"FAILED at {DateTime.Now:HH:mm:ss}: {ex.Message}";
             SetError($"Recovery step failed: {ex.Message}");
+
+            await RecordRecovery(action, actionStarted, OperationOutcome.Failed, ex.Message);
         }
         finally
         {

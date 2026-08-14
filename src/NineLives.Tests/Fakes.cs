@@ -48,7 +48,39 @@ public sealed class FakeCredentialStore : ICredentialStore
     public string? GetSqlPassword(ServerConnection connection)
         => connection.UnsavedPassword ?? ReadSecret(SqlKey(connection)).secret;
 
-    public AppConfig LoadConfig() => Config;
+    /// <summary>
+    /// A fresh object graph on every call, the way the real store behaves (#439).
+    ///
+    /// CredentialStore.LoadConfig does File.ReadAllText plus Deserialize every time, so every
+    /// caller gets brand-new ServerConnection and BlobContainerConfig instances. This used to hand
+    /// back the cached Config - the same instances every time - and that one difference let a real
+    /// defect reach dev with a fully green suite.
+    ///
+    /// BackupViewModel.Refresh rebuilds its list from the config and reselects by id. Against the
+    /// real store that is always a DIFFERENT instance, so the ObservableProperty setter raises a
+    /// change and OnServerChanged runs; once choosing a server started listing its databases, every
+    /// navigation to the Backup or Copy screen silently opened a connection to a production
+    /// instance and wiped the user's ticks. Against identical instances the setter short-circuited
+    /// and nothing fired, so no test could see it.
+    ///
+    /// Round-tripped through JSON rather than hand-copied: a field added to AppConfig is carried
+    /// without anybody remembering to update this, and the JsonIgnore'd in-memory secrets
+    /// (UnsavedPassword, UnsavedSasToken) drop out exactly as they do when the real store reads
+    /// from disk.
+    /// </summary>
+    public AppConfig LoadConfig()
+    {
+        var fresh = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(
+            System.Text.Json.JsonSerializer.Serialize(Config)) ?? new AppConfig();
+
+        // LoadError is JsonIgnore'd but the real store SETS it on the object it hands back, after
+        // deserializing, when the file existed and could not be read. So it has to survive the
+        // copy - without it this fake can no longer play an unreadable config, and the rule that
+        // such a config is never overwritten stops being testable at all.
+        fresh.LoadError = Config.LoadError;
+
+        return fresh;
+    }
 
     public void SaveConfig(AppConfig config)
     {
@@ -193,18 +225,46 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 }
 
 /// <summary>An in-memory restore history, so the tests never touch the real one.</summary>
-public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
+public sealed class FakeOperationHistoryStore : IOperationHistoryStore
 {
-    public List<RestoreHistoryEntry> Entries { get; } = [];
+    public List<OperationHistoryEntry> Entries { get; } = [];
 
     public string FilePath => "(in memory)";
 
     /// <summary>Set to play a history file that exists and cannot be read (#370).</summary>
     public bool CouldNotRead { get; set; }
 
-    public List<RestoreHistoryEntry> Load() => Entries.ToList();
+    public List<OperationHistoryEntry> Load() => Entries.ToList();
 
-    public void Append(RestoreHistoryEntry entry) => Entries.Insert(0, entry);
+    /// <summary>Set to play a store that cannot write - recording must never fail an operation.</summary>
+    public Exception? AppendThrows { get; set; }
+
+    /// <summary>
+    /// How many appends arrived through <see cref="AppendAsync"/> rather than the blocking
+    /// <see cref="Append"/> (#437).
+    ///
+    /// This is the observable difference between a call site that offloads and one that does not.
+    /// It replaced an assertion on thread identity, which was WRONG: Task.Run guarantees the work
+    /// is scheduled to the pool, not that it lands on a different thread - a loaded CI runner can
+    /// reuse the caller's own pool thread, and did.
+    /// </summary>
+    public int AsyncAppends { get; private set; }
+
+    public Task AppendAsync(OperationHistoryEntry entry)
+    {
+        AsyncAppends++;
+        return Task.Run(() => Append(entry));
+    }
+
+    public void Append(OperationHistoryEntry entry)
+    {
+        if (AppendThrows != null) throw AppendThrows;
+
+        // The real store serialises on its own lock, and callers may now arrive from the thread
+        // pool, so this has to be safe to call concurrently or the fake invents failures the
+        // product does not have.
+        lock (Entries) Entries.Insert(0, entry);
+    }
 
     public void Clear() => Entries.Clear();
 }
@@ -289,8 +349,44 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// </summary>
     public List<string> DatabaseList { get; set; } = [];
 
-    public Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(DatabaseList);
+    /// <summary>
+    /// Holds a listing open so a test can overtake it. Choosing a server now starts a listing by
+    /// itself, so one being superseded by the next selection is ordinary rather than exotic - and
+    /// the loser must neither write its answer nor tidy up after the winner.
+    /// </summary>
+    public TaskCompletionSource<bool>? DatabaseListGate { get; set; }
+
+    /// <summary>
+    /// Answer even though the token was signalled - the realistic case, and the one that matters.
+    ///
+    /// Cancelling a SQL command is not instantaneous: the attention has to reach the server and the
+    /// reply has to come back. A listing can finish normally in that window, so a superseded run
+    /// does not always unwind promptly at the moment it is replaced - it can land later, with its
+    /// finally running while the newer listing is mid-flight. Without this the fake cancels the
+    /// instant it is asked, which unwinds the loser before the winner has set anything up and hides
+    /// the whole class of bug.
+    /// </summary>
+    public bool DatabaseListIgnoresCancellation { get; set; }
+
+    /// <summary>Each server's answer, when a test needs the two listings to be distinguishable.</summary>
+    public Dictionary<string, List<string>> DatabaseListByServer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<List<string>> GetDatabaseListAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (DatabaseListGate != null)
+        {
+            if (DatabaseListIgnoresCancellation) await DatabaseListGate.Task;
+            else await DatabaseListGate.Task.WaitAsync(ct);
+        }
+
+        if (!DatabaseListIgnoresCancellation) ct.ThrowIfCancellationRequested();
+
+        return DatabaseListByServer.TryGetValue(server.ServerName, out var forServer)
+            ? [.. forServer]
+            : [.. DatabaseList];
+    }
 
     /// <summary>What the fake instance says it has free, by mount point.</summary>
     public Dictionary<string, long> VolumeFreeSpace { get; set; } = [];

@@ -19,7 +19,7 @@ public class CliExecuteVerbTests
     private static readonly DateTime T0 = new(2026, 8, 1, 22, 0, 0);
 
     private static (CliServices services, FakeSqlServerService sql,
-        FakeRestoreHistoryStore history, FakeRunNotifier notifier) Stage(
+        FakeOperationHistoryStore history, FakeRunNotifier notifier) Stage(
         params BackupHistoryEntry[] entries)
     {
         var store = new FakeCredentialStore();
@@ -29,7 +29,7 @@ public class CliExecuteVerbTests
         { Id = ServerConnection.NewId(), Name = "SRV02", ServerName = "SRV02" });
 
         var sql = new FakeSqlServerService { BackupHistory = entries.ToList() };
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var notifier = new FakeRunNotifier();
         var services = new CliServices(
             store, sql, new FakeBlobStorageService(), history, notifier);
@@ -214,7 +214,7 @@ public class CliExecuteVerbTests
         Assert.Equal("Restore", entry.Kind);
         Assert.Equal("MyDb", entry.TargetDatabase);
         Assert.Equal("SRV02", entry.ServerName);
-        Assert.Equal(RestoreOutcome.Succeeded, entry.Outcome);
+        Assert.Equal(OperationOutcome.Succeeded, entry.Outcome);
         Assert.Contains("RESTORE DATABASE", entry.Script);
 
         Assert.Equal(2, notifier.Sent.Count);
@@ -236,7 +236,7 @@ public class CliExecuteVerbTests
         Assert.Contains("FAILED", errors);
 
         var entry = Assert.Single(history.Entries);
-        Assert.Equal(RestoreOutcome.Failed, entry.Outcome);
+        Assert.Equal(OperationOutcome.Failed, entry.Outcome);
         Assert.NotNull(entry.ErrorMessage);
 
         Assert.Equal(RunPhase.Problem, notifier.Sent.Last().Phase);

@@ -20,7 +20,7 @@ public class CliEndingsTests
     private static readonly DateTime T0 = new(2026, 8, 1, 22, 0, 0);
 
     private static (CliServices services, FakeSqlServerService sql,
-        FakeRestoreHistoryStore history, FakeRunNotifier notifier) Stage()
+        FakeOperationHistoryStore history, FakeRunNotifier notifier) Stage()
     {
         var store = new FakeCredentialStore();
         store.Config.Servers.Add(new ServerConnection
@@ -44,7 +44,7 @@ public class CliEndingsTests
                 }
             ]
         };
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var notifier = new FakeRunNotifier();
         return (new CliServices(store, sql, new FakeBlobStorageService(), history, notifier),
             sql, history, notifier);
@@ -76,7 +76,7 @@ public class CliEndingsTests
         Assert.Contains("CANCELLED", errors);
 
         var entry = Assert.Single(history.Entries);
-        Assert.Equal(RestoreOutcome.Cancelled, entry.Outcome);
+        Assert.Equal(OperationOutcome.Cancelled, entry.Outcome);
 
         Assert.Equal(RunPhase.Problem, notifier.Sent.Last().Phase);
         Assert.True(notifier.DrainCalls >= 1);

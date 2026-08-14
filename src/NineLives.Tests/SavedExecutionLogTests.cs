@@ -29,9 +29,9 @@ public class SavedExecutionLogTests
         return new RestoreViewModel(
             new FakeBlobStorageService(), new FakeSqlServerService(),
             new BackupChainBuilder(), new RestoreScriptGenerator(), store,
+            new FakeOperationHistoryStore(),
             new OperationLog(System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), "ninelives-saved-log", Guid.NewGuid().ToString("n"))),
-            new FakeRestoreHistoryStore());
+                System.IO.Path.GetTempPath(), "ninelives-saved-log", Guid.NewGuid().ToString("n"))));
     }
 
     [Fact]

@@ -121,7 +121,7 @@ RESTORE DATABASE [MyDb] FROM DISK = N'D:\full.bak' WITH RECOVERY;";
     {
         var sql = new FakeSqlServerService();
         var vm = new RestoreExecutionViewModel(
-            sql, new FakeRestoreHistoryStore(), TestLogs.Temp(), new OperationCancellation());
+            sql, new FakeOperationHistoryStore(), TestLogs.Temp(), new OperationCancellation());
         return (vm, sql);
     }
 

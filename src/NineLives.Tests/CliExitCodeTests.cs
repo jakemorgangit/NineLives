@@ -33,7 +33,7 @@ public class CliExitCodeTests
         var sql = new FakeSqlServerService { BackupHistory = history.ToList() };
         return new CliServices(
             store, sql, new FakeBlobStorageService(),
-            new FakeRestoreHistoryStore(), new FakeRunNotifier());
+            new FakeOperationHistoryStore(), new FakeRunNotifier());
     }
 
     private static BackupHistoryEntry Full(string database) => new()

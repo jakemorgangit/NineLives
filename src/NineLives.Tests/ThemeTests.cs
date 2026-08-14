@@ -406,7 +406,7 @@ public class ThemeTests(WpfFixture wpf)
                     new BlobConfigView { DataContext = new BlobConfigViewModel(store, new BlobStorageService(store)) },
                     new ServerManagerView { DataContext = new ServerManagerViewModel(store, new SqlServerService(store)) },
                     new BlobBrowserView { DataContext = new BlobBrowserViewModel(new BlobStorageService(store), new FakeSqlServerService(), store) },
-                    new HistoryView { DataContext = new HistoryViewModel(new FakeRestoreHistoryStore()) },
+                    new HistoryView { DataContext = new HistoryViewModel(new FakeOperationHistoryStore()) },
                 ];
 
                 var listener = BindingErrorListener.Attach();

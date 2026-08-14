@@ -13,25 +13,36 @@
 
         <!-- Header -->
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Text="Restore History" Style="{StaticResource HeaderText}" />
-            <TextBlock Text="Every restore this app has run, kept so it can go in a change ticket or an incident write-up."
+            <TextBlock Text="History" Style="{StaticResource HeaderText}" />
+            <TextBlock Text="Every backup, restore, copy and rehearsal this app has run, kept so it can go in a change ticket or an incident write-up."
                        Style="{StaticResource SecondaryText}"
                        Margin="0,4,0,0" />
         </StackPanel>
 
-        <!-- Filter + refresh -->
+        <!-- Filter + kind + refresh -->
         <Grid Grid.Row="1" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <TextBox Grid.Column="0"
                      Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
                      Style="{StaticResource DarkTextBox}"
-                     ToolTip="Filter by database, server, container or outcome." />
+                     ToolTip="Filter by database, server, container, kind or outcome." />
 
-            <Button Grid.Column="1" Content="Refresh"
+            <!-- A backup of everything before a patch writes one entry per database, so without
+                 this "when did we last restore this" means reading past fifty backups (#434). -->
+            <ComboBox Grid.Column="1"
+                      ItemsSource="{Binding KindFilters}"
+                      SelectedItem="{Binding KindFilter}"
+                      Style="{StaticResource DarkComboBox}"
+                      MinWidth="130" Margin="8,0,0,0"
+                      VerticalAlignment="Center"
+                      ToolTip="Show only one kind of operation." />
+
+            <Button Grid.Column="2" Content="Refresh"
                     Command="{Binding RefreshCommand}"
                     Style="{StaticResource SecondaryButton}"
                     Padding="12,6" Margin="8,0,0,0" />
@@ -55,14 +66,37 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel>
-                                <TextBlock Text="{Binding StartedDisplay}"
-                                           Style="{StaticResource SecondaryText}"
-                                           FontSize="11" />
+                                <!-- The kind sits beside the timestamp because without it a
+                                     backup and a restore of the same database on the same server
+                                     are the same two lines, and they are opposite operations
+                                     (#434). -->
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Kind}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource AccentBrush}"
+                                               Margin="0,0,6,0" />
+                                    <TextBlock Text="{Binding StartedDisplay}"
+                                               Style="{StaticResource SecondaryText}"
+                                               FontSize="11" />
+                                </StackPanel>
                                 <TextBlock TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,2,0,0">
                                     <Run Text="{Binding TargetDatabase, Mode=OneWay}" />
                                     <Run Text=" on " Foreground="{DynamicResource SecondaryTextBrush}" />
                                     <Run Text="{Binding ServerName, Mode=OneWay}"
                                          Foreground="{DynamicResource SecondaryTextBrush}" />
+                                </TextBlock>
+
+                                <!-- A copy read one server and overwrote a database on another, and
+                                     the line above only names the one written to. Which machine was
+                                     the source is the first thing anyone asks afterwards, so the
+                                     row says it rather than making somebody open the entry (#434).
+                                     Collapsed for every other kind, which has no source server. -->
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,1,0,0"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Visibility="{Binding SourceServerName, Converter={StaticResource NullToVis}}">
+                                    <Run Text="from " />
+                                    <Run Text="{Binding SourceServerName, Mode=OneWay}" />
                                 </TextBlock>
                                 <TextBlock Margin="0,2,0,0" FontSize="11">
                                     <Run Text="{Binding OutcomeDisplay, Mode=OneWay}">

@@ -38,10 +38,10 @@ public class RestoreExecutionSeamTests
         new DateTime(2026, 8, 1, 22, 9, 12),
         "WITH REPLACE=True, recovery=Recovery, stopAt=none");
 
-    private static (RestoreExecutionViewModel vm, FakeSqlServerService sql, FakeRestoreHistoryStore history) New()
+    private static (RestoreExecutionViewModel vm, FakeSqlServerService sql, FakeOperationHistoryStore history) New()
     {
         var sql = new FakeSqlServerService();
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var vm = new RestoreExecutionViewModel(sql, history, ThrowawayLog(), new OperationCancellation());
         return (vm, sql, history);
     }
@@ -78,7 +78,7 @@ public class RestoreExecutionSeamTests
         Assert.True(vm.ExecutionComplete);
 
         var entry = Assert.Single(history.Entries);
-        Assert.Equal(RestoreOutcome.Succeeded, entry.Outcome);
+        Assert.Equal(OperationOutcome.Succeeded, entry.Outcome);
         Assert.Equal("MyDb_Restored", entry.TargetDatabase);
         Assert.Equal("MyDb", entry.SourceDatabase);
         Assert.Equal("backups", entry.ContainerName);
@@ -96,7 +96,7 @@ public class RestoreExecutionSeamTests
 
         Assert.False(vm.ExecutionSuccess);
         var entry = Assert.Single(history.Entries);
-        Assert.Equal(RestoreOutcome.Failed, entry.Outcome);
+        Assert.Equal(OperationOutcome.Failed, entry.Outcome);
         Assert.Contains("terminating abnormally", entry.ErrorMessage);
     }
 

@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -29,7 +29,7 @@ public class ACheckboxDoesNotCancelAQueryTests
         var sql = new FakeSqlServerService();
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, new FakeOperationHistoryStore(), TestLogs.Temp());
 
         vm.ConnectedServer = store.Config.Servers[0];
         vm.IsConnectedToServer = true;

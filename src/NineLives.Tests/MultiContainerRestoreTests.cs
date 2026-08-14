@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -229,8 +229,8 @@ public class MultiContainerRestoreTests
     {
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+            new RestoreScriptGenerator(), store, new FakeOperationHistoryStore(),
+            TestLogs.Temp(), TestAuditStores.Temp())
         {
             Mode = AppMode.Pro
         };

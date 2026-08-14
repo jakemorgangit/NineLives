@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -59,9 +59,9 @@ public class ExecuteDuringARunTests
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
             new RestoreScriptGenerator(), store,
+            new FakeOperationHistoryStore(),
             new OperationLog(System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), "ninelives-exec", Guid.NewGuid().ToString("n"))),
-            new FakeRestoreHistoryStore());
+                System.IO.Path.GetTempPath(), "ninelives-exec", Guid.NewGuid().ToString("n"))));
 
         vm.SelectedContainer = store.Config.BlobContainers[0];
         await vm.LoadBackupsCommand.ExecuteAsync(null);

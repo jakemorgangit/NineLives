@@ -20,12 +20,12 @@ public partial class ExposureViewModel : ViewModelBase
 {
     private readonly ICredentialStore _store;
     private readonly ISqlServerService _sql;
-    private readonly IRestoreHistoryStore _history;
+    private readonly IOperationHistoryStore _history;
     private readonly OperationLog _log;
     private readonly OperationCancellation _sweepCancellation = new();
 
     public ExposureViewModel(
-        ICredentialStore store, ISqlServerService sql, IRestoreHistoryStore history,
+        ICredentialStore store, ISqlServerService sql, IOperationHistoryStore history,
         OperationLog? log = null)
     {
         _store = store;
@@ -227,7 +227,7 @@ public partial class ExposureViewModel : ViewModelBase
         try
         {
             var proofs = _history.Load()
-                .Where(e => e.Kind == "Rehearsal" && e.Outcome == RestoreOutcome.Succeeded &&
+                .Where(e => e.Kind == "Rehearsal" && e.Outcome == OperationOutcome.Succeeded &&
                             e.SourceDatabase != null)
                 .GroupBy(e => (e.ServerName, e.SourceDatabase!),
                     StringTupleComparer.OrdinalIgnoreCase)

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
@@ -97,7 +97,7 @@ public class LogGoesWhereItIsToldTests
 
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, log, new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, new FakeOperationHistoryStore(), log);
 
         vm.RefreshContainers();
         await vm.LoadBackupsCommand.ExecuteAsync(null);
