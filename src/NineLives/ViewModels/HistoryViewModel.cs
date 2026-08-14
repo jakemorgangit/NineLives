@@ -53,6 +53,7 @@ public partial class HistoryViewModel : ViewModelBase
         OperationKind.Restore,
         OperationKind.Copy,
         OperationKind.Rehearsal,
+        OperationKind.Recovery,
     ];
 
     public const string AllKinds = "All";

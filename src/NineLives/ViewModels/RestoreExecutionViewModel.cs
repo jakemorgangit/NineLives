@@ -394,6 +394,39 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// Files this execution in the history (#31). Never throws: the store swallows its own
     /// failures, and a restore must not be reported as failed because a record could not be kept.
     /// </summary>
+    /// <summary>
+    /// Files a remediation run from the failed-restore panel (#438).
+    ///
+    /// This recorded nothing at all, which is exactly the wrong way round: it is the highest-stakes
+    /// statement the app sends. RESTORE ... WITH RECOVERY and DBCC CHECKDB go to a production
+    /// database at the moment a restore has already gone wrong, and an incident write-up showing
+    /// the failed restore but not the statement that brought the database back is missing the half
+    /// somebody will be asked about.
+    ///
+    /// All three endings, cancelled included - "I stopped it and the database was left alone" is
+    /// precisely what a change ticket needs, and the panel currently says it only on screen, where
+    /// it scrolls away.
+    /// </summary>
+    private Task RecordRecovery(
+        RecoveryAction action, DateTime startedAt, OperationOutcome outcome, string? error)
+    {
+        Console.Flush();
+
+        return _history.AppendAsync(new OperationHistoryEntry
+        {
+            StartedAt = startedAt,
+            CompletedAt = DateTime.Now,
+            ServerName = _lastServer?.ServerName ?? string.Empty,
+            TargetDatabase = _lastTarget ?? string.Empty,
+            Kind = OperationKind.Recovery,
+            ChainSummary = action.Title,
+            Outcome = outcome,
+            ErrorMessage = error,
+            Script = action.Sql,
+            Log = Console.Text
+        });
+    }
+
     private Task RecordHistory(RestoreRun run, DateTime startedAt, OperationOutcome outcome, string? failure)
         => _history.AppendAsync(new OperationHistoryEntry
         {
@@ -654,6 +687,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         TaskbarState = System.Windows.Shell.TaskbarItemProgressState.Normal;
         TaskbarValue = 0;
 
+        var actionStarted = DateTime.Now;
+
         try
         {
             AppendLog($"\nRunning: {action.Sql}");
@@ -684,6 +719,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             if (!HasRecoveryActions)
                 SetStatus($"[{_lastTarget}] is back to a usable state.");
+
+            await RecordRecovery(action, actionStarted, OperationOutcome.Succeeded, null);
         }
         // Two ways in, one answer (#427). The service translates a cancelled command into an
         // OperationCanceledException, and this also trusts the token directly: if the user pressed
@@ -698,12 +735,18 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             AppendLog("\nCancelled. The database is in the same state as before this step.");
             ActionOutcome = $"Cancelled at {DateTime.Now:HH:mm:ss} - the database is unchanged by this step.";
             SetStatus("Recovery step cancelled.");
+
+            await RecordRecovery(action, actionStarted, OperationOutcome.Cancelled,
+                "Cancelled by the user. SQL Server rolled the statement back, so the database is " +
+                "in the same state as before this step.");
         }
         catch (Exception ex)
         {
             AppendLog($"\nERROR: {ex.Message}");
             ActionOutcome = $"FAILED at {DateTime.Now:HH:mm:ss}: {ex.Message}";
             SetError($"Recovery step failed: {ex.Message}");
+
+            await RecordRecovery(action, actionStarted, OperationOutcome.Failed, ex.Message);
         }
         finally
         {

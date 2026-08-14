@@ -1,4 +1,4 @@
-namespace Blackcat.NineLives.Models;
+﻿namespace Blackcat.NineLives.Models;
 
 /// <summary>How an operation ended.</summary>
 public enum OperationOutcome
@@ -20,6 +20,16 @@ public static class OperationKind
     public const string Rehearsal = "Rehearsal";
     public const string Backup = "Backup";
     public const string Copy = "Copy";
+
+    /// <summary>
+    /// A remediation run from the panel that appears after a restore has failed (#438) - the
+    /// RESTORE ... WITH RECOVERY that brings a database out of RESTORING, or the DBCC CHECKDB
+    /// that proves it. Recorded because it is the highest-stakes statement this app sends: it
+    /// goes to a production database at the moment something has already gone wrong, and an
+    /// incident write-up that shows the failed restore but not the statement that fixed it is
+    /// missing the half somebody will be asked about.
+    /// </summary>
+    public const string Recovery = "Recovery";
 }
 
 /// <summary>

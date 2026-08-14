@@ -12,6 +12,16 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **Recovery actions are recorded** (#438). The panel that appears after a restore has failed
+  runs `RESTORE ... WITH RECOVERY` and `DBCC CHECKDB` against a production database - the
+  highest-stakes statement this app sends, at the worst possible moment - and it wrote nothing to
+  the history at all. An incident write-up showed the failed restore but not the statement that
+  brought the database back. All three endings are now filed, cancelled included, because "I
+  stopped it and the database was left alone" is exactly what a change ticket needs; the panel
+  said that only on screen, where it scrolls away. Recovery is also offered in the History
+  screen's filter, and a test now enumerates the kinds of run from the source of truth so the
+  next one added without a receipt fails the build rather than shipping silently.
+
 - **The test double for the config store now behaves like the real one** (#439). Nothing a user
   sees changes today, but this is why a real defect reached `dev` with a fully green suite. The
   real store re-reads and deserializes on every call, so every caller gets fresh objects; the
