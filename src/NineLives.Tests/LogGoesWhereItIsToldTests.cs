@@ -97,7 +97,7 @@ public class LogGoesWhereItIsToldTests
 
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, log, new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, log, new FakeOperationHistoryStore());
 
         vm.RefreshContainers();
         await vm.LoadBackupsCommand.ExecuteAsync(null);

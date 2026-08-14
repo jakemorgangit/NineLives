@@ -25,7 +25,7 @@ public class QueryCancellationTests
         _blob, _sql, new BackupChainBuilder(), new RestoreScriptGenerator(), _store,
         new OperationLog(System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))),
-        new FakeRestoreHistoryStore());
+        new FakeOperationHistoryStore());
 
     private static BackupFileInfo File(string blobName, BackupType type, DateTime stamp)
         => new()

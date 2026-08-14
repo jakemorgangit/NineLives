@@ -327,7 +327,7 @@ internal static class RestoreVerb
             await services.Sql.ExecuteWithProgressAsync(target, script, Progress, ct);
 
             var completedAt = DateTime.Now;
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
                 StartedAt = startedAt,
@@ -338,7 +338,7 @@ internal static class RestoreVerb
                 ContainerName = containerName,
                 RestorePointTimestamp = stopAt ?? point.Timestamp,
                 ChainSummary = point.TypeDisplay,
-                Outcome = RestoreOutcome.Succeeded,
+                Outcome = OperationOutcome.Succeeded,
                 Script = script,
                 Log = log.ToString()
             };
@@ -361,7 +361,7 @@ internal static class RestoreVerb
             // conventional 128+SIGINT so a wrapping script can tell interruption from failure.
             var completedAt = DateTime.Now;
             log.AppendLine("Cancelled from the terminal.");
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
                 StartedAt = startedAt,
@@ -372,7 +372,7 @@ internal static class RestoreVerb
                 ContainerName = containerName,
                 RestorePointTimestamp = stopAt ?? point.Timestamp,
                 ChainSummary = point.TypeDisplay,
-                Outcome = RestoreOutcome.Cancelled,
+                Outcome = OperationOutcome.Cancelled,
                 ErrorMessage = "Cancelled from the terminal.",
                 Script = script,
                 Log = log.ToString()
@@ -392,7 +392,7 @@ internal static class RestoreVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine(ex.Message);
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
                 StartedAt = startedAt,
@@ -403,7 +403,7 @@ internal static class RestoreVerb
                 ContainerName = containerName,
                 RestorePointTimestamp = stopAt ?? point.Timestamp,
                 ChainSummary = point.TypeDisplay,
-                Outcome = RestoreOutcome.Failed,
+                Outcome = OperationOutcome.Failed,
                 ErrorMessage = ex.Message,
                 Script = script,
                 Log = log.ToString()

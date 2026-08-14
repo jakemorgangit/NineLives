@@ -109,7 +109,7 @@ public class BrowseToRestoreHandoffTests
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
             new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+            new FakeOperationHistoryStore(), TestAuditStores.Temp())
         {
             Mode = AppMode.Pro
         };

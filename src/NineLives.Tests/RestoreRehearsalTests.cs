@@ -100,7 +100,7 @@ public class RestoreRehearsalTests
     }
 
     private static async Task<(RestoreViewModel vm, FakeSqlServerService sql, FakeRunNotifier notifier,
-            FakeRestoreHistoryStore history)>
+            FakeOperationHistoryStore history)>
         ReadyWithHistoryAsync()
     {
         var store = new FakeCredentialStore();
@@ -132,7 +132,7 @@ public class RestoreRehearsalTests
         };
 
         var notifier = new FakeRunNotifier();
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
             new RestoreScriptGenerator(), store, TestLogs.Temp(),
@@ -214,6 +214,6 @@ public class RestoreRehearsalTests
         var entry = Assert.Single(history.Entries);
         Assert.Equal("Rehearsal", entry.Kind);
         Assert.Contains("_rehearsal_", entry.TargetDatabase);
-        Assert.Equal(RestoreOutcome.Succeeded, entry.Outcome);
+        Assert.Equal(OperationOutcome.Succeeded, entry.Outcome);
     }
 }

@@ -94,7 +94,7 @@ public class PostRestoreTests
     {
         var sql = new FakeSqlServerService();
         var vm = new RestoreExecutionViewModel(
-            sql, new FakeRestoreHistoryStore(), TestLogs.Temp(), new OperationCancellation());
+            sql, new FakeOperationHistoryStore(), TestLogs.Temp(), new OperationCancellation());
         return (vm, sql);
     }
 

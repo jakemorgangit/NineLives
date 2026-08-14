@@ -893,11 +893,11 @@ public partial class RestoreViewModel : ViewModelBase
         RestoreScriptGenerator scriptGenerator,
         ICredentialStore credentialStore,
         OperationLog? log = null,
-        IRestoreHistoryStore? history = null,
+        IOperationHistoryStore? history = null,
         IBackupAuditStore? auditStore = null,
         IRunNotifier? notifier = null)
     {
-        _history = history ?? new RestoreHistoryStore();
+        _history = history ?? new OperationHistoryStore();
 
         _blobService = blobService;
         _sqlService = sqlService;
@@ -1071,7 +1071,7 @@ public partial class RestoreViewModel : ViewModelBase
     }
 
     private readonly OperationLog _log;
-    private readonly IRestoreHistoryStore _history;
+    private readonly IOperationHistoryStore _history;
 
     public void RefreshContainers()
     {

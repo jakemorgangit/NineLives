@@ -32,7 +32,7 @@ public class CancelledRecoveryStepTests
         var sql = new FakeSqlServerService();
         var queries = new OperationCancellation();
         var vm = new RestoreExecutionViewModel(
-            sql, new FakeRestoreHistoryStore(), TestLogs.Temp(), queries);
+            sql, new FakeOperationHistoryStore(), TestLogs.Temp(), queries);
 
         var run = new RestoreRun(
             new ServerConnection { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" },

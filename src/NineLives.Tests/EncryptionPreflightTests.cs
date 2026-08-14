@@ -121,7 +121,7 @@ public class EncryptionPreflightTests
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
             new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+            new FakeOperationHistoryStore(), TestAuditStores.Temp())
         {
             Mode = AppMode.Pro
         };

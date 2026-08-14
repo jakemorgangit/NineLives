@@ -296,7 +296,7 @@ public class AdHocFileRestoreTests
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), new FakeSqlServerService(), new BackupChainBuilder(),
             new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+            new FakeOperationHistoryStore(), TestAuditStores.Temp())
         {
             Mode = AppMode.Pro
         };

@@ -58,7 +58,7 @@ public class AuditIsVisibleOnTheRowsTests
                         : BackupType.Full)
             },
             new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
+            TestLogs.Temp(), new FakeOperationHistoryStore(), TestAuditStores.Temp());
 
         vm.ConnectedServer = new ServerConnection
         { Id = ServerConnection.NewId(), Name = "SRV01", ServerName = "SRV01" };

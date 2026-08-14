@@ -30,7 +30,7 @@ public class RestoreScreenOnArrivalTests
         var vm = new RestoreViewModel(
             new FakeBlobStorageService { Files = files.ToList() }, sql,
             new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            TestLogs.Temp(), new FakeRestoreHistoryStore());
+            TestLogs.Temp(), new FakeOperationHistoryStore());
 
         return (vm, sql);
     }
@@ -196,7 +196,7 @@ public class RestoreScreenOnArrivalTests
         var sql = new FakeSqlServerService();
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeOperationHistoryStore());
 
         var gate = new TaskCompletionSource();
         sql.HoldConnection = gate;

@@ -121,7 +121,7 @@ internal static class Program
         var store = new CredentialStore();
         var services = new CliServices(
             store, new SqlServerService(store), new BlobStorageService(store),
-            new RestoreHistoryStore(), new WebhookRunNotifier(store, new OperationLog()),
+            new OperationHistoryStore(), new WebhookRunNotifier(store, new OperationLog()),
             envServer, envContainer);
 
         try

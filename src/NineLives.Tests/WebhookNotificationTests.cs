@@ -184,7 +184,7 @@ public class WebhookNotificationTests
     {
         var notifier = new FakeRunNotifier();
         var vm = new RestoreExecutionViewModel(
-            new FakeSqlServerService(), new FakeRestoreHistoryStore(), TestLogs.Temp(),
+            new FakeSqlServerService(), new FakeOperationHistoryStore(), TestLogs.Temp(),
             new OperationCancellation(), notifier);
 
         await vm.RunAsync(Run(), _ => Task.FromResult(CredentialPreflight.Proceed));
@@ -200,7 +200,7 @@ public class WebhookNotificationTests
         var notifier = new FakeRunNotifier();
         var sql = new FakeSqlServerService { ExecuteThrows = new InvalidOperationException("Msg 3201") };
         var vm = new RestoreExecutionViewModel(
-            sql, new FakeRestoreHistoryStore(), TestLogs.Temp(), new OperationCancellation(), notifier);
+            sql, new FakeOperationHistoryStore(), TestLogs.Temp(), new OperationCancellation(), notifier);
 
         await vm.RunAsync(Run(), _ => Task.FromResult(CredentialPreflight.Proceed));
 

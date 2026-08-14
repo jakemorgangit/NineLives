@@ -56,7 +56,7 @@ public class CliScriptRelocationTests
 
         return new CliServices(
             store, sql, new FakeBlobStorageService(),
-            new FakeRestoreHistoryStore(), new FakeRunNotifier());
+            new FakeOperationHistoryStore(), new FakeRunNotifier());
     }
 
     private static async Task<(int exit, string script, string said)> RunScript(params string[] argv)

@@ -16,7 +16,7 @@ namespace Blackcat.NineLives.Tests;
 public class CliBackupVerbTests
 {
     private static (CliServices services, FakeSqlServerService sql,
-                    FakeRestoreHistoryStore history, FakeRunNotifier notifier) Stage()
+                    FakeOperationHistoryStore history, FakeRunNotifier notifier) Stage()
     {
         var store = new FakeCredentialStore();
         store.Config.Servers.Add(new ServerConnection
@@ -29,7 +29,7 @@ public class CliBackupVerbTests
         });
 
         var sql = new FakeSqlServerService();
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var notifier = new FakeRunNotifier();
         var services = new CliServices(
             store, sql, new FakeBlobStorageService(), history, notifier);
@@ -146,7 +146,7 @@ public class CliBackupVerbTests
 
         var receipt = Assert.Single(history.Entries);
         Assert.Equal("Backup", receipt.Kind);
-        Assert.Equal(RestoreOutcome.Succeeded, receipt.Outcome);
+        Assert.Equal(OperationOutcome.Succeeded, receipt.Outcome);
 
         Assert.Equal(RunPhase.Started, notifier.Sent[0].Phase);
         Assert.Equal(RunPhase.Succeeded, notifier.Sent[^1].Phase);
@@ -165,7 +165,7 @@ public class CliBackupVerbTests
 
         Assert.Equal(2, exit);
         Assert.Contains("FAILED", errors);
-        Assert.Equal(RestoreOutcome.Failed, Assert.Single(history.Entries).Outcome);
+        Assert.Equal(OperationOutcome.Failed, Assert.Single(history.Entries).Outcome);
         Assert.Equal(RunPhase.Problem, notifier.Sent[^1].Phase);
         Assert.NotNull(notifier.Sent[^1].Duration);
     }

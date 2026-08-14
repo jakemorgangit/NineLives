@@ -61,7 +61,7 @@ public class ExecuteDuringARunTests
             new RestoreScriptGenerator(), store,
             new OperationLog(System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(), "ninelives-exec", Guid.NewGuid().ToString("n"))),
-            new FakeRestoreHistoryStore());
+            new FakeOperationHistoryStore());
 
         vm.SelectedContainer = store.Config.BlobContainers[0];
         await vm.LoadBackupsCommand.ExecuteAsync(null);

@@ -24,7 +24,7 @@ public class ExecuteBlockedReasonTests
         _blob, _sql, new BackupChainBuilder(), new RestoreScriptGenerator(), _store,
         new OperationLog(System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))),
-        new FakeRestoreHistoryStore());
+        new FakeOperationHistoryStore());
 
     private async Task<RestoreViewModel> Loaded()
     {

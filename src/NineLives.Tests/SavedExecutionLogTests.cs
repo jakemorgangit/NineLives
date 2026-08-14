@@ -31,7 +31,7 @@ public class SavedExecutionLogTests
             new BackupChainBuilder(), new RestoreScriptGenerator(), store,
             new OperationLog(System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(), "ninelives-saved-log", Guid.NewGuid().ToString("n"))),
-            new FakeRestoreHistoryStore());
+            new FakeOperationHistoryStore());
     }
 
     [Fact]
