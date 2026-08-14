@@ -24,6 +24,7 @@ public class RestoreViewModelTests
 
     private RestoreViewModel NewViewModel() => new(
         _blob, _sql, new BackupChainBuilder(), new RestoreScriptGenerator(), _store,
+        new FakeOperationHistoryStore(),
         new OperationLog(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))));
 
     private static readonly DateTime T0 = new(2026, 1, 10, 22, 0, 0);

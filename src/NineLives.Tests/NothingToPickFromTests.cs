@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Blackcat.NineLives.Models;
@@ -141,7 +141,7 @@ public class NothingToPickFromTests(WpfFixture wpf)
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), new FakeSqlServerService(), new BackupChainBuilder(),
             new RestoreScriptGenerator(), new FakeCredentialStore(),
-            TestLogs.Temp(), new FakeOperationHistoryStore());
+            new FakeOperationHistoryStore(), TestLogs.Temp());
 
         Assert.True(vm.HasNoTargetServers);
     }

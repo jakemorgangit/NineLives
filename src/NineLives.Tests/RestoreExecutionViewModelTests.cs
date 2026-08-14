@@ -55,7 +55,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
 
         var vm = new RestoreViewModel(
             blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            ThrowawayLog(), history ?? new FakeOperationHistoryStore())
+            history ?? new FakeOperationHistoryStore(), ThrowawayLog())
         {
             SelectedContainer = Container()
         };

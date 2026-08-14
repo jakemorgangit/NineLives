@@ -899,7 +899,7 @@ public class XamlLoadTests(WpfFixture wpf)
 
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeOperationHistoryStore(), TestAuditStores.Temp());
+            new RestoreScriptGenerator(), store, new FakeOperationHistoryStore(), TestLogs.Temp(), TestAuditStores.Temp());
 
         vm.RefreshContainers();
         vm.LoadBackupsCommand.Execute(null);
@@ -939,8 +939,8 @@ public class XamlLoadTests(WpfFixture wpf)
             var vm = new RestoreViewModel(
                 blob, new FakeSqlServerService(), new BackupChainBuilder(),
                 new RestoreScriptGenerator(), store,
-                TestLogs.Temp(),
-                new FakeOperationHistoryStore());
+                new FakeOperationHistoryStore(),
+                TestLogs.Temp());
 
             vm.RefreshContainers();
             vm.LoadBackupsCommand.Execute(null);
@@ -1593,8 +1593,8 @@ public class XamlLoadTests(WpfFixture wpf)
             new BackupChainBuilder(),
             new RestoreScriptGenerator(),
             store,
-            TestLogs.Temp(),
-            new FakeOperationHistoryStore());
+            new FakeOperationHistoryStore(),
+            TestLogs.Temp());
     }
 
     /// <summary>
