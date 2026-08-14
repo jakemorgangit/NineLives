@@ -153,6 +153,9 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// <summary>The list is not fetchable mid-run: it can wait; the copy cannot re-run (#281).</summary>
     public bool CanLoadSourceDatabases => !IsRunning;
 
+    /// <summary>Which listing owns the screen - see the note on the same field in BackupViewModel.</summary>
+    private int _listGeneration;
+
     [RelayCommand(CanExecute = nameof(CanLoadSourceDatabases))]
     private async Task LoadSourceDatabasesAsync()
     {
@@ -162,33 +165,50 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             return;
         }
 
+        // Captured before the await, the fix the Backup screen already had (#409). Read afterwards,
+        // the status line named whatever was selected by then rather than the server that answered
+        // - and threw outright if the selection had been cleared meanwhile.
+        var server = SourceServer;
+
+        var generation = ++_listGeneration;
         var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
 
         try
         {
-            var names = await _sql.GetDatabaseListAsync(SourceServer, ct);
+            var names = await _sql.GetDatabaseListAsync(server, ct);
+
+            // Overtaken while this was in flight; the newer selection owns the screen.
+            if (generation != _listGeneration) return;
+
             SourceDatabases = new ObservableCollection<string>(names);
 
             // Nothing is chosen for the user. Here the wrong choice reads a production database at
             // full speed AND overwrites a database on another server.
             SourceDatabase = null;
 
-            SetStatus($"{SourceServer.ServerName} has {names.Count} database(s).");
+            SetStatus($"{server.ServerName} has {names.Count} database(s).");
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Stopped.");
+            if (generation == _listGeneration) SetStatus("Stopped.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (generation == _listGeneration)
         {
             SetError($"Could not list the databases: {ex.Message}");
         }
+        catch
+        {
+            // Superseded - an error about the old server does not belong over the new one's list.
+        }
         finally
         {
-            _listCancellation.End();
-            IsBusy = false;
+            if (generation == _listGeneration)
+            {
+                _listCancellation.End();
+                IsBusy = false;
+            }
         }
     }
 
@@ -197,6 +217,11 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         SourceDatabases = [];
         SourceDatabase = null;
         Invalidate();
+
+        // Choosing the source server is the request to see what it holds - same reasoning as the
+        // Backup screen, and the same restraint mid-run.
+        if (value != null && CanLoadSourceDatabases)
+            _ = LoadSourceDatabasesAsync();
     }
 
     partial void OnTargetServerChanged(ServerConnection? value) => Invalidate();

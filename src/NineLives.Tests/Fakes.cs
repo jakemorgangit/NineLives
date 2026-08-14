@@ -289,8 +289,44 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// </summary>
     public List<string> DatabaseList { get; set; } = [];
 
-    public Task<List<string>> GetDatabaseListAsync(ServerConnection server, CancellationToken ct = default)
-        => Task.FromResult(DatabaseList);
+    /// <summary>
+    /// Holds a listing open so a test can overtake it. Choosing a server now starts a listing by
+    /// itself, so one being superseded by the next selection is ordinary rather than exotic - and
+    /// the loser must neither write its answer nor tidy up after the winner.
+    /// </summary>
+    public TaskCompletionSource<bool>? DatabaseListGate { get; set; }
+
+    /// <summary>
+    /// Answer even though the token was signalled - the realistic case, and the one that matters.
+    ///
+    /// Cancelling a SQL command is not instantaneous: the attention has to reach the server and the
+    /// reply has to come back. A listing can finish normally in that window, so a superseded run
+    /// does not always unwind promptly at the moment it is replaced - it can land later, with its
+    /// finally running while the newer listing is mid-flight. Without this the fake cancels the
+    /// instant it is asked, which unwinds the loser before the winner has set anything up and hides
+    /// the whole class of bug.
+    /// </summary>
+    public bool DatabaseListIgnoresCancellation { get; set; }
+
+    /// <summary>Each server's answer, when a test needs the two listings to be distinguishable.</summary>
+    public Dictionary<string, List<string>> DatabaseListByServer { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<List<string>> GetDatabaseListAsync(
+        ServerConnection server, CancellationToken ct = default)
+    {
+        if (DatabaseListGate != null)
+        {
+            if (DatabaseListIgnoresCancellation) await DatabaseListGate.Task;
+            else await DatabaseListGate.Task.WaitAsync(ct);
+        }
+
+        if (!DatabaseListIgnoresCancellation) ct.ThrowIfCancellationRequested();
+
+        return DatabaseListByServer.TryGetValue(server.ServerName, out var forServer)
+            ? [.. forServer]
+            : [.. DatabaseList];
+    }
 
     /// <summary>What the fake instance says it has free, by mount point.</summary>
     public Dictionary<string, long> VolumeFreeSpace { get; set; } = [];

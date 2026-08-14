@@ -150,6 +150,15 @@ public partial class BackupViewModel : ViewModelBase
     /// <summary>The list is not fetchable mid-run: it can wait; the backup cannot re-run (#281).</summary>
     public bool CanLoadDatabases => !IsRunning;
 
+    /// <summary>
+    /// Which listing owns the screen. Choosing a server now starts one automatically, so being
+    /// overtaken went from something you had to double-click to cause, to the ordinary result of
+    /// changing your mind about the server - and the loser must not write its answer, nor tidy up
+    /// after the winner. OperationCancellation.End() disposes unconditionally, so a superseded
+    /// run reaching its finally would dispose the live run's token source.
+    /// </summary>
+    private int _listGeneration;
+
     /// <summary>Asks the chosen instance what it has, rather than making somebody type a name.</summary>
     [RelayCommand(CanExecute = nameof(CanLoadDatabases))]
     private async Task LoadDatabasesAsync()
@@ -164,6 +173,7 @@ public partial class BackupViewModel : ViewModelBase
         // this dropdown is a click away from the one that produced it.
         var server = Server;
 
+        var generation = ++_listGeneration;
         var ct = _listCancellation.Begin();
         IsBusy = true;
         ClearStatus();
@@ -171,6 +181,10 @@ public partial class BackupViewModel : ViewModelBase
         try
         {
             var names = await _sql.GetDatabaseListAsync(server, ct);
+
+            // Overtaken while this was in flight: the newer selection owns the screen, and this
+            // answer is about a server the user has already moved on from.
+            if (generation != _listGeneration) return;
 
             Databases = new ObservableCollection<string>(names);
             DatabasePicks = new ObservableCollection<DatabasePick>(
@@ -197,16 +211,29 @@ public partial class BackupViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Stopped.");
+            // A cancel here is almost always this run being replaced by a newer selection, and the
+            // newer one is about to say what it found. Only the current generation speaks.
+            if (generation == _listGeneration) SetStatus("Stopped.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (generation == _listGeneration)
         {
             SetError($"Could not list the databases: {ex.Message}");
         }
+        catch
+        {
+            // Superseded, and its server is no longer on screen - reporting it would put an error
+            // about the old server over the new server's list.
+        }
         finally
         {
-            _listCancellation.End();
-            IsBusy = false;
+            // Only the newest listing tidies up. End() disposes whatever source is current, so a
+            // superseded run doing this would dispose the live one's - the same shape as the
+            // cross-operation version of this bug in #281.
+            if (generation == _listGeneration)
+            {
+                _listCancellation.End();
+                IsBusy = false;
+            }
         }
     }
 
@@ -223,6 +250,16 @@ public partial class BackupViewModel : ViewModelBase
         EncryptionCertificates = [];
         SelectedEncryptionCertificate = null;
         Invalidate();
+
+        // Choosing the server IS the request to see its databases. Pressing a button afterwards to
+        // ask the obvious follow-up question was a step that only ever had one right answer.
+        //
+        // Unlike the automatic fetch in #413, this cancels nothing anyone would miss: the only
+        // thing sharing _listCancellation is a previous listing of this same dropdown, which the
+        // new selection has just made irrelevant. It stays out of the way mid-run, where the list
+        // is deliberately unfetchable (#281) and the backup must not be disturbed.
+        if (value != null && CanLoadDatabases)
+            _ = LoadDatabasesAsync();
     }
 
     partial void OnSelectedDatabaseChanged(string? value) => Invalidate();

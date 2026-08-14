@@ -52,22 +52,60 @@ public class StaleGeneratedStateTests
         Assert.False(vm.CanExecute);
     }
 
-    /// <summary>The multi-select ticks belonged to the previous instance too.</summary>
+    /// <summary>
+    /// The multi-select ticks belonged to the previous instance too (#278).
+    ///
+    /// Choosing a server now lists its databases automatically, so the list is no longer empty
+    /// after a switch - it holds the NEW server's databases. That is the point of the change, and
+    /// it does not weaken what #278 was protecting: what must not survive is the user's CHOICES,
+    /// because stale ticks satisfied CanGenerate and produced statements naming the old server's
+    /// databases against the new one's destinations. Every pick is rebuilt unticked, and nothing
+    /// is runnable until somebody chooses again.
+    /// </summary>
     [Fact]
     public async Task SwitchingServersClearsTheMultiSelectTicksAndCertificates()
     {
-        var (vm, _) = BackupStage();
+        var (vm, sql) = BackupStage();
+        sql.BackupCertificates = ["OldServerCert"];
         await vm.LoadDatabasesCommand.ExecuteAsync(null);
         vm.MultiSelect = true;
         vm.PickAllCommand.Execute(null);
+        vm.SelectedEncryptionCertificate = "OldServerCert";
         Assert.True(vm.CanGenerate);
+
+        // The new server has a different estate, so anything left from the old one is visible.
+        sql.DatabaseList = ["SomethingElse"];
+        sql.BackupCertificates = [];
 
         vm.Server = vm.Servers.First(s => s.Name == "SRV02");
 
-        Assert.Empty(vm.DatabasePicks);
-        Assert.Empty(vm.EncryptionCertificates);
+        // The choices did not survive - the part that made #278 dangerous.
+        Assert.DoesNotContain(vm.DatabasePicks, p => p.IsPicked);
+        Assert.Null(vm.SelectedDatabase);
         Assert.Null(vm.SelectedEncryptionCertificate);
         Assert.False(vm.CanGenerate);
+
+        // And nothing of the old server's estate is still on offer.
+        Assert.Equal(["SomethingElse"], vm.DatabasePicks.Select(p => p.Name));
+        Assert.Empty(vm.EncryptionCertificates);
+    }
+
+    /// <summary>
+    /// The step that used to be required: choosing a server is the request to see its databases,
+    /// so the list arrives without anyone pressing anything.
+    /// </summary>
+    [Fact]
+    public void ChoosingAServerListsItsDatabasesWithoutPressingAnything()
+    {
+        var (vm, _) = BackupStage();
+
+        // BackupStage sets Server, which is the whole trigger.
+        Assert.Equal(["MyDb", "OtherDb"], vm.Databases);
+        Assert.Equal(["MyDb", "OtherDb"], vm.DatabasePicks.Select(p => p.Name));
+
+        // Still nothing chosen for the user - listing is not selecting.
+        Assert.Null(vm.SelectedDatabase);
+        Assert.DoesNotContain(vm.DatabasePicks, p => p.IsPicked);
     }
 
     [Fact]
