@@ -48,7 +48,39 @@ public sealed class FakeCredentialStore : ICredentialStore
     public string? GetSqlPassword(ServerConnection connection)
         => connection.UnsavedPassword ?? ReadSecret(SqlKey(connection)).secret;
 
-    public AppConfig LoadConfig() => Config;
+    /// <summary>
+    /// A fresh object graph on every call, the way the real store behaves (#439).
+    ///
+    /// CredentialStore.LoadConfig does File.ReadAllText plus Deserialize every time, so every
+    /// caller gets brand-new ServerConnection and BlobContainerConfig instances. This used to hand
+    /// back the cached Config - the same instances every time - and that one difference let a real
+    /// defect reach dev with a fully green suite.
+    ///
+    /// BackupViewModel.Refresh rebuilds its list from the config and reselects by id. Against the
+    /// real store that is always a DIFFERENT instance, so the ObservableProperty setter raises a
+    /// change and OnServerChanged runs; once choosing a server started listing its databases, every
+    /// navigation to the Backup or Copy screen silently opened a connection to a production
+    /// instance and wiped the user's ticks. Against identical instances the setter short-circuited
+    /// and nothing fired, so no test could see it.
+    ///
+    /// Round-tripped through JSON rather than hand-copied: a field added to AppConfig is carried
+    /// without anybody remembering to update this, and the JsonIgnore'd in-memory secrets
+    /// (UnsavedPassword, UnsavedSasToken) drop out exactly as they do when the real store reads
+    /// from disk.
+    /// </summary>
+    public AppConfig LoadConfig()
+    {
+        var fresh = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(
+            System.Text.Json.JsonSerializer.Serialize(Config)) ?? new AppConfig();
+
+        // LoadError is JsonIgnore'd but the real store SETS it on the object it hands back, after
+        // deserializing, when the file existed and could not be read. So it has to survive the
+        // copy - without it this fake can no longer play an unreadable config, and the rule that
+        // such a config is never overwritten stops being testable at all.
+        fresh.LoadError = Config.LoadError;
+
+        return fresh;
+    }
 
     public void SaveConfig(AppConfig config)
     {
