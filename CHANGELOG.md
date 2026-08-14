@@ -8,6 +8,20 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Fixed
+
+- **Recording a run no longer blocks the window** (#437). Writing a receipt is synchronous file
+  I/O - a cross-process lock whose backoff sleeps up to ten seconds when a scheduled CLI run
+  holds it, a whole-file read, a redaction pass over every script and log, then a serialize and
+  a replace - and the screens did it on the UI thread, once per database. A fifty-database
+  backup did fifty of them, so the window could stop repainting for minutes. The same write sat
+  in the cancellation handler, which meant pressing Stop froze the app instead of stopping the
+  run. Receipts are now written off the dispatcher, and still awaited one at a time: a run that
+  dies on the sixth database leaves the first five receipts on disk, because that half-finished
+  run is exactly the incident somebody opens the history for.
+
 ## [1.6.3] - 2026-08-13
 
 ### Fixed

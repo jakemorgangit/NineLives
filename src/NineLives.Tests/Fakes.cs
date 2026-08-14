@@ -207,10 +207,22 @@ public sealed class FakeOperationHistoryStore : IOperationHistoryStore
     /// <summary>Set to play a store that cannot write - recording must never fail an operation.</summary>
     public Exception? AppendThrows { get; set; }
 
+    /// <summary>
+    /// The thread each Append ran on, in order (#437). A UI caller must not be one of them:
+    /// the real store's Append is blocking file I/O with a ten-second lock backoff.
+    /// </summary>
+    public List<int> AppendThreads { get; } = [];
+
     public void Append(OperationHistoryEntry entry)
     {
+        AppendThreads.Add(Environment.CurrentManagedThreadId);
+
         if (AppendThrows != null) throw AppendThrows;
-        Entries.Insert(0, entry);
+
+        // The real store serialises on its own lock, and callers may now arrive from the thread
+        // pool, so this has to be safe to call concurrently or the fake invents failures the
+        // product does not have.
+        lock (Entries) Entries.Insert(0, entry);
     }
 
     public void Clear() => Entries.Clear();

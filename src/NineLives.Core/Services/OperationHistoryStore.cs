@@ -22,6 +22,27 @@ public interface IOperationHistoryStore
     /// <summary>Adds one execution. Never throws: recording history must not be able to fail a restore.</summary>
     void Append(OperationHistoryEntry entry);
 
+    /// <summary>
+    /// The same append, off the calling thread - what a UI caller must use (#437).
+    ///
+    /// <see cref="Append"/> is fully synchronous blocking I/O: a cross-process lock whose backoff
+    /// can sleep for ten seconds when a scheduled CLI run holds it, a whole-file read and
+    /// deserialize, a redaction pass over every script and log, then a serialize and a file
+    /// replace. On the dispatcher that stops the window repainting, and a backup records once per
+    /// database - fifty databases, fifty rewrites. The same call sits in the cancellation handler
+    /// too, so pressing Stop froze the app instead of stopping it.
+    ///
+    /// Awaited rather than fired and forgotten, deliberately. Ordering and per-database durability
+    /// are the whole point of one receipt per database: a run that dies on the sixth still leaves
+    /// the first five on disk, and that half-finished run is exactly the incident somebody opens
+    /// the history for.
+    ///
+    /// Defaulted here so a fake inherits it, and so a new UI call site cannot get it wrong by
+    /// forgetting - the fault it would reintroduce is invisible until somebody backs up fifty
+    /// databases at once.
+    /// </summary>
+    Task AppendAsync(OperationHistoryEntry entry) => Task.Run(() => Append(entry));
+
     void Clear();
 
     string FilePath { get; }
