@@ -98,12 +98,14 @@
                                        Visibility="{Binding HasNoServers, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
 
+                        <!-- A refresh now, not a required step - the source server lists itself. -->
                         <Button Grid.Column="1"
-                                Content="List databases"
+                                Content="Refresh list"
                                 Command="{Binding LoadSourceDatabasesCommand}"
                                 Style="{StaticResource SecondaryButton}"
                                 Padding="16,8"
-                                VerticalAlignment="Bottom" />
+                                VerticalAlignment="Bottom"
+                                ToolTip="Ask the source server for its databases again - for one created since, or if the list could not be fetched." />
                     </Grid>
 
                     <StackPanel Margin="0,12,0,0">
