@@ -324,20 +324,14 @@
                                    Style="{StaticResource BodyText}" />
                     </Border>
 
-                    <StackPanel Margin="0,12,0,0"
-                                Visibility="{Binding HasScripts, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="THROUGH" Style="{StaticResource LabelText}" Margin="0,0,0,4" />
-                        <ItemsControl ItemsSource="{Binding Destinations}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}"
-                                               TextWrapping="Wrap"
-                                               FontFamily="{StaticResource ConsoleFont}"
-                                               FontSize="12" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
+                    <!-- The staging location used to be repeated here under "THROUGH", the same
+                         way the backup screen repeated it under "WRITING TO". Both scripts below
+                         name it in the statements that write and read it, and this appeared at
+                         exactly the moment they did - when the reader is already looking at the
+                         authoritative copy. Destinations remains on the viewmodel: it drives both
+                         scripts, the readability check and the run, and the outcome text still
+                         names the file when a copy half-works and the backup is worth restoring
+                         from. -->
 
                     <Border Background="{DynamicResource ConsoleBackgroundBrush}"
                             BorderBrush="{DynamicResource ConsoleBorderBrush}"
