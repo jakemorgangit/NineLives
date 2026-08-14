@@ -45,6 +45,14 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The Restore screen can no longer default its history store to the real file** (#440).
+  Nothing a user sees changes. The store was an optional constructor argument defaulting to the
+  installed app's own `%LOCALAPPDATA%` audit trail, and this screen hands it straight to the
+  thing that writes - so a single forgotten argument meant a test appending invented runs to a
+  developer's real history, with the entry cap trimming genuine receipts off the end to make
+  room. The issue recorded this as latent because every call site passed a fake; one did not.
+  It is now required, which C# forces to sit ahead of the optional log, hence the call-site churn.
+
 - **A differential's file name no longer claims COPY_ONLY** (#441). COPY_ONLY is the default for
   backups this app takes, and the marker went into every destination name - but the generated
   statement omits the keyword on a differential, and rightly so: there is no copy-only

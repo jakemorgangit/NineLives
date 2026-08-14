@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -108,8 +108,8 @@ public class BrowseToRestoreHandoffTests
     {
         var vm = new RestoreViewModel(
             blob, new FakeSqlServerService(), new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeOperationHistoryStore(), TestAuditStores.Temp())
+            new RestoreScriptGenerator(), store, new FakeOperationHistoryStore(),
+            TestLogs.Temp(), TestAuditStores.Temp())
         {
             Mode = AppMode.Pro
         };

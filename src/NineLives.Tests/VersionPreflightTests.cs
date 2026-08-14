@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
 using Xunit;
@@ -106,8 +106,8 @@ public class VersionPreflightTests
 
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeOperationHistoryStore(), TestAuditStores.Temp())
+            new RestoreScriptGenerator(), store, new FakeOperationHistoryStore(),
+            TestLogs.Temp(), TestAuditStores.Temp())
         {
             Mode = AppMode.Pro
         };

@@ -23,9 +23,9 @@ public class QueryCancellationTests
 
     private RestoreViewModel NewViewModel() => new(
         _blob, _sql, new BackupChainBuilder(), new RestoreScriptGenerator(), _store,
+        new FakeOperationHistoryStore(),
         new OperationLog(System.IO.Path.Combine(
-            System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))),
-        new FakeOperationHistoryStore());
+            System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))));
 
     private static BackupFileInfo File(string blobName, BackupType type, DateTime stamp)
         => new()
