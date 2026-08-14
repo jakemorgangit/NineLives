@@ -118,8 +118,14 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
             executedAgainst = Assert.Single(sql.ExecutedAgainst);
         });
 
-        Assert.Same(sqlAuthEntry, executedAgainst);
-        Assert.NotSame(windowsAuthEntry, executedAgainst);
+        // By identity rather than by reference (#439): the store now hands out fresh instances
+        // the way the real one does, so the object executed against is a COPY of the right entry.
+        // Which entry it is remains the whole point - the SQL-auth one that was connected, not
+        // the Windows-auth one a name lookup would find first.
+        Assert.Equal(sqlAuthEntry.Id, executedAgainst!.Id);
+        Assert.Equal(AuthMode.SqlAuth, executedAgainst.AuthMode);
+        Assert.Equal("restoreadmin", executedAgainst.Username);
+        Assert.NotEqual(windowsAuthEntry.Id, executedAgainst.Id);
     }
 
     /// <summary>

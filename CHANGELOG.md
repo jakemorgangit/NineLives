@@ -12,6 +12,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The test double for the config store now behaves like the real one** (#439). Nothing a user
+  sees changes today, but this is why a real defect reached `dev` with a fully green suite. The
+  real store re-reads and deserializes on every call, so every caller gets fresh objects; the
+  fake handed back its cached instances. That one difference meant a screen which rebuilds its
+  list and reselects by id saw "no change" in tests and a genuine change in production - so
+  every visit to the Backup or Copy screen silently opened a connection to a production instance
+  and wiped the user's selections, and no test could see it. The fake now hands out copies, and
+  five tests that were leaning on the old behaviour say what they mean instead.
+
 - **Recording a run no longer blocks the window** (#437). Writing a receipt is synchronous file
   I/O - a cross-process lock whose backoff sleeps up to ten seconds when a scheduled CLI run
   holds it, a whole-file read, a redaction pass over every script and log, then a serialize and
