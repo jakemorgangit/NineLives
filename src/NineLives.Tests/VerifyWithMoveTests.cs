@@ -139,7 +139,7 @@ public class VerifyWithMoveViewModelTests(WpfFixture wpf)
             blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
             new OperationLog(System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(), "ninelives-vm-tests", Guid.NewGuid().ToString("n"))),
-            new FakeRestoreHistoryStore())
+            new FakeOperationHistoryStore())
         {
             SelectedContainer = new BlobContainerConfig
             {

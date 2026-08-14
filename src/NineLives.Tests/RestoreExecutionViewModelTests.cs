@@ -48,14 +48,14 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
     /// <summary>Loads one full backup and arms the execute button, ready to fire.</summary>
     private static async Task<(RestoreViewModel vm, FakeSqlServerService sql)> ReadyToExecute(
         ServerConnection connected, FakeCredentialStore store,
-        FakeRestoreHistoryStore? history = null)
+        FakeOperationHistoryStore? history = null)
     {
         var blob = new FakeBlobStorageService { Files = [FullBackup()] };
         var sql = new FakeSqlServerService();
 
         var vm = new RestoreViewModel(
             blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            ThrowawayLog(), history ?? new FakeRestoreHistoryStore())
+            ThrowawayLog(), history ?? new FakeOperationHistoryStore())
         {
             SelectedContainer = Container()
         };
@@ -220,7 +220,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         };
 
         var store = new FakeCredentialStore();
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         string log = string.Empty;
         string error = string.Empty;
         List<string> writes = [];
@@ -353,7 +353,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
             ServerName = "SRV01"
         };
 
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
 
         RunOnUi(async () =>
         {
@@ -362,7 +362,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         });
 
         var entry = Assert.Single(history.Entries);
-        Assert.Equal(RestoreOutcome.Succeeded, entry.Outcome);
+        Assert.Equal(OperationOutcome.Succeeded, entry.Outcome);
         Assert.Equal("SRV01", entry.ServerName);
         Assert.Equal("MyDb_Restored", entry.TargetDatabase);
         Assert.Contains("RESTORE DATABASE [MyDb_Restored]", entry.Script);
@@ -383,7 +383,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
             ServerName = "SRV01"
         };
 
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
 
         RunOnUi(async () =>
         {
@@ -393,7 +393,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
         });
 
         var entry = Assert.Single(history.Entries);
-        Assert.Equal(RestoreOutcome.Failed, entry.Outcome);
+        Assert.Equal(OperationOutcome.Failed, entry.Outcome);
         Assert.Contains("terminating abnormally", entry.ErrorMessage);
     }
 
@@ -411,7 +411,7 @@ public class RestoreExecutionViewModelTests(WpfFixture wpf)
             ServerName = "SRV01"
         };
 
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
 
         RunOnUi(async () =>
         {

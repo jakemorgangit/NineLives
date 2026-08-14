@@ -29,7 +29,7 @@ public class ACheckboxDoesNotCancelAQueryTests
         var sql = new FakeSqlServerService();
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
-            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeRestoreHistoryStore());
+            new RestoreScriptGenerator(), store, TestLogs.Temp(), new FakeOperationHistoryStore());
 
         vm.ConnectedServer = store.Config.Servers[0];
         vm.IsConnectedToServer = true;

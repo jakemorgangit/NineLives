@@ -11,26 +11,29 @@ using Blackcat.NineLives.Services;
 namespace Blackcat.NineLives.ViewModels;
 
 /// <summary>
-/// Past restores, read back from disk (#31).
+/// Past operations, read back from disk (#31, #434).
+///
+/// Restores and rehearsals at first; backups and copies since, because each of them is a thing
+/// that happened to somebody's server and none of them is recoverable from the app afterwards.
 ///
 /// Read-only on purpose beyond clearing: this is the record of what was done, and a view that
 /// could edit it would be worth less than one that cannot.
 /// </summary>
 public partial class HistoryViewModel : ViewModelBase
 {
-    private readonly IRestoreHistoryStore _history;
+    private readonly IOperationHistoryStore _history;
 
-    public HistoryViewModel(IRestoreHistoryStore? history = null)
+    public HistoryViewModel(IOperationHistoryStore? history = null)
     {
-        _history = history ?? new RestoreHistoryStore();
+        _history = history ?? new OperationHistoryStore();
         Refresh();
     }
 
     [ObservableProperty]
-    private ObservableCollection<RestoreHistoryEntry> _entries = [];
+    private ObservableCollection<OperationHistoryEntry> _entries = [];
 
     [ObservableProperty]
-    private RestoreHistoryEntry? _selectedEntry;
+    private OperationHistoryEntry? _selectedEntry;
 
     [ObservableProperty]
     private bool _hasEntries;
@@ -38,11 +41,36 @@ public partial class HistoryViewModel : ViewModelBase
     [ObservableProperty]
     private string _filterText = string.Empty;
 
+    /// <summary>
+    /// The kinds on offer, "All" first (#434). Built as a fixed list rather than from what happens
+    /// to be in the file, so the choices do not move around as history accumulates - and so
+    /// "Backup" is still offered on the day somebody is looking for one and there is none.
+    /// </summary>
+    public IReadOnlyList<string> KindFilters { get; } =
+    [
+        AllKinds,
+        OperationKind.Backup,
+        OperationKind.Restore,
+        OperationKind.Copy,
+        OperationKind.Rehearsal,
+    ];
+
+    public const string AllKinds = "All";
+
+    /// <summary>
+    /// Which kind is shown. Now that a backup of everything before a patch writes one entry per
+    /// database, "when did we last restore this" would otherwise mean reading past fifty backups.
+    /// </summary>
+    [ObservableProperty]
+    private string _kindFilter = AllKinds;
+
+    partial void OnKindFilterChanged(string value) => ApplyFilter();
+
     /// <summary>True while a confirmation is pending, so Clear takes two presses.</summary>
     [ObservableProperty]
     private bool _isClearArmed;
 
-    private List<RestoreHistoryEntry> _all = [];
+    private List<OperationHistoryEntry> _all = [];
 
     [RelayCommand]
     public void Refresh()
@@ -62,29 +90,42 @@ public partial class HistoryViewModel : ViewModelBase
                 "holds. Do not clear it - copy it somewhere safe first: " + _history.FilePath);
         else
             SetStatus(HasEntries
-                ? $"{_all.Count} restore(s) recorded."
-                : "No restores recorded yet.");
+                ? $"{_all.Count} operation(s) recorded."
+                : "No operations recorded yet.");
     }
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
 
     private void ApplyFilter()
     {
-        var matching = string.IsNullOrWhiteSpace(FilterText)
-            ? _all
-            : _all.Where(Matches).ToList();
+        var matching = _all.AsEnumerable();
 
-        Entries = new ObservableCollection<RestoreHistoryEntry>(matching);
+        if (KindFilter != AllKinds)
+        {
+            // Entries written before Kind existed hold "Restore", which is what they were - so
+            // filtering to Restore correctly includes them without a special case here.
+            matching = matching.Where(e =>
+                string.Equals(e.Kind, KindFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(FilterText))
+            matching = matching.Where(Matches);
+
+        Entries = new ObservableCollection<OperationHistoryEntry>(matching);
         HasEntries = Entries.Count > 0;
 
         if (SelectedEntry != null && !Entries.Contains(SelectedEntry))
             SelectedEntry = Entries.FirstOrDefault();
     }
 
-    private bool Matches(RestoreHistoryEntry e)
+    private bool Matches(OperationHistoryEntry e)
         => Contains(e.TargetDatabase) || Contains(e.ServerName)
         || Contains(e.SourceDatabase) || Contains(e.ContainerName)
-        || Contains(e.OutcomeDisplay);
+        || Contains(e.OutcomeDisplay)
+        // The source server is the only record of the machine a copy READ, and searching for a
+        // server by name should find the copies that touched it in either direction.
+        || Contains(e.SourceServerName)
+        || Contains(e.Kind);
 
     private bool Contains(string? value)
         => value != null && value.Contains(FilterText, StringComparison.OrdinalIgnoreCase);
@@ -192,7 +233,7 @@ public partial class HistoryViewModel : ViewModelBase
     }
 
     /// <summary>The entry as a self-contained document: what ran, where, and what came back.</summary>
-    public static string Format(RestoreHistoryEntry e)
+    public static string Format(OperationHistoryEntry e)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Nine Lives - restore record");

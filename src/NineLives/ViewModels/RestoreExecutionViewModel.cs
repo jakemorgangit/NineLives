@@ -49,7 +49,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 {
     private readonly IRunNotifier _notifier;
     private readonly ISqlServerService _sql;
-    private readonly IRestoreHistoryStore _history;
+    private readonly IOperationHistoryStore _history;
     private readonly OperationLog _log;
 
     /// <summary>Its own source: the Stop button during a restore is not the same button as the
@@ -64,7 +64,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
     public RestoreExecutionViewModel(
         ISqlServerService sql,
-        IRestoreHistoryStore history,
+        IOperationHistoryStore history,
         OperationLog log,
         OperationCancellation queryCancellation,
         IRunNotifier? notifier = null)
@@ -213,7 +213,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         _lastTarget = run.TargetDatabase;
 
         var startedAt = DateTime.Now;
-        var outcome = RestoreOutcome.Failed;
+        var outcome = OperationOutcome.Failed;
         string? failure = null;
 
         // Set false when the run is abandoned before anything was attempted, so the history
@@ -289,7 +289,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
                 executeToken);
 
             ExecutionSuccess = true;
-            outcome = RestoreOutcome.Succeeded;
+            outcome = OperationOutcome.Succeeded;
 
             // The run IS over, whatever the last STATS line said - a small final statement often
             // finishes without reporting 100.
@@ -321,7 +321,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            outcome = RestoreOutcome.Cancelled;
+            outcome = OperationOutcome.Cancelled;
             failure = "Cancelled by the user part-way through the chain.";
 
             // Cancelling a restore is not the same as never having run it. SqlCommand.Cancel stops
@@ -348,7 +348,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
         catch (Exception ex)
         {
             ExecutionSuccess = false;
-            outcome = RestoreOutcome.Failed;
+            outcome = OperationOutcome.Failed;
             failure = ex.Message;
             AppendLog($"\nERROR: {ex.Message}");
             SetError($"Restore failed: {ex.Message}");
@@ -394,8 +394,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// Files this execution in the history (#31). Never throws: the store swallows its own
     /// failures, and a restore must not be reported as failed because a record could not be kept.
     /// </summary>
-    private void RecordHistory(RestoreRun run, DateTime startedAt, RestoreOutcome outcome, string? failure)
-        => _history.Append(new RestoreHistoryEntry
+    private void RecordHistory(RestoreRun run, DateTime startedAt, OperationOutcome outcome, string? failure)
+        => _history.Append(new OperationHistoryEntry
         {
             StartedAt = startedAt,
             CompletedAt = DateTime.Now,
@@ -405,7 +405,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             SourceDatabase = run.SourceDatabase,
             RestorePointTimestamp = run.RestorePointTimestamp,
             ChainSummary = run.ChainSummary,
-            Kind = run.Kind == RunKind.Rehearsal ? "Rehearsal" : "Restore",
+            Kind = run.Kind == RunKind.Rehearsal ? OperationKind.Rehearsal : OperationKind.Restore,
             Outcome = outcome,
             ErrorMessage = failure,
             Script = run.Script,

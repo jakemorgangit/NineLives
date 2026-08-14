@@ -54,7 +54,7 @@ public class CliSaysWhatItDoesTests
 
         return (new CliServices(
             store, sql, new FakeBlobStorageService(),
-            new FakeRestoreHistoryStore(), new FakeRunNotifier()), sql);
+            new FakeOperationHistoryStore(), new FakeRunNotifier()), sql);
     }
 
     private static async Task<(int exit, string output, string errors)> Run(
@@ -117,7 +117,7 @@ public class CliSaysWhatItDoesTests
 
         var services = new CliServices(
             store, new FakeSqlServerService(), new FakeBlobStorageService(),
-            new FakeRestoreHistoryStore(), new FakeRunNotifier());
+            new FakeOperationHistoryStore(), new FakeRunNotifier());
 
         var (exit, output, _) = await Run(BackupVerb.RunAsync, BackupVerb.Spec,
             ["--server", "SRV01", "--container", "backups",

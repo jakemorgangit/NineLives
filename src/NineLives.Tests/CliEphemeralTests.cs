@@ -73,7 +73,7 @@ public class CliEphemeralTests
         store ??= new FakeCredentialStore();
         return new CliServices(
             store, new FakeSqlServerService(), new FakeBlobStorageService(),
-            new FakeRestoreHistoryStore(), new FakeRunNotifier(), envServer, envContainer);
+            new FakeOperationHistoryStore(), new FakeRunNotifier(), envServer, envContainer);
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class CliEphemeralTests
         };
         var store = new FakeCredentialStore();   // deliberately EMPTY: no profile config at all
         var sql = new FakeSqlServerService();
-        var history = new FakeRestoreHistoryStore();
+        var history = new FakeOperationHistoryStore();
         var services = new CliServices(
             store, sql, new FakeBlobStorageService(), history, new FakeRunNotifier(),
             envServer, envContainer);

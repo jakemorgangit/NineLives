@@ -25,7 +25,7 @@ public class CliExposureNotifyTests
         var sql = new FakeSqlServerService();
         var notifier = new FakeRunNotifier();
         var services = new CliServices(
-            store, sql, new FakeBlobStorageService(), new FakeRestoreHistoryStore(), notifier);
+            store, sql, new FakeBlobStorageService(), new FakeOperationHistoryStore(), notifier);
         return (services, sql, notifier);
     }
 

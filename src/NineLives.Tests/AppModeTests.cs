@@ -415,7 +415,7 @@ public class AppModeTests
         return new RestoreViewModel(
             new FakeBlobStorageService(), new FakeSqlServerService(), new BackupChainBuilder(),
             new RestoreScriptGenerator(), store, TestLogs.Temp(),
-            new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+            new FakeOperationHistoryStore(), TestAuditStores.Temp())
         {
             Mode = mode
         };

@@ -17,7 +17,7 @@ public class RestoreTargetStepTests
     private static RestoreViewModel New(FakeCredentialStore? store = null) => new(
         new FakeBlobStorageService(), new FakeSqlServerService(), new BackupChainBuilder(),
         new RestoreScriptGenerator(), store ?? new FakeCredentialStore(), TestLogs.Temp(),
-        new FakeRestoreHistoryStore(), TestAuditStores.Temp());
+        new FakeOperationHistoryStore(), TestAuditStores.Temp());
 
     private static ServerConnection Server(string id = "s1", string name = "SRV01") =>
         new() { Id = id, Name = name, ServerName = name };

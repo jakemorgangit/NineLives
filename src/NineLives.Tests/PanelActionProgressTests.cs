@@ -17,7 +17,7 @@ public class PanelActionProgressTests
     {
         var sql = new FakeSqlServerService();
         var vm = new RestoreExecutionViewModel(
-            sql, new FakeRestoreHistoryStore(), TestLogs.Temp(), new OperationCancellation());
+            sql, new FakeOperationHistoryStore(), TestLogs.Temp(), new OperationCancellation());
 
         // A run first, so _lastServer/_lastTarget are aimed - the panel only exists after one.
         var run = new RestoreRun(

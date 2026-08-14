@@ -34,7 +34,7 @@ public class HandoffHonestyTests
     private static RestoreViewModel Restore(FakeCredentialStore store, FakeBlobStorageService blob) => new(
         blob, new FakeSqlServerService(), new BackupChainBuilder(),
         new RestoreScriptGenerator(), store, TestLogs.Temp(),
-        new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+        new FakeOperationHistoryStore(), TestAuditStores.Temp())
     { Mode = AppMode.Pro };
 
     private static FakeCredentialStore Store(params BlobContainerConfig[] containers)

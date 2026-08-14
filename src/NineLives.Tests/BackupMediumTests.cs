@@ -46,7 +46,7 @@ public class BackupMediumTests
         var vm = new RestoreViewModel(
             new FakeBlobStorageService(), sql, new BackupChainBuilder(),
             new RestoreScriptGenerator(), store,
-            log: null, history: new FakeRestoreHistoryStore(), auditStore: TestAuditStores.Temp());
+            log: null, history: new FakeOperationHistoryStore(), auditStore: TestAuditStores.Temp());
 
         vm.RefreshContainers();
         vm.SelectedMedium = BackupMedium.SharedPath;

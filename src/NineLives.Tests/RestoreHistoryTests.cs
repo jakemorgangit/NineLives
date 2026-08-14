@@ -17,7 +17,7 @@ public class RestoreHistoryTests : IDisposable
     private readonly string _dir = Path.Combine(
         Path.GetTempPath(), "ninelives-history-tests", Guid.NewGuid().ToString("n"));
 
-    private RestoreHistoryStore Store() => new(_dir);
+    private OperationHistoryStore Store() => new(_dir);
 
     public void Dispose()
     {
@@ -25,7 +25,7 @@ public class RestoreHistoryTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private static RestoreHistoryEntry Entry(string target = "MyDb", RestoreOutcome outcome = RestoreOutcome.Succeeded)
+    private static OperationHistoryEntry Entry(string target = "MyDb", OperationOutcome outcome = OperationOutcome.Succeeded)
         => new()
         {
             StartedAt = new DateTime(2026, 1, 10, 22, 0, 0),
@@ -52,7 +52,7 @@ public class RestoreHistoryTests : IDisposable
         var loaded = Assert.Single(Store().Load());
         Assert.Equal("MyDb", loaded.TargetDatabase);
         Assert.Equal("SRV01", loaded.ServerName);
-        Assert.Equal(RestoreOutcome.Succeeded, loaded.Outcome);
+        Assert.Equal(OperationOutcome.Succeeded, loaded.Outcome);
         Assert.Contains("RESTORE DATABASE", loaded.Script);
     }
 
@@ -152,7 +152,7 @@ public class RestoreHistoryTests : IDisposable
     [Fact]
     public void ARecordFormatsAsASelfContainedDocument()
     {
-        var text = HistoryViewModel.Format(Entry(outcome: RestoreOutcome.Failed));
+        var text = HistoryViewModel.Format(Entry(outcome: OperationOutcome.Failed));
 
         // Everything needed to read it a week later without the app open.
         Assert.Contains("SRV01", text);
@@ -183,7 +183,7 @@ public class RestoreHistoryTests : IDisposable
     {
         var store = Store();
         store.Append(Entry("Sales"));
-        store.Append(Entry("Payroll", RestoreOutcome.Failed));
+        store.Append(Entry("Payroll", OperationOutcome.Failed));
 
         var vm = new HistoryViewModel(store);
 
@@ -280,7 +280,7 @@ public class RestoreHistoryTests : IDisposable
             lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
         // A writer whose patience runs out while the lock is still held.
-        new RestoreHistoryStore(_dir, lockTimeoutMs: 150).Append(Entry("Second"));
+        new OperationHistoryStore(_dir, lockTimeoutMs: 150).Append(Entry("Second"));
 
         // It did not land - and, the point, it took nothing with it.
         var all = Store().Load();
@@ -324,7 +324,7 @@ public class RestoreHistoryTests : IDisposable
 /// </summary>
 public class HistorySavedFileTests
 {
-    private static HistoryViewModel New() => new(new FakeRestoreHistoryStore());
+    private static HistoryViewModel New() => new(new FakeOperationHistoryStore());
 
     [Fact]
     public void NothingIsOfferedToOpenUntilSomethingHasBeenSaved()

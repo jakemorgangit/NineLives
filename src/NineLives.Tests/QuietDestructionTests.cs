@@ -66,7 +66,7 @@ public class QuietDestructionTests : IDisposable
     [Fact]
     public void AnUnreadableHistorySaysSoRatherThanReportingNothingRecorded()
     {
-        var store = new FakeRestoreHistoryStore { CouldNotRead = true };
+        var store = new FakeOperationHistoryStore { CouldNotRead = true };
         var vm = new HistoryViewModel(store);
 
         vm.Refresh();
@@ -83,8 +83,8 @@ public class QuietDestructionTests : IDisposable
     [Fact]
     public void ClearRefusesOverAHistoryItCouldNotRead()
     {
-        var store = new FakeRestoreHistoryStore { CouldNotRead = true };
-        store.Entries.Add(new Models.RestoreHistoryEntry { TargetDatabase = "Sales" });
+        var store = new FakeOperationHistoryStore { CouldNotRead = true };
+        store.Entries.Add(new Models.OperationHistoryEntry { TargetDatabase = "Sales" });
 
         var vm = new HistoryViewModel(store);
 
@@ -100,8 +100,8 @@ public class QuietDestructionTests : IDisposable
     [Fact]
     public void AReadableHistoryStillClearsOnTheSecondPress()
     {
-        var store = new FakeRestoreHistoryStore();
-        store.Entries.Add(new Models.RestoreHistoryEntry { TargetDatabase = "Sales" });
+        var store = new FakeOperationHistoryStore();
+        store.Entries.Add(new Models.OperationHistoryEntry { TargetDatabase = "Sales" });
 
         var vm = new HistoryViewModel(store);
 

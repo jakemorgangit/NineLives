@@ -57,6 +57,53 @@ public class ViewRenderHarness
             return (new BackupView(), vm);
         },
 
+        ["history-screen"] = () =>
+        {
+            var history = new FakeOperationHistoryStore();
+            history.Append(new OperationHistoryEntry
+            {
+                Kind = OperationKind.Backup,
+                ServerName = "SRV01",
+                TargetDatabase = "Sales",
+                ContainerName = "backups",
+                Medium = "Cloud storage",
+                FileCount = 4,
+                OptionsSummary = "NOT copy-only, COMPRESSION, CHECKSUM",
+                StartedAt = new DateTime(2026, 8, 14, 9, 15, 0),
+                CompletedAt = new DateTime(2026, 8, 14, 9, 21, 30),
+                Outcome = OperationOutcome.Succeeded,
+                Script = "BACKUP DATABASE [Sales] TO URL = N'...';",
+            });
+            history.Append(new OperationHistoryEntry
+            {
+                Kind = OperationKind.Copy,
+                ServerName = "SRV02",
+                SourceServerName = "SRV01",
+                TargetDatabase = "Sales_Copy",
+                SourceDatabase = "Sales",
+                Medium = "Cloud storage",
+                FileCount = 1,
+                OptionsSummary = "COPY_ONLY, WITH REPLACE",
+                StartedAt = new DateTime(2026, 8, 14, 10, 0, 0),
+                CompletedAt = new DateTime(2026, 8, 14, 10, 4, 0),
+                Outcome = OperationOutcome.Failed,
+                ErrorMessage = "The backup succeeded and the restore did not.",
+            });
+            history.Append(new OperationHistoryEntry
+            {
+                Kind = OperationKind.Restore,
+                ServerName = "SRV02",
+                TargetDatabase = "Sales",
+                ChainSummary = "1 Full + 2 Log(s)",
+                RestorePointTimestamp = new DateTime(2026, 8, 13, 23, 45, 0),
+                StartedAt = new DateTime(2026, 8, 14, 11, 0, 0),
+                CompletedAt = new DateTime(2026, 8, 14, 11, 12, 0),
+                Outcome = OperationOutcome.Succeeded,
+            });
+
+            return (new HistoryView(), new HistoryViewModel(history));
+        },
+
         ["copy-screen"] = () =>
         {
             var sql = new FakeSqlServerService { DatabaseList = ["Sales", "Archive"] };

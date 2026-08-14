@@ -56,7 +56,7 @@ public class SpaceCheckOnTheScreenTests
 
         var vm = new RestoreViewModel(
             blob, sql, new BackupChainBuilder(), new RestoreScriptGenerator(), store,
-            TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp());
+            TestLogs.Temp(), new FakeOperationHistoryStore(), TestAuditStores.Temp());
 
         vm.RefreshContainers();
         vm.ConnectedServer = new ServerConnection

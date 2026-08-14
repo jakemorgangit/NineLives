@@ -45,7 +45,7 @@ public class S3PreflightGateTests
             ]
         };
         var services = new CliServices(
-            store, sql, new FakeBlobStorageService(), new FakeRestoreHistoryStore(),
+            store, sql, new FakeBlobStorageService(), new FakeOperationHistoryStore(),
             new FakeRunNotifier());
         return (services, sql);
     }

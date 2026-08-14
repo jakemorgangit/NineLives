@@ -20,7 +20,7 @@ namespace Blackcat.NineLives.Tests;
 public class OneRecoveryActionAtATimeTests
 {
     private static RestoreExecutionViewModel Panel(FakeSqlServerService sql) =>
-        new(sql, new FakeRestoreHistoryStore(), TestLogs.Temp(),
+        new(sql, new FakeOperationHistoryStore(), TestLogs.Temp(),
             new OperationCancellation(), new FakeRunNotifier());
 
     [Fact]

@@ -14,7 +14,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISqlServerService _sqlService;
     private readonly BackupChainBuilder _chainBuilder;
     private readonly RestoreScriptGenerator _scriptGenerator;
-    private readonly IRestoreHistoryStore _historyStore;
+    private readonly IOperationHistoryStore _historyStore;
 
     [ObservableProperty]
     private ViewModelBase? _currentView;
@@ -254,9 +254,9 @@ public partial class MainViewModel : ViewModelBase
         BlobConfig = new BlobConfigViewModel(_credentialStore, _blobService);
         ServerManager = new ServerManagerViewModel(_credentialStore, _sqlService);
         BlobBrowser = new BlobBrowserViewModel(_blobService, _sqlService, _credentialStore);
-        // One store, shared: the Restore screen writes to it and the History screen reads it back,
-        // and two instances pointed at the same file would be a way to lose an entry.
-        _historyStore = new RestoreHistoryStore();
+        // One store, shared: the screens that RUN things write to it and the History screen reads
+        // it back, and two instances pointed at the same file would be a way to lose an entry.
+        _historyStore = new OperationHistoryStore();
 
         // One notifier for every screen that runs things (#242) - reads the endpoint list fresh
         // per event, so a webhook added in Settings works without a restart.
@@ -269,8 +269,10 @@ public partial class MainViewModel : ViewModelBase
         ModeSelection.Chosen += OnModeChosen;
         ModeSelection.Cancelled += OnModeCardsCancelled;
 
-        Backup = new BackupViewModel(_credentialStore, _sqlService, notifier: notifier);
-        CopyDatabase = new CopyDatabaseViewModel(_credentialStore, _sqlService, notifier: notifier);
+        Backup = new BackupViewModel(
+            _credentialStore, _sqlService, notifier: notifier, history: _historyStore);
+        CopyDatabase = new CopyDatabaseViewModel(
+            _credentialStore, _sqlService, notifier: notifier, history: _historyStore);
         History = new HistoryViewModel(_historyStore);
         Exposure = new ExposureViewModel(_credentialStore, _sqlService, _historyStore);
         Settings = new SettingsViewModel(_credentialStore);

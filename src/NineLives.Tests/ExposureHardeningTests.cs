@@ -32,7 +32,7 @@ public class ExposureHardeningTests
             { Id = ServerConnection.NewId(), Name = name, ServerName = name });
 
         var sql = new FakeSqlServerService();
-        return (new ExposureViewModel(store, sql, new FakeRestoreHistoryStore(), TestLogs.Temp()), sql, store);
+        return (new ExposureViewModel(store, sql, new FakeOperationHistoryStore(), TestLogs.Temp()), sql, store);
     }
 
     // ── the sweep can be stopped (#287 item 1) ──────────────────────────────────
@@ -142,7 +142,7 @@ public class ExposureHardeningTests
         store.Config.Servers.Add(asReader);
         var sql = new FakeSqlServerService();
         sql.ExposureByServer["SRV01"] = [Row("SRV01", "Sales")];
-        var vm = new ExposureViewModel(store, sql, new FakeRestoreHistoryStore(), TestLogs.Temp());
+        var vm = new ExposureViewModel(store, sql, new FakeOperationHistoryStore(), TestLogs.Temp());
         await vm.RefreshCommand.ExecuteAsync(null);
 
         // Both entries answered, so the same database appears once per connection; each row

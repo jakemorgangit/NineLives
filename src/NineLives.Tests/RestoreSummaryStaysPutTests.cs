@@ -88,7 +88,7 @@ public class RestoreSummaryStaysPutTests(WpfFixture wpf)
             new FakeBlobStorageService(), new FakeSqlServerService(),
             new Blackcat.NineLives.Services.BackupChainBuilder(),
             new Blackcat.NineLives.Services.RestoreScriptGenerator(),
-            store, TestLogs.Temp(), new FakeRestoreHistoryStore(), TestAuditStores.Temp())
+            store, TestLogs.Temp(), new FakeOperationHistoryStore(), TestAuditStores.Temp())
         {
             // The banner is collapsed with nothing to say, and a collapsed element is not somewhere
             // a person can fail to see - so it needs something to say before any of this means

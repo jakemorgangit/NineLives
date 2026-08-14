@@ -32,8 +32,8 @@ public class EveryScreenSaysWhatItDidTests(WpfFixture wpf)
             "Settings" => Pair(new SettingsView(), new SettingsViewModel(store, TestLogs.Temp())),
             "Servers" => Pair(new ServerManagerView(), new ServerManagerViewModel(store, new FakeSqlServerService())),
             "Blob" => Pair(new BlobConfigView(), new BlobConfigViewModel(store, new FakeBlobStorageService())),
-            "Exposure" => Pair(new ExposureView(), new ExposureViewModel(store, new FakeSqlServerService(), new FakeRestoreHistoryStore())),
-            "History" => Pair(new HistoryView(), new HistoryViewModel(new FakeRestoreHistoryStore())),
+            "Exposure" => Pair(new ExposureView(), new ExposureViewModel(store, new FakeSqlServerService(), new FakeOperationHistoryStore())),
+            "History" => Pair(new HistoryView(), new HistoryViewModel(new FakeOperationHistoryStore())),
             _ => throw new ArgumentOutOfRangeException(nameof(name))
         };
 
@@ -104,7 +104,7 @@ public class EveryScreenSaysWhatItDidTests(WpfFixture wpf)
     {
         wpf.Invoke(() =>
         {
-            var vm = new HistoryViewModel(new FakeRestoreHistoryStore { CouldNotRead = true });
+            var vm = new HistoryViewModel(new FakeOperationHistoryStore { CouldNotRead = true });
             var view = new HistoryView { DataContext = vm };
 
             vm.Refresh();

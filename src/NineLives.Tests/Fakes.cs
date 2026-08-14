@@ -193,18 +193,25 @@ public sealed class FakeBlobStorageService : IBlobStorageService
 }
 
 /// <summary>An in-memory restore history, so the tests never touch the real one.</summary>
-public sealed class FakeRestoreHistoryStore : IRestoreHistoryStore
+public sealed class FakeOperationHistoryStore : IOperationHistoryStore
 {
-    public List<RestoreHistoryEntry> Entries { get; } = [];
+    public List<OperationHistoryEntry> Entries { get; } = [];
 
     public string FilePath => "(in memory)";
 
     /// <summary>Set to play a history file that exists and cannot be read (#370).</summary>
     public bool CouldNotRead { get; set; }
 
-    public List<RestoreHistoryEntry> Load() => Entries.ToList();
+    public List<OperationHistoryEntry> Load() => Entries.ToList();
 
-    public void Append(RestoreHistoryEntry entry) => Entries.Insert(0, entry);
+    /// <summary>Set to play a store that cannot write - recording must never fail an operation.</summary>
+    public Exception? AppendThrows { get; set; }
+
+    public void Append(OperationHistoryEntry entry)
+    {
+        if (AppendThrows != null) throw AppendThrows;
+        Entries.Insert(0, entry);
+    }
 
     public void Clear() => Entries.Clear();
 }

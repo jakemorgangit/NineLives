@@ -32,15 +32,17 @@ public partial class BackupViewModel : ViewModelBase
     private readonly OperationCancellation _runCancellation = new();
     private readonly OperationCancellation _verifyCancellation = new();
     private readonly OperationLog _log;
+    private readonly IOperationHistoryStore _history;
 
     public BackupViewModel(
         ICredentialStore store, ISqlServerService sql, OperationLog? log = null,
-        IRunNotifier? notifier = null)
+        IRunNotifier? notifier = null, IOperationHistoryStore? history = null)
     {
         _notifier = notifier ?? NullRunNotifier.Instance;
         _store = store;
         _sql = sql;
         _log = log ?? App.Log;
+        _history = history ?? new OperationHistoryStore();
 
         Refresh();
     }
@@ -145,6 +147,81 @@ public partial class BackupViewModel : ViewModelBase
     private void PickNone()
     {
         foreach (var pick in DatabasePicks) pick.IsPicked = false;
+    }
+
+    /// <summary>
+    /// One receipt per database (#434).
+    ///
+    /// Per database rather than per run, matching the semantics the loop already commits to: a
+    /// failure on the sixth database is the sixth database's failure and the rest still run
+    /// (#208). One entry per run would have to describe five successes and one failure in a single
+    /// outcome, which is exactly the summarising that loses the detail somebody came looking for.
+    ///
+    /// Never allowed to fail the backup. The store's own rule, and it matters more here than on
+    /// the restore screen: the backup has already happened by the time this is called, and
+    /// throwing now would turn a completed backup into a reported failure.
+    /// </summary>
+    private void Record(
+        string database, string script, List<string> destinations,
+        DateTime startedAt, OperationOutcome outcome, string? error)
+    {
+        try
+        {
+            _history.Append(new OperationHistoryEntry
+            {
+                StartedAt = startedAt,
+                CompletedAt = DateTime.Now,
+                ServerName = Server?.ServerName ?? string.Empty,
+                TargetDatabase = database,
+                ContainerName = MediumIsBlob ? Container?.Name : null,
+                Medium = MediumDescription(destinations),
+                FileCount = destinations.Count,
+                OptionsSummary = OptionsDescription(),
+                Kind = OperationKind.Backup,
+                Outcome = outcome,
+                ErrorMessage = error,
+                Script = script,
+
+                // This screen's console is a line collection rather than the restore screen's
+                // ConsoleBuffer, and it is shared by every database in a multi-database run - so
+                // each entry carries the run's output up to its own moment, which is what a
+                // failure on the sixth database needs to be readable.
+                Log = string.Join(Environment.NewLine, Console)
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Could not record the backup of {database} in history: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// S3 and Azure are both "cloud storage" on screen but not in a receipt - the URL scheme is
+    /// what a later restore has to match, so the two are told apart here.
+    /// </summary>
+    private string MediumDescription(List<string> destinations) =>
+        MediumIsBlob
+            ? destinations.FirstOrDefault()?.StartsWith("s3://", StringComparison.OrdinalIgnoreCase) == true
+                ? "S3"
+                : "Cloud storage"
+            : "A path the server can write to";
+
+    /// <summary>
+    /// COPY_ONLY first and always stated, including when it is OFF.
+    ///
+    /// "Was the differential base moved?" is the question this exists to answer, and it is
+    /// unanswerable from anywhere else months later. The others are only worth the words when
+    /// they are on.
+    /// </summary>
+    private string OptionsDescription()
+    {
+        var options = new List<string> { CopyOnly ? "COPY_ONLY" : "NOT copy-only" };
+
+        if (Compression) options.Add("COMPRESSION");
+        if (Checksum) options.Add("CHECKSUM");
+        if (Encrypt) options.Add("ENCRYPTION");
+
+        return string.Join(", ", options);
     }
 
     /// <summary>The list is not fetchable mid-run: it can wait; the backup cannot re-run (#281).</summary>
@@ -654,17 +731,29 @@ public partial class BackupViewModel : ViewModelBase
 
             foreach (var (database, script, destinations) in run)
             {
+                // Before the statement goes out, so a database the cancel arrived before is not
+                // recorded at all - the receipt is for what was performed, not what was planned.
                 ct.ThrowIfCancellationRequested();
                 Append($"Backing up {database} on {Server.ServerName}...");
+
+                var databaseStarted = DateTime.Now;
 
                 try
                 {
                     await _sql.ExecuteWithProgressAsync(Server, script, Append, ct);
                     Append($"{database}: done.");
                     succeededDevices.AddRange(destinations);
+                    Record(database, script, destinations, databaseStarted,
+                        OperationOutcome.Succeeded, null);
                 }
                 catch (OperationCanceledException)
                 {
+                    // This one was in flight when the stop arrived, so it happened - and a partial
+                    // file that cannot be restored from is precisely what somebody needs to find
+                    // in the history later.
+                    Record(database, script, destinations, databaseStarted,
+                        OperationOutcome.Cancelled,
+                        "Cancelled by the user. Any file already written is incomplete.");
                     throw;
                 }
                 catch (Exception ex)
@@ -675,6 +764,8 @@ public partial class BackupViewModel : ViewModelBase
                     failed.Add(database);
                     lastFailureMessage = ex.Message;
                     _log.Error($"Backup failed: {database}: {ex.Message}");
+                    Record(database, script, destinations, databaseStarted,
+                        OperationOutcome.Failed, ex.Message);
 
                     // At the moment of the problem, not minutes later in the summary (#242): the
                     // rest of the run continues, and whoever is off watching something else can

@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 
 namespace Blackcat.NineLives.Cli.Verbs;
@@ -256,16 +256,27 @@ internal static class BackupVerb
         }
 
         return await ExecuteAsync(
-            services, server, script, database, type.Value, destinations,
+            services, server, script, database, type.Value, destinations, copyOnly,
             json ? output : null, errors, ct);
     }
 
     private static async Task<int> ExecuteAsync(
         CliServices services, ServerConnection server, string script, string database,
-        BackupType type, List<string> destinations, TextWriter? jsonOut, TextWriter errors,
-        CancellationToken ct)
+        BackupType type, List<string> destinations, bool copyOnly,
+        TextWriter? jsonOut, TextWriter errors, CancellationToken ct)
     {
         var startedAt = DateTime.Now;
+
+        // Same receipt fields as the app writes (#434), so a scheduled 9lives backup and a clicked
+        // one read alike in the history - only Origin tells them apart, which is the point.
+        var medium = destinations.FirstOrDefault() is { } first
+            && (first.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                || first.StartsWith("s3://", StringComparison.OrdinalIgnoreCase))
+            ? first.StartsWith("s3://", StringComparison.OrdinalIgnoreCase) ? "S3" : "Cloud storage"
+            : "A path the server can write to";
+
+        // Stated either way. "Was the differential base moved?" is unanswerable later otherwise.
+        var options = copyOnly ? "COPY_ONLY" : "NOT copy-only";
         var log = new System.Text.StringBuilder();
 
         // The run's ending as data (#303), when asked for.
@@ -302,17 +313,20 @@ internal static class BackupVerb
             await services.Sql.ExecuteWithProgressAsync(server, script, Progress, ct);
 
             var completedAt = DateTime.Now;
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
-                Kind = "Backup",
+                Kind = OperationKind.Backup,
+                Medium = medium,
+                FileCount = destinations.Count,
+                OptionsSummary = options,
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = server.ServerName,
                 TargetDatabase = database,
                 SourceDatabase = database,
                 ChainSummary = $"{type} backup",
-                Outcome = RestoreOutcome.Succeeded,
+                Outcome = OperationOutcome.Succeeded,
                 Script = script,
                 Log = log.ToString()
             };
@@ -332,17 +346,20 @@ internal static class BackupVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine("Cancelled from the terminal.");
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
-                Kind = "Backup",
+                Kind = OperationKind.Backup,
+                Medium = medium,
+                FileCount = destinations.Count,
+                OptionsSummary = options,
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = server.ServerName,
                 TargetDatabase = database,
                 SourceDatabase = database,
                 ChainSummary = $"{type} backup",
-                Outcome = RestoreOutcome.Cancelled,
+                Outcome = OperationOutcome.Cancelled,
                 ErrorMessage = "Cancelled from the terminal.",
                 Script = script,
                 Log = log.ToString()
@@ -362,17 +379,20 @@ internal static class BackupVerb
         {
             var completedAt = DateTime.Now;
             log.AppendLine(ex.Message);
-            var receipt = new RestoreHistoryEntry
+            var receipt = new OperationHistoryEntry
             {
                 Origin = "CLI",
-                Kind = "Backup",
+                Kind = OperationKind.Backup,
+                Medium = medium,
+                FileCount = destinations.Count,
+                OptionsSummary = options,
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 ServerName = server.ServerName,
                 TargetDatabase = database,
                 SourceDatabase = database,
                 ChainSummary = $"{type} backup",
-                Outcome = RestoreOutcome.Failed,
+                Outcome = OperationOutcome.Failed,
                 ErrorMessage = ex.Message,
                 Script = script,
                 Log = log.ToString()
