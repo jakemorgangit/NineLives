@@ -31,6 +31,20 @@ more detail on the user-facing changes; this file is the short history.
   dies on the sixth database leaves the first five receipts on disk, because that half-finished
   run is exactly the incident somebody opens the history for.
 
+## [Unreleased]
+
+### Fixed
+
+- **A differential's file name no longer claims COPY_ONLY** (#441). COPY_ONLY is the default for
+  backups this app takes, and the marker went into every destination name - but the generated
+  statement omits the keyword on a differential, and rightly so: there is no copy-only
+  differential, because what COPY_ONLY protects is the differential base and a differential does
+  not move it. So the name asserted something about the statement that the statement did not.
+  That marker is load-bearing - the listing reads it back out of the name to classify what it
+  finds - and it read oddly in an audit, where the receipt said NOT copy-only beside a file
+  called `_COPY_ONLY_`. Backups already written keep their names and are still read correctly;
+  this only changes what gets written from here.
+
 ## [1.6.3] - 2026-08-13
 
 ### Fixed

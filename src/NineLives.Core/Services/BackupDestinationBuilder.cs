@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -47,7 +47,18 @@ public static class BackupDestinationBuilder
         // COPY_ONLY in the name as well as in the header. The listing reads it from the name (#49),
         // and a copy-only full that is not recognised as one becomes a differential's base - which
         // SQL Server then rejects with 3136.
-        var copy = copyOnly ? "_COPY_ONLY" : string.Empty;
+        //
+        // Never on a differential, matching the statement exactly (#441). The generator has the
+        // same condition, because there IS no copy-only differential: the keyword protects the
+        // differential base, and a differential does not move it. So the file name was claiming a
+        // property of a statement that never carried it - noise at best, and at worst read as
+        // meaningful by the listing, which uses this marker to classify what it finds. It also
+        // read oddly in an audit, where the receipt correctly said NOT copy-only beside a file
+        // called _COPY_ONLY_.
+        //
+        // Backups already on disk keep the old naming, so anything parsing the marker back out
+        // still has to tolerate it on a _DIFF_ file. This changes what gets written from here on.
+        var copy = copyOnly && type != BackupType.Differential ? "_COPY_ONLY" : string.Empty;
 
         return $"{Sanitise(databaseName)}_{FolderFor(type)}{copy}_{takenAt:yyyyMMdd_HHmmss}{suffix}" +
                ExtensionFor(type);
