@@ -8,7 +8,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.6.4] - 2026-08-14
 
 ### Fixed
 
@@ -40,10 +40,6 @@ more detail on the user-facing changes; this file is the short history.
   run. Receipts are now written off the dispatcher, and still awaited one at a time: a run that
   dies on the sixth database leaves the first five receipts on disk, because that half-finished
   run is exactly the incident somebody opens the history for.
-
-## [Unreleased]
-
-### Fixed
 
 - **The Restore screen can no longer default its history store to the real file** (#440).
   Nothing a user sees changes. The store was an optional constructor argument defaulting to the
