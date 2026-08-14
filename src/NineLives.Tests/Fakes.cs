@@ -240,15 +240,24 @@ public sealed class FakeOperationHistoryStore : IOperationHistoryStore
     public Exception? AppendThrows { get; set; }
 
     /// <summary>
-    /// The thread each Append ran on, in order (#437). A UI caller must not be one of them:
-    /// the real store's Append is blocking file I/O with a ten-second lock backoff.
+    /// How many appends arrived through <see cref="AppendAsync"/> rather than the blocking
+    /// <see cref="Append"/> (#437).
+    ///
+    /// This is the observable difference between a call site that offloads and one that does not.
+    /// It replaced an assertion on thread identity, which was WRONG: Task.Run guarantees the work
+    /// is scheduled to the pool, not that it lands on a different thread - a loaded CI runner can
+    /// reuse the caller's own pool thread, and did.
     /// </summary>
-    public List<int> AppendThreads { get; } = [];
+    public int AsyncAppends { get; private set; }
+
+    public Task AppendAsync(OperationHistoryEntry entry)
+    {
+        AsyncAppends++;
+        return Task.Run(() => Append(entry));
+    }
 
     public void Append(OperationHistoryEntry entry)
     {
-        AppendThreads.Add(Environment.CurrentManagedThreadId);
-
         if (AppendThrows != null) throw AppendThrows;
 
         // The real store serialises on its own lock, and callers may now arrive from the thread
