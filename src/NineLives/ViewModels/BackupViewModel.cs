@@ -161,13 +161,13 @@ public partial class BackupViewModel : ViewModelBase
     /// the restore screen: the backup has already happened by the time this is called, and
     /// throwing now would turn a completed backup into a reported failure.
     /// </summary>
-    private void Record(
+    private async Task Record(
         string database, string script, List<string> destinations,
         DateTime startedAt, OperationOutcome outcome, string? error)
     {
         try
         {
-            _history.Append(new OperationHistoryEntry
+            await _history.AppendAsync(new OperationHistoryEntry
             {
                 StartedAt = startedAt,
                 CompletedAt = DateTime.Now,
@@ -743,7 +743,7 @@ public partial class BackupViewModel : ViewModelBase
                     await _sql.ExecuteWithProgressAsync(Server, script, Append, ct);
                     Append($"{database}: done.");
                     succeededDevices.AddRange(destinations);
-                    Record(database, script, destinations, databaseStarted,
+                    await Record(database, script, destinations, databaseStarted,
                         OperationOutcome.Succeeded, null);
                 }
                 catch (OperationCanceledException)
@@ -751,7 +751,10 @@ public partial class BackupViewModel : ViewModelBase
                     // This one was in flight when the stop arrived, so it happened - and a partial
                     // file that cannot be restored from is precisely what somebody needs to find
                     // in the history later.
-                    Record(database, script, destinations, databaseStarted,
+                    // Awaited even though a stop is in flight: this write is why Stop used to
+                    // freeze the window, and it is also the receipt that says the file on disk is
+                    // a partial one. Off the dispatcher it is no longer felt.
+                    await Record(database, script, destinations, databaseStarted,
                         OperationOutcome.Cancelled,
                         "Cancelled by the user. Any file already written is incomplete.");
                     throw;
@@ -764,7 +767,7 @@ public partial class BackupViewModel : ViewModelBase
                     failed.Add(database);
                     lastFailureMessage = ex.Message;
                     _log.Error($"Backup failed: {database}: {ex.Message}");
-                    Record(database, script, destinations, databaseStarted,
+                    await Record(database, script, destinations, databaseStarted,
                         OperationOutcome.Failed, ex.Message);
 
                     // At the moment of the problem, not minutes later in the summary (#242): the

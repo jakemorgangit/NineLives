@@ -386,7 +386,7 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // After the flush, so the recorded log is the whole console rather than whatever had
             // made it out of the batching buffer. Recorded for every outcome including cancelled -
             // "I stopped it" is exactly the kind of thing a change ticket needs to say.
-            if (attempted) RecordHistory(run, startedAt, outcome, failure);
+            if (attempted) await RecordHistory(run, startedAt, outcome, failure);
         }
     }
 
@@ -394,8 +394,8 @@ public partial class RestoreExecutionViewModel : ViewModelBase
     /// Files this execution in the history (#31). Never throws: the store swallows its own
     /// failures, and a restore must not be reported as failed because a record could not be kept.
     /// </summary>
-    private void RecordHistory(RestoreRun run, DateTime startedAt, OperationOutcome outcome, string? failure)
-        => _history.Append(new OperationHistoryEntry
+    private Task RecordHistory(RestoreRun run, DateTime startedAt, OperationOutcome outcome, string? failure)
+        => _history.AppendAsync(new OperationHistoryEntry
         {
             StartedAt = startedAt,
             CompletedAt = DateTime.Now,

@@ -805,7 +805,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             IsRunning = false;
             OutcomeText = CopyOutcomeText.Describe(Outcome, run.Destinations.FirstOrDefault());
 
-            Record(run.Backup, run.Restore, run.Destinations, startedAt, ct.IsCancellationRequested);
+            await Record(run.Backup, run.Restore, run.Destinations, startedAt, ct.IsCancellationRequested);
 
             // Told, not interrupted (#289): same taskbar flash as the restore and the backup
             // when the copy finishes while the app is behind another window.
@@ -832,7 +832,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// Never allowed to throw. By the time this runs the copy is over, and a history write that
     /// failed here would surface as the copy failing.
     /// </summary>
-    private void Record(
+    private async Task Record(
         string backupScript, string restoreScript, IReadOnlyList<string> destinations,
         DateTime startedAt, bool wasCancelled)
     {
@@ -840,7 +840,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
         try
         {
-            _history.Append(new OperationHistoryEntry
+            await _history.AppendAsync(new OperationHistoryEntry
             {
                 StartedAt = startedAt,
                 CompletedAt = DateTime.Now,
