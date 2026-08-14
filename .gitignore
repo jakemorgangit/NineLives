@@ -41,3 +41,7 @@ publish/
 
 # Local staging for the publish/ swap while the app holds the exe lock - never shipped
 publish-staging/
+
+# Personal, machine-local editor and tooling notes. Each contributor keeps their own; the
+# shared conventions belong in CONTRIBUTING.md.
+CLAUDE.local.md
