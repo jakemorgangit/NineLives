@@ -278,6 +278,11 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             if (string.IsNullOrWhiteSpace(SourceDatabase)) return string.Empty;
             if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return string.Empty;
 
+            // A folder one side cannot use (#452). Before the version and encryption verdicts,
+            // because there is no point discussing what the target can restore when the backup
+            // cannot be written in the first place.
+            if (SharedFolderRefusal.Length > 0) return SharedFolderRefusal;
+
             // Onto itself, under its own name. That is not a copy - it is a backup of a database
             // immediately restored over the top of the database it was taken from, which at best
             // is an expensive no-op and at worst destroys it when the restore fails halfway.
@@ -506,7 +511,45 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// <summary>The in-flight sweep, so the run can refuse to start before the verdicts are in.</summary>
     private Task _checksTask = Task.CompletedTask;
 
+    /// <summary>
+    /// Awaits the in-flight check sweep. For tests, so they turn on the sweep having finished
+    /// rather than on a sleep long enough to hope it has - a timing guess is how a test passes
+    /// locally and fails on a loaded runner.
+    /// </summary>
+    internal Task WaitForChecksForTests() => _checksTask;
+
     private readonly OperationCancellation _checksCancellation = new();
+
+    /// <summary>
+    /// What the SOURCE said about writing to the shared folder, and the TARGET about reading it
+    /// (#452).
+    ///
+    /// Two accounts, two answers, kept apart. The screen's own text has always said the source
+    /// writes as its service account and the target reads as its own - routinely not the same one -
+    /// and reporting them as one verdict loses the only thing that makes the message actionable,
+    /// which is WHICH permission grant is needed and to whom.
+    /// </summary>
+    [ObservableProperty]
+    private string _sourceCanWriteHere = string.Empty;
+
+    [ObservableProperty]
+    private string _targetCanReadHere = string.Empty;
+
+    [ObservableProperty]
+    private bool _sharedFolderProven;
+
+    /// <summary>
+    /// The folder problem, or empty. Feeds the refusal, because a copy through a folder one side
+    /// cannot use will not work and generating a script for it wastes the wait.
+    ///
+    /// A check that could not be COMPLETED is not a check that failed - an instance that refuses to
+    /// answer must not block a copy that would have worked, the same rule the space check follows.
+    /// So only a definite no counts.
+    /// </summary>
+    [ObservableProperty]
+    private string _sharedFolderRefusal = string.Empty;
+
+    partial void OnSharedFolderRefusalChanged(string value) => Invalidate();
 
     /// <summary>
     /// The three generation-time checks as one serialised sweep (#285): warnings cleared once
@@ -523,6 +566,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             SpaceWarning = string.Empty;
             VolumeSpace = [];
 
+            SourceCanWriteHere = string.Empty;
+            TargetCanReadHere = string.Empty;
+            SharedFolderRefusal = string.Empty;
+            SharedFolderProven = false;
+
+            await CheckSharedFolderAsync(ct);
             await CheckVersionAsync(ct);
             await CheckEncryptionAsync(ct);
             await CheckSpaceAsync(ct);
@@ -558,6 +607,51 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// STRONGEST terms, because unlike disk space nothing can change between generating and
     /// running that makes this legal.
     /// </summary>
+    /// <summary>
+    /// Asks both instances about the shared folder before anything is backed up (#452).
+    ///
+    /// The readability check that already exists runs on a FILE, so it cannot run until a file is
+    /// there - which on this screen is after a full backup has been written. A share the target
+    /// cannot read therefore cost the whole backup first. This costs two round trips.
+    ///
+    /// What it proves is narrower than what the file check proves, and the wording says so: that
+    /// the folder is visible to the target's account, not that a backup inside it will be
+    /// readable - a share can be traversable and still refuse the read. It catches the common
+    /// failure, which is an account with no access to the share at all, in a second.
+    /// </summary>
+    private async Task CheckSharedFolderAsync(CancellationToken ct)
+    {
+        if (MediumIsBlob) return;
+        if (string.IsNullOrWhiteSpace(SharedPathRoot)) return;
+        if (SourceServer == null || TargetServer == null) return;
+
+        try
+        {
+            // The source has to CREATE here; the target only has to see it.
+            var write = await _sql.CheckFolderAccessAsync(SourceServer, SharedPathRoot, true, ct);
+            SourceCanWriteHere = write.Explain(SourceServer.ServerName, wasWriteCheck: true);
+
+            var read = await _sql.CheckFolderAccessAsync(TargetServer, SharedPathRoot, false, ct);
+            TargetCanReadHere = read.Explain(TargetServer.ServerName, wasWriteCheck: false);
+
+            SharedFolderProven = write.IsOk && read.IsOk;
+
+            SharedFolderRefusal =
+                !write.IsOk && write.Access != FolderAccess.Unreachable ? SourceCanWriteHere
+                : !read.IsOk && read.Access != FolderAccess.Unreachable ? TargetCanReadHere
+                : string.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Never the reason a copy cannot be set up. Not knowing is not the same as refusing.
+            _log.Info($"[share] could not check {SharedPathRoot}: {ex.Message}");
+        }
+    }
+
     private async Task CheckVersionAsync(CancellationToken ct)
     {
         if (SourceServer == null || TargetServer == null) return;

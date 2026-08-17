@@ -554,6 +554,80 @@ public class SqlServerService : ISqlServerService
     /// cause - the service account having no access to the share - fails every file identically,
     /// so carrying on would produce a page of the same message.
     /// </summary>
+    /// <summary>
+    /// The name of the folder created to prove a write (#452).
+    ///
+    /// A write cannot be proven without writing, and SQL Server has no primitive for removing a
+    /// directory again - xp_delete_files takes files with an extension and a date filter. So this
+    /// leaves one empty folder behind, with a name that says what it is, and reuses it on every
+    /// later check because xp_create_subdir succeeds silently when the directory already exists.
+    ///
+    /// One obvious artefact beats the alternatives: writing a real backup to prove the write costs
+    /// minutes and megabytes, and proving nothing costs somebody a full backup before they find out.
+    /// </summary>
+    internal const string WriteProbeFolder = "_ninelives_write_check";
+
+    /// <inheritdoc />
+    public async Task<FolderAccessCheck> CheckFolderAccessAsync(
+        ServerConnection server, string folder, bool needsWrite, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return FolderAccessCheck.Ok(folder);
+
+        var trimmed = folder.TrimEnd('\\', '/');
+
+        try
+        {
+            await using var conn = CreateConnection(server);
+            await conn.OpenAsync(ct);
+
+            // Shorter than the default: the failure this is most likely to hit is a UNC host that
+            // does not resolve, which hangs rather than answering, and the whole value of asking
+            // early is lost if the answer takes as long as the backup would have.
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 30;
+
+            if (needsWrite)
+            {
+                // Creating a subfolder is the cheapest thing that genuinely proves the account can
+                // write here, and it is what the maintenance scripts everybody already runs use for
+                // the same purpose. Idempotent, so the probe folder is created at most once.
+                cmd.CommandText = "EXEC master.sys.xp_create_subdir @probe";
+                cmd.Parameters.Add(new SqlParameter("@probe",
+                    trimmed + "\\" + WriteProbeFolder));
+
+                await cmd.ExecuteNonQueryAsync(ct);
+                return FolderAccessCheck.Ok(folder);
+            }
+
+            // Visible, and a directory rather than a file. xp_fileexist answers three columns:
+            // whether the path exists as a file, whether it is a directory, and whether its parent
+            // exists - and it answers as the SERVICE account, which is the whole point.
+            cmd.CommandText = "EXEC master.dbo.xp_fileexist @path";
+            cmd.Parameters.Add(new SqlParameter("@path", trimmed));
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            if (!await reader.ReadAsync(ct))
+                return new FolderAccessCheck(folder, FolderAccess.Other,
+                    "xp_fileexist returned no rows.");
+
+            var isDirectory = !reader.IsDBNull(1) && reader.GetInt32(1) == 1;
+
+            return isDirectory
+                ? FolderAccessCheck.Ok(folder)
+                : new FolderAccessCheck(folder, FolderAccess.NotVisible,
+                    "xp_fileexist reported it is not a directory this account can see.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return FolderAccessCheck.FromError(folder, ex.Message);
+        }
+    }
+
     public async Task<List<BackupFileCheck>> CheckBackupFilesAsync(
         ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default)
     {
