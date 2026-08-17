@@ -76,6 +76,15 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public RestoreTimelineViewModel Timeline { get; } = new();
 
+    /// <summary>
+    /// What the source instance recorded, against what this container holds (#451).
+    ///
+    /// Its own view model because it connects to a DIFFERENT server from the one the restore runs
+    /// on - the instance that TOOK the backups, which is routinely not the instance they are being
+    /// restored to - and conflating those two connections is the confusion worth designing out.
+    /// </summary>
+    public BackupGapViewModel Gap { get; }
+
     // Restore chain
     [ObservableProperty]
     private BackupChain? _restoreChain;
@@ -925,6 +934,7 @@ public partial class RestoreViewModel : ViewModelBase
         // finds the one in the user's profile - so a TEST run reads and writes the real cache, and
         // a stale entry from one test then decides the answer in another (#130).
         Inventory = new BackupInventoryViewModel(blobService, sqlService, _log, auditStore);
+        Gap = new BackupGapViewModel(sqlService);
 
         // The chain and the timeline are built from whatever the inventory currently holds, so a
         // change there is the one signal that rebuilds them.
@@ -1106,6 +1116,14 @@ public partial class RestoreViewModel : ViewModelBase
             var match = TargetServers.FirstOrDefault(x => x.Id == previousTarget);
             if (match != null) SelectedTargetServer = match;
         }
+
+        // The gap check offers the same saved list, and keeps its own selection: the instance that
+        // took the backups is a different question from the one being restored to (#451).
+        var previousGapSource = Gap.SourceServer?.Id;
+        Gap.Servers.Clear();
+        foreach (var server in config.Servers) Gap.Servers.Add(server);
+        if (previousGapSource != null)
+            Gap.SourceServer = Gap.Servers.FirstOrDefault(x => x.Id == previousGapSource);
 
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
@@ -2093,6 +2111,66 @@ public partial class RestoreViewModel : ViewModelBase
         HasScript = true;
     }
 
+    /// <summary>
+    /// Asks the source instance what this container is missing (#451).
+    ///
+    /// The database, the container and the listing are gathered HERE and handed over, rather than
+    /// the panel holding them: all three move while it is open, and an answer about a database
+    /// nobody is looking at any more is worse than no answer.
+    /// </summary>
+    [RelayCommand]
+    private async Task CheckForMissingBackupsAsync()
+        => await Gap.CheckAsync(new GapCheckRequest(
+            Inventory.SelectedDatabaseName ?? string.Empty,
+            SelectedContainer,
+            Inventory.AllSets));
+
+    /// <summary>
+    /// Writes the copy script for one location. On demand: most checks find one location, and
+    /// building every script up front is work nobody reads.
+    /// </summary>
+    [RelayCommand]
+    private void BuildCopyScript(MissingLocationRow? row)
+    {
+        if (row == null || SelectedContainer == null) return;
+        Gap.BuildScript(row, SelectedContainer);
+    }
+
+    /// <summary>
+    /// Restores these where they already are, instead of copying them in first (#451).
+    ///
+    /// The remedy for mid-incident, when uploading twenty-three files is time nobody has. The sets
+    /// are folded into the working set, so the timeline extends to the newest of them and the
+    /// chain builder treats them like anything else - and the generator names them with DISK
+    /// rather than URL because it asks the device string, not an option.
+    ///
+    /// The target still has to be able to READ those paths, which is a different question from
+    /// whether this machine can. That is checked in the preflight, before anything is dropped.
+    /// </summary>
+    [RelayCommand]
+    private void RestoreFromWhereTheyAre(MissingLocationRow? row)
+    {
+        if (row is not { IsOnDisk: true }) return;
+
+        var sets = BackupHistoryInventory.ToSets(row.Location.Backups.Select(b => b.Entry));
+        if (sets.Count == 0) return;
+
+        Inventory.IncludeFromInstanceHistory(sets);
+
+        SetStatus(
+            $"Added {sets.Count} backup(s) from {row.Folder} to the timeline. The script will read " +
+            "them from that path - the target has to be able to reach it, which is checked before " +
+            "the restore runs.");
+    }
+
+    /// <summary>Puts one location's script on the clipboard, ready to paste into a session on the source.</summary>
+    [RelayCommand]
+    private void CopyCopyScript(MissingLocationRow? row)
+    {
+        if (row is not { HasScript: true }) return;
+        TryCopyToClipboard(row.Script, "Copy script copied to clipboard.");
+    }
+
     [RelayCommand]
     private void CopyScript()
         => TryCopyToClipboard(GeneratedScript, "Script copied to clipboard.");
@@ -2737,6 +2815,12 @@ public partial class RestoreViewModel : ViewModelBase
             return await CheckVersionCompatibilityAsync(server, appendLog);
         }
 
+        // A blob chain can now hold disk-resident members (#451), and the target has to be able to
+        // read those paths - a different question from whether the container is reachable, and one
+        // the medium-based branch above never asks because the medium is still blob.
+        var onDisk = await CheckTargetCanReadAnyDiskMembersAsync(server, appendLog);
+        if (!onDisk.CanProceed) return onDisk;
+
         var primary = await Credential.PrepareForRestoreAsync(server, appendLog);
         if (!primary.CanProceed) return primary;
 
@@ -2989,6 +3073,57 @@ public partial class RestoreViewModel : ViewModelBase
     /// has no identity on the network and so cannot read ANY share. That is worth diagnosing rather
     /// than reporting as a missing file, because it sends people to check the wrong thing.
     /// </summary>
+    /// <summary>
+    /// The disk-resident members of an otherwise-blob chain (#451).
+    ///
+    /// Restoring logs from where they already are means the RESTORE names a path on some other
+    /// machine, and the instance running it has to be able to open that path as its own service
+    /// account. Nothing about the container being reachable says anything about that.
+    ///
+    /// Only the disk members: the URL members are covered by the credential checks, and asking
+    /// RESTORE HEADERONLY of every blob in a long chain would add a round trip per file to every
+    /// restore for no new information.
+    /// </summary>
+    private async Task<CredentialPreflight> CheckTargetCanReadAnyDiskMembersAsync(
+        ServerConnection server, Action<string> appendLog)
+    {
+        var paths = RestoreChain?.AllFiles
+            .Select(f => f.RestoreDevice)
+            .Where(BackupDevice.IsPath)
+            .Distinct()
+            .ToList() ?? [];
+
+        if (paths.Count == 0) return CredentialPreflight.Proceed;
+
+        appendLog(
+            $"This chain reads {paths.Count} file(s) from a path rather than the container. " +
+            $"Checking {server.ServerName} can open them...");
+
+        try
+        {
+            var checks = await _sqlService.CheckBackupFilesAsync(server, paths);
+            var failed = checks.FirstOrDefault(c => !c.CanBeRestored);
+
+            if (failed != null)
+            {
+                var refusal = failed.Explain(server.ServerName);
+                appendLog(refusal);
+                return CredentialPreflight.Stop(refusal);
+            }
+
+            appendLog($"{server.ServerName} can read all {checks.Count} of them.");
+            return CredentialPreflight.Proceed;
+        }
+        catch (Exception ex)
+        {
+            var refusal =
+                $"Could not confirm {server.ServerName} can read the files held outside the " +
+                $"container: {ex.Message}";
+            appendLog(refusal);
+            return CredentialPreflight.Stop(refusal);
+        }
+    }
+
     private async Task<CredentialPreflight> CheckTargetCanReadFilesAsync(
         ServerConnection server, Action<string> appendLog)
     {

@@ -13,7 +13,7 @@
          Windows filenames are case-insensitive, so it would collide with the GUI beside it. -->
     <AssemblyName>9lives</AssemblyName>
     <RootNamespace>Blackcat.NineLives.Cli</RootNamespace>
-    <Version>1.6.4</Version>
+    <Version>1.7.0</Version>
     <Product>Nine Lives</Product>
     <Authors>Jake Morgan</Authors>
     <Company>Blackcat Data Solutions Ltd</Company>

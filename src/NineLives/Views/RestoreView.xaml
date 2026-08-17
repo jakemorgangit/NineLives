@@ -1582,6 +1582,172 @@
                                        Visibility="{Binding Options.ContinueAfterError, Converter={StaticResource BoolToVis}}"
                                        Text="A restore that finishes despite errors can leave a corrupt database. Run DBCC CHECKDB on the result before trusting it." />
 
+                            <!-- What the source instance recorded, against what this container
+                                 holds (#451). Behind the advanced options because it means
+                                 connecting to a SECOND server - the one that took the backups,
+                                 which is routinely not the one being restored to. -->
+                            <Border Style="{StaticResource CardBorder}"
+                                    Margin="0,4,0,16"
+                                    Visibility="{Binding ShowAdvancedOptions, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="BACKUPS THIS CONTAINER IS MISSING"
+                                               Style="{StaticResource LabelText}" Margin="0,0,0,6" />
+
+                                    <TextBlock Style="{StaticResource SecondaryText}"
+                                               TextWrapping="Wrap" Margin="0,0,0,10"
+                                               Text="Logs often go somewhere else - a local or cluster disk for throughput, or a share because log shipping already owns them. The container cannot tell you that; the instance that took them can. Ask it, and anything written elsewhere shows up here with the path it went to." />
+
+                                    <Grid Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <ComboBox Grid.Column="0"
+                                                  ItemsSource="{Binding Gap.Servers}"
+                                                  SelectedItem="{Binding Gap.SourceServer}"
+                                                  Style="{StaticResource DarkComboBox}"
+                                                  ToolTip="The instance that TOOK these backups - not necessarily the one being restored to.">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding DisplayText}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+
+                                        <Button Grid.Column="1"
+                                                Content="Check its history"
+                                                Command="{Binding CheckForMissingBackupsCommand}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Padding="12,6" Margin="8,0,0,0"
+                                                IsEnabled="{Binding Gap.CanCheck}" />
+                                    </Grid>
+
+                                    <TextBlock Text="Reading the instance's own record..."
+                                               Style="{StaticResource SecondaryText}"
+                                               Margin="0,0,0,8"
+                                               Visibility="{Binding Gap.IsChecking, Converter={StaticResource BoolToVis}}" />
+
+                                    <ContentControl Style="{StaticResource ErrorBanner}"
+                                                    DataContext="{Binding Gap}" />
+
+                                    <!-- The all-clear, said out loud. An empty panel is
+                                         indistinguishable from never having pressed the button. -->
+                                    <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,8"
+                                            Background="{DynamicResource SuccessPanelBackgroundBrush}"
+                                            BorderBrush="{DynamicResource SuccessPanelBorderBrush}"
+                                            BorderThickness="1"
+                                            Visibility="{Binding Gap.FoundNothingMissing, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap"
+                                                   Text="Everything the instance recorded is in this container. The chain on offer is the whole chain." />
+                                    </Border>
+
+                                    <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,8"
+                                            Background="{DynamicResource WarningPanelBackgroundBrush}"
+                                            BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                                            BorderThickness="1"
+                                            Visibility="{Binding Gap.HasGap, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap"
+                                                       Visibility="{Binding Gap.HasMeasuredGap, Converter={StaticResource BoolToVis}}">
+                                                <Run Text="This container is" />
+                                                <Run Text="{Binding Gap.BehindBy, Mode=OneWay}" FontWeight="SemiBold" />
+                                                <Run Text="behind what the instance recorded. Restoring from it alone throws that away." />
+                                            </TextBlock>
+
+                                            <!-- A gap and a MEASURED gap are not the same thing: a
+                                                 container holding nothing for this database has
+                                                 everything missing and no interval to quote. -->
+                                            <TextBlock Style="{StaticResource BodyText}" TextWrapping="Wrap"
+                                                       Visibility="{Binding Gap.HasMeasuredGap, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
+                                                       Text="The instance recorded backups this container does not hold. Restoring from it alone leaves them out." />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <ItemsControl ItemsSource="{Binding Gap.Locations}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{DynamicResource InputBackgroundBrush}"
+                                                        CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Folder}"
+                                                                   Style="{StaticResource BodyText}"
+                                                                   FontFamily="{StaticResource ConsoleFont}"
+                                                                   TextWrapping="Wrap" />
+
+                                                        <TextBlock Style="{StaticResource SecondaryText}"
+                                                                   Margin="0,4,0,0" TextWrapping="Wrap">
+                                                            <Run Text="{Binding Summary, Mode=OneWay}" />
+                                                            <Run Text="-" />
+                                                            <Run Text="{Binding FileCount, Mode=OneWay}" />
+                                                            <Run Text="file(s)," />
+                                                            <Run Text="{Binding SizeDisplay, Mode=OneWay}" />
+                                                        </TextBlock>
+
+                                                        <TextBlock Text="{Binding Window}"
+                                                                   Style="{StaticResource SecondaryText}"
+                                                                   Margin="0,2,0,0" />
+
+                                                        <!-- A backup recorded to a URL is not a file on
+                                                             that machine, so there is nothing for a copy
+                                                             script to pick up. -->
+                                                        <TextBlock Style="{StaticResource SecondaryText}"
+                                                                   Margin="0,6,0,0" TextWrapping="Wrap"
+                                                                   Foreground="{DynamicResource WarningBrush}"
+                                                                   Text="Recorded as written to storage rather than to disk, so there is no file here to copy - the listing did not see something that should be in the container. Check its base path."
+                                                                   Visibility="{Binding IsOnDisk, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+
+                                                        <WrapPanel Margin="0,8,0,0"
+                                                                   Visibility="{Binding IsOnDisk, Converter={StaticResource BoolToVis}}">
+                                                            <Button Content="Write a copy script"
+                                                                    Command="{Binding DataContext.BuildCopyScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    Style="{StaticResource SecondaryButton}"
+                                                                    Padding="10,4" Margin="0,0,8,0" />
+
+                                                            <Button Content="Restore from where they are"
+                                                                    Command="{Binding DataContext.RestoreFromWhereTheyAreCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    Style="{StaticResource SecondaryButton}"
+                                                                    Padding="10,4" Margin="0,0,8,0"
+                                                                    ToolTip="Adds these to the timeline and reads them from this path instead of copying them into the container. The target has to be able to reach it - checked before the restore runs." />
+
+                                                            <Button Content="Copy to clipboard"
+                                                                    Command="{Binding DataContext.CopyCopyScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    Style="{StaticResource SecondaryButton}"
+                                                                    Padding="10,4"
+                                                                    Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}" />
+                                                        </WrapPanel>
+
+                                                        <Border Background="{DynamicResource ConsoleBackgroundBrush}"
+                                                                BorderBrush="{DynamicResource ConsoleBorderBrush}"
+                                                                BorderThickness="1" CornerRadius="4"
+                                                                Margin="0,8,0,0"
+                                                                Visibility="{Binding HasScript, Converter={StaticResource BoolToVis}}">
+                                                            <ScrollViewer MaxHeight="200"
+                                                                          VerticalScrollBarVisibility="Auto"
+                                                                          HorizontalScrollBarVisibility="Auto"
+                                                                          Padding="10,8">
+                                                                <TextBlock Text="{Binding Script}"
+                                                                           FontFamily="{StaticResource ConsoleFont}"
+                                                                           FontSize="11"
+                                                                           Foreground="{DynamicResource ConsoleTextBrush}" />
+                                                            </ScrollViewer>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <TextBlock Text="{Binding Gap.ComparedWhat}"
+                                               Style="{StaticResource SecondaryText}"
+                                               FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"
+                                               Visibility="{Binding Gap.ComparedWhat, Converter={StaticResource NullToVis}}" />
+                                </StackPanel>
+                            </Border>
+
                             <CheckBox Content="WITH MOVE (relocate files)"
                                       Visibility="{Binding ShowFileRelocation, Converter={StaticResource BoolToVis}}"
                                       IsChecked="{Binding UseWithMove}"

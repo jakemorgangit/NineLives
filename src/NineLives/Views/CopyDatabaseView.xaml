@@ -291,6 +291,19 @@
                     <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                Text="Both statements are shown together, because what happens to each server is one decision - reading them one at a time is how somebody approves the half they were looking at." />
 
+                    <!-- Why the buttons are dead. They went out with nothing said, so a form with
+                         five of the six answers filled in read as complete and simply refused to
+                         work - which is exactly what a screen looks like after the source database
+                         has been cleared out from under it. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,12"
+                            Background="{DynamicResource WarningPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource WarningPanelBorderBrush}"
+                            BorderThickness="1"
+                            Visibility="{Binding IsGenerateBlocked, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding GenerateBlockedReason}"
+                                   Style="{StaticResource BodyText}" TextWrapping="Wrap" />
+                    </Border>
+
                     <WrapPanel>
                         <Button Content="Generate scripts"
                                 Command="{Binding GenerateCommand}"

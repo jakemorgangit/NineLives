@@ -8,6 +8,53 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.7.0] - 2026-08-17
+
+### Added
+
+- **The script that carries a login across from the source instance** (#459). When a restored
+  database holds a user with no matching login here, the app said to create the login first with
+  a password set by whoever owns the account - honest, and it still left a database whose users
+  could not log in. There is a third option beyond inventing a password or asking for one: go and
+  fetch the real one. Run the new script on the instance the backup came from and it prints the
+  `CREATE LOGIN` to run here, carrying the original password hash and the original SID. The hash
+  means applications keep the password they already have; the SID means the user is not orphaned
+  at all, so there is no `ALTER USER` to run afterwards. SQL logins only - a Windows login carries
+  no password and takes its SID from Active Directory, which the script says rather than quietly
+  finding nothing.
+
+
+- **The Restore screen can ask the source instance what this container is missing** (#451).
+  Logs often go somewhere the fulls do not - a local or cluster disk for throughput, or a share
+  because log shipping already owns them. Pointed at the container, the app built an honest chain
+  out of what it could see, and that chain stopped at the last differential with nothing to say
+  the rest existed. Under the advanced restore options there is now a source instance picker and
+  a check: it reads that instance's own record, sets it against what the container holds, and
+  names what is missing along with the path it went to and how much recovery time the container
+  is behind by. For anything on disk it writes the PowerShell to copy those exact files in -
+  named individually rather than globbed, and carrying no credential, because that script is
+  handed to somebody to run on a production server.
+
+- **Or restore them from where they already are** (#451). The other way out, and the one for
+  mid-incident when uploading twenty-three files is time nobody has: fold them into the timeline
+  and leave the files alone. The restore point extends to the newest of them, and the script
+  reads the container by URL and those logs from their own path by DISK, in one run. The target
+  has to be able to open that path as its own service account - a different question from whether
+  the container is reachable, and one now asked in the preflight, before anything is dropped.
+
+### Fixed
+
+- **The Copy screen says why it will not generate, and stops losing the database you chose**
+  (#457). Reported from the app: every field filled in, the overwrite banner naming the target,
+  and both buttons dead with nothing saying why. Two faults. The source database had been cleared
+  out from under the form - the screen re-reads its server list on every visit and re-assigns the
+  source server to a fresh object, which clears the database and reloads the list, while the
+  target server, container, name and overwrite tick all survive. So the form looked complete and
+  was not. Your own choice is now put back when the same server arrives again, though never when
+  you switch servers, because inventing a source database is the one thing this screen must not
+  do. And six things have to be true before Generate is live; the screen named none of them, and
+  now names the first one missing along with the step to go back to.
+
 ## [1.6.4] - 2026-08-14
 
 ### Fixed

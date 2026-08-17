@@ -807,11 +807,17 @@ public sealed class FakeSqlServerService : ISqlServerService
         return Task.FromResult(entries.ToList());
     }
 
+    /// <summary>Set to play an instance whose history cannot be read - a login failure, or no
+    /// rights on msdb, which is the ordinary reason a source refuses this (#451).</summary>
+    public Exception? BackupHistoryThrows { get; set; }
+
     public Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null, CancellationToken ct = default)
-        => Task.FromResult(databaseName == null
-            ? BackupHistory
-            : BackupHistory.Where(h => h.DatabaseName == databaseName).ToList());
+        => BackupHistoryThrows != null
+            ? Task.FromException<List<BackupHistoryEntry>>(BackupHistoryThrows)
+            : Task.FromResult(databaseName == null
+                ? BackupHistory
+                : BackupHistory.Where(h => h.DatabaseName == databaseName).ToList());
 
     /// <summary>Set to make the target unreachable rather than merely unhelpful.</summary>
     public Exception? ThrowOnCheck { get; set; }
