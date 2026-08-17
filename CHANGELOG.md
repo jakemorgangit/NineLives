@@ -8,9 +8,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
-## [Unreleased]
+## [1.7.1] - 2026-08-17
 
 ### Added
+
+- **Copy a database for a cutover, not just a refresh** (#451). A copy brought the target online,
+  which is right for refreshing a test environment and wrong for a migration: online means no
+  more logs can be applied, so the copy is frozen at the moment it was taken. Tick "Leave the
+  target ready for more log backups" and it stays in RESTORING - the full is restored in advance,
+  and the switch-over costs only the logs that accumulated since. The screen then asks the source
+  which logs it has taken since that full, says where they live, and writes the statements to
+  apply them, oldest first, recovering only at the end. Offered only when the target has been left
+  restorable, because against a database already online those statements fail with 3101. It is not
+  the Restore screen's check ported across: this screen reads no container chain at all - it
+  writes its own full - so "what is this container missing" means nothing here, and the question
+  that does mean something is which of the source's logs would carry the copy forward.
+
 
 - **Both service accounts are proven against the shared folder before anything is backed up**
   (#452). The Copy screen has always said the source writes there as its own service account and
@@ -25,8 +38,6 @@ more detail on the user-facing changes; this file is the short history.
   authoritative one. An instance that never answers does not block the copy: not knowing is not
   the same as refusing.
 
-## [1.7.0] - 2026-08-17
-
 ### Fixed
 
 - **A completed restore can no longer surface as a crash** (#471). Reading the console to file a
@@ -36,8 +47,6 @@ more detail on the user-facing changes; this file is the short history.
   target online, and an exception on screen. The console now snapshots before reading and tolerates
   a torn one, and filing a receipt can no longer fail the thing it is filing: it says so on the
   console instead. Found as a red build rather than by looking for it.
-
-
 - **The gap check can be found** (#466). It shipped in 1.7.0 inside the restore options, which
   meant behind a step you only reach after *confirming* a restore point - and which starts
   collapsed. A feature whose whole purpose is telling you the chain is shorter than you think
@@ -47,6 +56,8 @@ more detail on the user-facing changes; this file is the short history.
   It was also gated on a mode check that returns true for every mode, which did nothing except
   imply it was a Pro-only tool. A test now asserts it is on screen with only a container chosen,
   in every mode, because two placements have compiled and hidden it.
+
+## [1.7.0] - 2026-08-17
 
 ### Added
 
@@ -79,20 +90,6 @@ more detail on the user-facing changes; this file is the short history.
   reads the container by URL and those logs from their own path by DISK, in one run. The target
   has to be able to open that path as its own service account - a different question from whether
   the container is reachable, and one now asked in the preflight, before anything is dropped.
-
-### Added
-
-- **Copy a database for a cutover, not just a refresh** (#451). A copy brought the target online,
-  which is right for refreshing a test environment and wrong for a migration: online means no
-  more logs can be applied, so the copy is frozen at the moment it was taken. Tick "Leave the
-  target ready for more log backups" and it stays in RESTORING - the full is restored in advance,
-  and the switch-over costs only the logs that accumulated since. The screen then asks the source
-  which logs it has taken since that full, says where they live, and writes the statements to
-  apply them, oldest first, recovering only at the end. Offered only when the target has been left
-  restorable, because against a database already online those statements fail with 3101. It is not
-  the Restore screen's check ported across: this screen reads no container chain at all - it
-  writes its own full - so "what is this container missing" means nothing here, and the question
-  that does mean something is which of the source's logs would carry the copy forward.
 
 ### Fixed
 
