@@ -159,7 +159,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     private int _listGeneration;
 
     [RelayCommand(CanExecute = nameof(CanLoadSourceDatabases))]
-    private async Task LoadSourceDatabasesAsync()
+    private async Task LoadSourceDatabasesAsync(string? chosen = null)
     {
         if (SourceServer == null)
         {
@@ -186,9 +186,18 @@ public partial class CopyDatabaseViewModel : ViewModelBase
 
             SourceDatabases = new ObservableCollection<string>(names);
 
-            // Nothing is chosen for the user. Here the wrong choice reads a production database at
-            // full speed AND overwrites a database on another server.
-            SourceDatabase = null;
+            // Nothing is chosen FOR the user - here the wrong choice reads a production database
+            // at full speed AND overwrites a database on another server.
+            //
+            // But putting back what they chose themselves is not choosing for them, and not doing
+            // it was a live defect: Refresh runs on every visit to this screen and re-assigns
+            // SourceServer to a fresh instance from the config, which fires OnSourceServerChanged,
+            // which clears this and reloads. The target server, container, target name and
+            // overwrite tick all survive that, so navigating away and back left a form that looked
+            // complete, refused to generate, and said nothing about why.
+            SourceDatabase = chosen != null && names.Contains(chosen, StringComparer.OrdinalIgnoreCase)
+                ? names.First(n => string.Equals(n, chosen, StringComparison.OrdinalIgnoreCase))
+                : null;
 
             SetStatus($"{server.ServerName} has {names.Count} database(s).");
         }
@@ -214,16 +223,26 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         }
     }
 
-    partial void OnSourceServerChanged(ServerConnection? value)
+    partial void OnSourceServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
     {
+        // Carried across the reload ONLY when this is the same server arriving again - which is
+        // what Refresh does on every visit to the screen, because the config hands back a fresh
+        // instance each time and the assignment therefore always fires.
+        //
+        // A server the user has actually switched to has no previous answer, and inventing one
+        // would be the thing this screen most carefully does not do: the wrong choice here reads a
+        // production database at full speed and overwrites one on another server. Captured before
+        // the clear below wipes it.
+        var carry = oldValue?.Id == newValue?.Id ? SourceDatabase : null;
+
         SourceDatabases = [];
         SourceDatabase = null;
         Invalidate();
 
         // Choosing the source server is the request to see what it holds - same reasoning as the
         // Backup screen, and the same restraint mid-run.
-        if (value != null && CanLoadSourceDatabases)
-            _ = LoadSourceDatabasesAsync();
+        if (newValue != null && CanLoadSourceDatabases)
+            _ = LoadSourceDatabasesAsync(carry);
     }
 
     partial void OnTargetServerChanged(ServerConnection? value) => Invalidate();
@@ -345,11 +364,45 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         (MediumIsBlob ? Container != null : !string.IsNullOrWhiteSpace(SharedPathRoot)) &&
         !IsRefused;
 
+    /// <summary>
+    /// Why Generate scripts cannot be pressed, or empty when it can.
+    ///
+    /// The buttons went dead with nothing said. Six things have to be true and the screen named
+    /// none of them, so a form with five of them filled in - which is what one looks like after
+    /// the source database has been cleared out from under it - reads as complete and simply
+    /// refuses to work. The restore screen has had this sentence for a while; this screen is the
+    /// one where a person has typed a target name and ticked an overwrite box, so it is arguably
+    /// the one that needed it more.
+    ///
+    /// In the order the screen asks the questions, so the sentence points at the step to go back
+    /// to rather than just naming a field.
+    /// </summary>
+    public string GenerateBlockedReason =>
+        SourceServer == null
+            ? "Choose the server to copy from, in step 1."
+        : string.IsNullOrWhiteSpace(SourceDatabase)
+            ? "Choose the database to copy, in step 1."
+        : MediumIsBlob && Container == null
+            ? "Choose the container to copy through, in step 2."
+        : !MediumIsBlob && string.IsNullOrWhiteSpace(SharedPathRoot)
+            ? "Enter the folder both servers can reach, in step 2."
+        : TargetServer == null
+            ? "Choose the server to copy to, in step 3."
+        : string.IsNullOrWhiteSpace(TargetDatabaseName)
+            ? "Enter the name to restore as, in step 3."
+        : IsRefused
+            ? Refusal
+            : string.Empty;
+
+    public bool IsGenerateBlocked => GenerateBlockedReason.Length > 0;
+
     private void Invalidate()
     {
         OnPropertyChanged(nameof(Refusal));
         OnPropertyChanged(nameof(IsRefused));
         OnPropertyChanged(nameof(CanGenerate));
+        OnPropertyChanged(nameof(GenerateBlockedReason));
+        OnPropertyChanged(nameof(IsGenerateBlocked));
         OnPropertyChanged(nameof(WillOverwriteTheTarget));
         OnPropertyChanged(nameof(OverwriteWarning));
         OnPropertyChanged(nameof(WillResetTheDifferentialBase));
