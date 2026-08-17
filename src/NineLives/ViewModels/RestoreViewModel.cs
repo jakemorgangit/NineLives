@@ -76,6 +76,15 @@ public partial class RestoreViewModel : ViewModelBase
     /// </summary>
     public RestoreTimelineViewModel Timeline { get; } = new();
 
+    /// <summary>
+    /// What the source instance recorded, against what this container holds (#451).
+    ///
+    /// Its own view model because it connects to a DIFFERENT server from the one the restore runs
+    /// on - the instance that TOOK the backups, which is routinely not the instance they are being
+    /// restored to - and conflating those two connections is the confusion worth designing out.
+    /// </summary>
+    public BackupGapViewModel Gap { get; }
+
     // Restore chain
     [ObservableProperty]
     private BackupChain? _restoreChain;
@@ -925,6 +934,7 @@ public partial class RestoreViewModel : ViewModelBase
         // finds the one in the user's profile - so a TEST run reads and writes the real cache, and
         // a stale entry from one test then decides the answer in another (#130).
         Inventory = new BackupInventoryViewModel(blobService, sqlService, _log, auditStore);
+        Gap = new BackupGapViewModel(sqlService);
 
         // The chain and the timeline are built from whatever the inventory currently holds, so a
         // change there is the one signal that rebuilds them.
@@ -1106,6 +1116,14 @@ public partial class RestoreViewModel : ViewModelBase
             var match = TargetServers.FirstOrDefault(x => x.Id == previousTarget);
             if (match != null) SelectedTargetServer = match;
         }
+
+        // The gap check offers the same saved list, and keeps its own selection: the instance that
+        // took the backups is a different question from the one being restored to (#451).
+        var previousGapSource = Gap.SourceServer?.Id;
+        Gap.Servers.Clear();
+        foreach (var server in config.Servers) Gap.Servers.Add(server);
+        if (previousGapSource != null)
+            Gap.SourceServer = Gap.Servers.FirstOrDefault(x => x.Id == previousGapSource);
 
         Containers = new ObservableCollection<BlobContainerConfig>(config.BlobContainers);
         foreach (var c in Containers)
@@ -2091,6 +2109,39 @@ public partial class RestoreViewModel : ViewModelBase
 
         GeneratedScript = _scriptGenerator.Generate(chain!, options);
         HasScript = true;
+    }
+
+    /// <summary>
+    /// Asks the source instance what this container is missing (#451).
+    ///
+    /// The database, the container and the listing are gathered HERE and handed over, rather than
+    /// the panel holding them: all three move while it is open, and an answer about a database
+    /// nobody is looking at any more is worse than no answer.
+    /// </summary>
+    [RelayCommand]
+    private async Task CheckForMissingBackupsAsync()
+        => await Gap.CheckAsync(new GapCheckRequest(
+            Inventory.SelectedDatabaseName ?? string.Empty,
+            SelectedContainer,
+            Inventory.AllSets));
+
+    /// <summary>
+    /// Writes the copy script for one location. On demand: most checks find one location, and
+    /// building every script up front is work nobody reads.
+    /// </summary>
+    [RelayCommand]
+    private void BuildCopyScript(MissingLocationRow? row)
+    {
+        if (row == null || SelectedContainer == null) return;
+        Gap.BuildScript(row, SelectedContainer);
+    }
+
+    /// <summary>Puts one location's script on the clipboard, ready to paste into a session on the source.</summary>
+    [RelayCommand]
+    private void CopyCopyScript(MissingLocationRow? row)
+    {
+        if (row is not { HasScript: true }) return;
+        TryCopyToClipboard(row.Script, "Copy script copied to clipboard.");
     }
 
     [RelayCommand]
