@@ -8,6 +8,23 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Added
+
+- **Both service accounts are proven against the shared folder before anything is backed up**
+  (#452). The Copy screen has always said the source writes there as its own service account and
+  the target reads there as its own - two different accounts, routinely not the same one - but the
+  check ran on a *file*, so it could not run until a file was there. Which meant after a full
+  backup had been written. A share the target could not read cost you the whole backup first, and
+  the source's write was never checked ahead of time at all. Generating the scripts now asks each
+  instance about the folder as itself: can the source create in it, can the target see it. Two
+  verdicts kept apart, because the fix is a permission grant to a specific account and one
+  combined answer loses which. It stays honest about what it proves - the folder is reachable, not
+  that a backup inside it will open - so the file-level check after the backup remains the
+  authoritative one. An instance that never answers does not block the copy: not knowing is not
+  the same as refusing.
+
 ## [1.7.0] - 2026-08-17
 
 ### Added

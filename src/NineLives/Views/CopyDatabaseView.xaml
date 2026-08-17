@@ -164,7 +164,52 @@
                                  Margin="0,4,0,0"
                                  ToolTip="For example \\nas01\sql" />
                         <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                   Text="The source has to WRITE here as its own service account, and the target has to READ here as its own - two different accounts, and routinely not the same one. Whether the target can read it is checked after the backup, before the restore." />
+                                   Text="The source has to WRITE here as its own service account, and the target has to READ here as its own - two different accounts, and routinely not the same one. Both are checked when you generate the scripts - before anything is written, rather than after the backup as it used to be." />
+
+                        <!-- The two verdicts, kept apart (#452). One combined answer loses the only
+                             thing that makes the message actionable: which permission grant is
+                             needed, and to which account. Coloured on the outcome, so a refusal
+                             does not read as reassurance. -->
+                        <StackPanel Margin="0,8,0,0"
+                                    Visibility="{Binding SourceCanWriteHere, Converter={StaticResource NullToVis}}">
+                            <TextBlock Text="{Binding SourceCanWriteHere}"
+                                       TextWrapping="Wrap" Margin="0,0,0,4">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SharedFolderProven}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <TextBlock Text="{Binding TargetCanReadHere}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{Binding TargetCanReadHere, Converter={StaticResource NullToVis}}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SharedFolderProven}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- What xp_fileexist actually proves, said rather than implied: the
+                                 folder is visible to that account, not that a backup inside it will
+                                 be readable. The file-level check after the backup is still the
+                                 authoritative one. -->
+                            <TextBlock Style="{StaticResource SecondaryText}"
+                                       FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Visibility="{Binding SharedFolderProven, Converter={StaticResource BoolToVis}}"
+                                       Text="That proves the folder is reachable by both accounts. Whether a backup inside it can be opened is checked again once it is written - a share can be visible and still refuse the read." />
+                        </StackPanel>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Margin="0,14,0,0">

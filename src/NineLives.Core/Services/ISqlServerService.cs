@@ -182,6 +182,21 @@ public interface ISqlServerService
     Task<BackupFileCheck> CheckBackupFileAsync(
         ServerConnection server, string path, CancellationToken ct = default);
 
+    /// <summary>
+    /// Whether THIS instance's service account can use a folder, asked before anything is written
+    /// (#452).
+    ///
+    /// The file-level check below cannot run until a file is there, which on the copy screen means
+    /// after a full backup has been taken - so a share the target cannot read costs the whole
+    /// backup first. This one costs a round trip.
+    ///
+    /// <paramref name="needsWrite"/> picks the question: whether the account can see the folder, or
+    /// whether it can create in it. Both are asked ON the instance, because the account that
+    /// matters is its service account and not this app.
+    /// </summary>
+    Task<FolderAccessCheck> CheckFolderAccessAsync(
+        ServerConnection server, string folder, bool needsWrite, CancellationToken ct = default);
+
     /// <summary>Checks every file a chain needs, stopping at the first that cannot be read.</summary>
     Task<List<BackupFileCheck>> CheckBackupFilesAsync(
         ServerConnection server, IEnumerable<string> paths, CancellationToken ct = default);

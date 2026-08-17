@@ -822,6 +822,24 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// <summary>Set to make the target unreachable rather than merely unhelpful.</summary>
     public Exception? ThrowOnCheck { get; set; }
 
+    /// <summary>What each folder check should answer, keyed by "serverName|folder|write" (#452).
+    /// Anything not listed answers Ok, so a test only has to state the failure it cares about.</summary>
+    public Dictionary<string, FolderAccessCheck> FolderAccess { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every folder check asked for, so a test can prove BOTH sides were asked.</summary>
+    public List<string> FolderChecks { get; } = [];
+
+    public Task<FolderAccessCheck> CheckFolderAccessAsync(
+        ServerConnection server, string folder, bool needsWrite, CancellationToken ct = default)
+    {
+        var key = $"{server.ServerName}|{folder}|{(needsWrite ? "write" : "read")}";
+        FolderChecks.Add(key);
+
+        return Task.FromResult(FolderAccess.TryGetValue(key, out var answer)
+            ? answer
+            : FolderAccessCheck.Ok(folder));
+    }
+
     public Task<BackupFileCheck> CheckBackupFileAsync(
         ServerConnection server, string path, CancellationToken ct = default)
     {
