@@ -8,6 +8,20 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Added
+
+- **After copying the missing backups in, one press confirms it worked** (#451). The copy script
+  is taken away and run on the machine that holds the files, and whoever ran it comes back with
+  one question: did it work. Re-running the check answered a different one - what is missing now -
+  and a still-red panel listing five files looks identical whether eighteen arrived or none did.
+  There is now a single button that re-reads the container and asks the source again, both in one
+  press because doing them separately is how somebody concludes the copy failed when it was the
+  listing that was stale. It reports what changed: all of them arrived, or three of five with two
+  still to come, or none. Backups the instance has taken *since* are counted separately, because
+  more work appearing is not the same as the copy having failed.
+
 ## [1.7.1] - 2026-08-17
 
 ### Added
