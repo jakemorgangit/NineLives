@@ -1705,6 +1705,13 @@
                                                                     Style="{StaticResource SecondaryButton}"
                                                                     Padding="10,4" Margin="0,0,8,0" />
 
+                                                            <Button Content="Restore from where they are"
+                                                                    Command="{Binding DataContext.RestoreFromWhereTheyAreCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    Style="{StaticResource SecondaryButton}"
+                                                                    Padding="10,4" Margin="0,0,8,0"
+                                                                    ToolTip="Adds these to the timeline and reads them from this path instead of copying them into the container. The target has to be able to reach it - checked before the restore runs." />
+
                                                             <Button Content="Copy to clipboard"
                                                                     Command="{Binding DataContext.CopyCopyScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                                     CommandParameter="{Binding}"

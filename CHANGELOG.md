@@ -23,6 +23,13 @@ more detail on the user-facing changes; this file is the short history.
   named individually rather than globbed, and carrying no credential, because that script is
   handed to somebody to run on a production server.
 
+- **Or restore them from where they already are** (#451). The other way out, and the one for
+  mid-incident when uploading twenty-three files is time nobody has: fold them into the timeline
+  and leave the files alone. The restore point extends to the newest of them, and the script
+  reads the container by URL and those logs from their own path by DISK, in one run. The target
+  has to be able to open that path as its own service account - a different question from whether
+  the container is reachable, and one now asked in the preflight, before anything is dropped.
+
 ## [1.6.4] - 2026-08-14
 
 ### Fixed
