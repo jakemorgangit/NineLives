@@ -48,6 +48,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         _sql = sql;
         _log = log ?? App.Log;
         _history = history ?? new OperationHistoryStore();
+        Gap = new BackupGapViewModel(sql);
 
         Refresh();
     }
@@ -144,12 +145,62 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             if (previousSource != null) SourceServer = Servers.FirstOrDefault(s => s.Id == previousSource);
             if (previousTarget != null) TargetServer = Servers.FirstOrDefault(s => s.Id == previousTarget);
             if (previousContainer != null) Container = Containers.FirstOrDefault(c => c.Id == previousContainer);
+
+            // The log check offers the same saved list.
+            Gap.Servers.Clear();
+            foreach (var server in config.Servers) Gap.Servers.Add(server);
         }
         catch
         {
             Servers = [];
             Containers = [];
         }
+    }
+
+    /// <summary>
+    /// Asks the source what logs it has taken since this copy's full, and where they went (#451).
+    ///
+    /// Not the Restore screen's question. That one asks what a container is MISSING; this screen
+    /// reads no container chain at all - it writes its own full - so the useful question is which
+    /// of the source's logs would carry that full forward to now.
+    ///
+    /// Only worth asking once the scripts exist, because "since when" is the copy's own timestamp.
+    /// </summary>
+    [RelayCommand]
+    private async Task CheckSourceLogsAsync()
+    {
+        if (SourceServer == null || string.IsNullOrWhiteSpace(SourceDatabase)) return;
+        if (_copyTakenAt is not { } takenAt)
+        {
+            SetStatus("Generate the scripts first - the logs to apply are the ones taken since.");
+            return;
+        }
+
+        Gap.SourceServer = SourceServer;
+        await Gap.CheckLogsAfterAsync(SourceDatabase!, takenAt);
+    }
+
+    /// <summary>
+    /// Writes the statements that apply those logs to the copy.
+    ///
+    /// Brought online at the end, because somebody pressing this is doing the cutover. Applying
+    /// logs repeatedly up to the switch is the other shape, and the script says how.
+    /// </summary>
+    [RelayCommand]
+    private void BuildRollForward()
+    {
+        var logs = Gap.Locations
+            .SelectMany(l => l.Location.Backups.Select(b => b.Entry))
+            .ToList();
+
+        RollForwardScript = LogRollForwardScript.Build(TargetDatabaseName, logs);
+    }
+
+    [RelayCommand]
+    private void CopyRollForward()
+    {
+        if (!HasRollForwardScript) return;
+        TryCopyToClipboard(RollForwardScript, "Roll-forward script copied to clipboard.");
     }
 
     /// <summary>The list is not fetchable mid-run: it can wait; the copy cannot re-run (#281).</summary>
@@ -484,10 +535,17 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             {
                 TargetDatabaseName = TargetDatabaseName,
                 WithReplace = WithReplace,
-                RecoveryMode = RecoveryMode.Recovery
+                // Left restoring for a cutover, online for a refresh (#451).
+                RecoveryMode = LeaveRestoringForMoreLogs
+                    ? RecoveryMode.NoRecovery
+                    : RecoveryMode.Recovery
             });
 
-        SetStatus("Scripts generated.");
+        _copyTakenAt = takenAt;
+
+        SetStatus(LeaveRestoringForMoreLogs
+            ? "Scripts generated. The target will be left in RESTORING, ready for more logs."
+            : "Scripts generated.");
 
         // The checks depend on the SERVERS and the SOURCE database - not on the target
         // name or any other keystroke-speed field. Re-asking two production instances six
@@ -550,6 +608,45 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     private string _sharedFolderRefusal = string.Empty;
 
     partial void OnSharedFolderRefusalChanged(string value) => Invalidate();
+
+    /// <summary>
+    /// Leave the target in RESTORING so more log backups can be applied to it (#451).
+    ///
+    /// The cutover. A copy normally brings the target online, which is right for a test refresh and
+    /// wrong for a migration: online means no more logs can be applied, so the copy is frozen at
+    /// the moment it was taken. Left restoring, the long part - the full - happens in advance, and
+    /// the switch-over costs only the logs that accumulated since.
+    ///
+    /// Off by default, because a database left in RESTORING is not usable and somebody refreshing a
+    /// test environment wants the opposite. The screen says which it will be.
+    /// </summary>
+    [ObservableProperty]
+    private bool _leaveRestoringForMoreLogs;
+
+    partial void OnLeaveRestoringForMoreLogsChanged(bool value)
+    {
+        Invalidate();
+        RollForwardScript = string.Empty;
+        if (HasScripts) Generate();
+    }
+
+    /// <summary>The logs on the source that would roll this copy forward, and where they live.</summary>
+    public BackupGapViewModel Gap { get; }
+
+    /// <summary>
+    /// The statements that apply those logs, or empty. Built on demand: most copies are refreshes
+    /// and nobody wants this.
+    /// </summary>
+    [ObservableProperty]
+    private string _rollForwardScript = string.Empty;
+
+    public bool HasRollForwardScript => RollForwardScript.Length > 0;
+
+    partial void OnRollForwardScriptChanged(string value)
+        => OnPropertyChanged(nameof(HasRollForwardScript));
+
+    /// <summary>When the copy's own full was taken - what the logs have to come after.</summary>
+    private DateTime? _copyTakenAt;
 
     /// <summary>
     /// The three generation-time checks as one serialised sweep (#285): warnings cleared once

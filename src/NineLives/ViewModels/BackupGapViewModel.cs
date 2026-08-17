@@ -170,6 +170,56 @@ public partial class BackupGapViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// The source's logs taken after a moment, rather than what a container is missing (#451).
+    ///
+    /// The Copy screen's question. It reads no container chain - it writes its own full - so the
+    /// useful thing is which of the source's logs would carry that full forward to now.
+    /// </summary>
+    public async Task CheckLogsAfterAsync(string database, DateTime after)
+    {
+        if (SourceServer is not { } server) return;
+
+        IsChecking = true;
+        ClearStatus();
+        Clear();
+
+        var ct = _cancellation.Begin();
+
+        try
+        {
+            var history = await _sql.ReadBackupHistoryAsync(server, database, ct);
+            var locations = BackupGapAnalyser.LogsTakenAfter(history, database, after);
+
+            foreach (var location in locations) Locations.Add(new MissingLocationRow(location));
+
+            ComparedWhat =
+                $"{database} on {server.ServerName}: log backups taken after " +
+                $"{after:yyyy-MM-dd HH:mm}.";
+
+            HasChecked = true;
+
+            var files = Locations.Sum(l => l.FileCount);
+            SetStatus(Locations.Count == 0
+                ? "The source has taken no log backups since the copy - there is nothing to roll forward."
+                : $"{files} log backup file(s) could roll this copy forward.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Check cancelled.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not read {server.ServerName}'s backup history: {ex.Message}");
+        }
+        finally
+        {
+            IsChecking = false;
+            _cancellation.End();
+            RaiseDerived();
+        }
+    }
+
     [RelayCommand]
     private void Cancel() => _cancellation.Cancel();
 

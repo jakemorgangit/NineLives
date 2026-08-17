@@ -71,6 +71,20 @@ more detail on the user-facing changes; this file is the short history.
   has to be able to open that path as its own service account - a different question from whether
   the container is reachable, and one now asked in the preflight, before anything is dropped.
 
+### Added
+
+- **Copy a database for a cutover, not just a refresh** (#451). A copy brought the target online,
+  which is right for refreshing a test environment and wrong for a migration: online means no
+  more logs can be applied, so the copy is frozen at the moment it was taken. Tick "Leave the
+  target ready for more log backups" and it stays in RESTORING - the full is restored in advance,
+  and the switch-over costs only the logs that accumulated since. The screen then asks the source
+  which logs it has taken since that full, says where they live, and writes the statements to
+  apply them, oldest first, recovering only at the end. Offered only when the target has been left
+  restorable, because against a database already online those statements fail with 3101. It is not
+  the Restore screen's check ported across: this screen reads no container chain at all - it
+  writes its own full - so "what is this container missing" means nothing here, and the question
+  that does mean something is which of the source's logs would carry the copy forward.
+
 ### Fixed
 
 - **The Copy screen says why it will not generate, and stops losing the database you chose**
