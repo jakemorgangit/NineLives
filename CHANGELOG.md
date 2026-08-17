@@ -29,6 +29,15 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A completed restore can no longer surface as a crash** (#471). Reading the console to file a
+  run's receipt was not thread-safe: the line collection could be enumerated while another thread
+  was still appending to it, handing back a null and throwing. That happened inside the run's own
+  finally block, unguarded, so it came out of the restore itself - the database restored, the
+  target online, and an exception on screen. The console now snapshots before reading and tolerates
+  a torn one, and filing a receipt can no longer fail the thing it is filing: it says so on the
+  console instead. Found as a red build rather than by looking for it.
+
+
 - **The gap check can be found** (#466). It shipped in 1.7.0 inside the restore options, which
   meant behind a step you only reach after *confirming* a restore point - and which starts
   collapsed. A feature whose whole purpose is telling you the chain is shorter than you think

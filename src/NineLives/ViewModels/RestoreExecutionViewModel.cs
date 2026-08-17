@@ -395,7 +395,24 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             // mid-finally, which is a worse trade than a receipt missing "100 percent processed" -
             // every line that carries meaning is already in it, because those are appended
             // directly rather than through the progress channel.
-            if (attempted) await RecordHistory(run, startedAt, outcome, failure);
+            if (attempted)
+            {
+                try
+                {
+                    await RecordHistory(run, startedAt, outcome, failure);
+                }
+                catch (Exception ex)
+                {
+                    // The store already promises never to fail the thing it records - but that
+                    // promise lives inside Append, and everything BEFORE it was unguarded: reading
+                    // the console, assembling the entry. A NullReferenceException from a torn read
+                    // of the console came out of here on CI, and in the app it would have surfaced
+                    // a completed restore as a crash. The restore has already happened by this
+                    // point; nothing that goes wrong while filing it may change that.
+                    _log.Error($"Could not record this run in the history: {ex.Message}");
+                    AppendLog($"The restore finished. Recording it in History failed: {ex.Message}");
+                }
+            }
         }
     }
 
