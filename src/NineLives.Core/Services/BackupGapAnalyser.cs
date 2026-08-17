@@ -1,4 +1,4 @@
-using Blackcat.NineLives.Models;
+﻿using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -135,6 +135,38 @@ public static class BackupGapAnalyser
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The source's log backups taken after a given moment, grouped by where they live (#451).
+    ///
+    /// The Copy screen's question, which is not the Restore screen's. A copy writes its own full and
+    /// reads no existing chain, so "what is this container missing" means nothing there. What does
+    /// mean something is the cutover: the copy restores a full taken at T, and the logs the source
+    /// has taken SINCE T are what would roll the target forward to now. The long part happens in
+    /// advance and the downtime is only the tail.
+    ///
+    /// Strictly after, and by the log's own start: a log backup that began before the full was
+    /// taken is already inside it.
+    /// </summary>
+    public static IReadOnlyList<MissingLocation> LogsTakenAfter(
+        IReadOnlyList<BackupHistoryEntry> history,
+        string database,
+        DateTime after)
+    {
+        var logs = history
+            .Where(h => string.Equals(h.DatabaseName, database, StringComparison.OrdinalIgnoreCase))
+            .Where(h => h.Type == BackupType.TransactionLog)
+            .Where(h => h.HasFiles)
+            .Where(h => h.StartedAt > after)
+            .ToList();
+
+        return logs
+            .Select(h => new MissingBackup(h, FolderOf(h.Files[0])))
+            .GroupBy(m => m.Folder, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new MissingLocation(g.Key, g.OrderBy(m => m.TakenAt).ToList()))
+            .OrderBy(l => l.Earliest)
+            .ToList();
     }
 
     /// <summary>

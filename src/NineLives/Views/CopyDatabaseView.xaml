@@ -264,6 +264,21 @@
                         </StackPanel>
                     </Grid>
 
+                    <!-- The cutover (#451). Online is right for a test refresh and wrong for a
+                         migration: online means no more logs can be applied, so the copy is
+                         frozen at the moment it was taken. -->
+                    <CheckBox Content="Leave the target ready for more log backups (NORECOVERY)"
+                              IsChecked="{Binding LeaveRestoringForMoreLogs}"
+                              Style="{StaticResource DarkCheckBox}"
+                              Margin="0,0,0,4"
+                              ToolTip="For a migration: the full is restored now and the target stays in RESTORING, so the source's later logs can be applied at the moment you switch over. The database is NOT usable until they are." />
+
+                    <TextBlock Style="{StaticResource SecondaryText}"
+                               FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Foreground="{DynamicResource WarningBrush}"
+                               Visibility="{Binding LeaveRestoringForMoreLogs, Converter={StaticResource BoolToVis}}"
+                               Text="The target will be left in RESTORING and will not be usable until logs are applied and it is brought online. For a test refresh, leave this unticked." />
+
                     <CheckBox Content="Overwrite it if it already exists (WITH REPLACE)"
                               IsChecked="{Binding WithReplace}"
                               Style="{StaticResource DarkCheckBox}"
@@ -415,6 +430,86 @@
                                                     Foreground="{DynamicResource ConsoleTextBrush}" />
                             </StackPanel>
                         </ScrollViewer>
+                    </Border>
+
+                    <!-- Rolling the copy forward (#451). Only when the target has been left
+                         restorable - on a copy brought online these logs cannot be applied at all,
+                         and offering them would be offering something that fails with 3101. -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,12,0,0"
+                            Visibility="{Binding LeaveRestoringForMoreLogs, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="ROLL THIS COPY FORWARD" Style="{StaticResource LabelText}"
+                                       Margin="0,0,0,6" />
+
+                            <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap"
+                                       Margin="0,0,0,10"
+                                       Text="The copy restores a full taken now. The log backups the source takes after it are what carry the target up to the moment you switch over - so the long part happens in advance and the downtime is only the tail. Ask the source what it has taken since." />
+
+                            <WrapPanel>
+                                <Button Content="What has the source taken since?"
+                                        Command="{Binding CheckSourceLogsCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="12,6" Margin="0,0,8,8" />
+
+                                <Button Content="Write the roll-forward script"
+                                        Command="{Binding BuildRollForwardCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="12,6" Margin="0,0,8,8"
+                                        Visibility="{Binding Gap.HasGap, Converter={StaticResource BoolToVis}}" />
+
+                                <Button Content="Copy to clipboard"
+                                        Command="{Binding CopyRollForwardCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Padding="12,6" Margin="0,0,8,8"
+                                        Visibility="{Binding HasRollForwardScript, Converter={StaticResource BoolToVis}}" />
+                            </WrapPanel>
+
+                            <ContentControl Style="{StaticResource ErrorBanner}" DataContext="{Binding Gap}" />
+
+                            <TextBlock Text="{Binding Gap.StatusMessage}"
+                                       Style="{StaticResource SecondaryText}"
+                                       TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Visibility="{Binding Gap.StatusMessage, Converter={StaticResource NullToVis}}" />
+
+                            <ItemsControl ItemsSource="{Binding Gap.Locations}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource InputBackgroundBrush}"
+                                                CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Folder}"
+                                                           Style="{StaticResource BodyText}"
+                                                           FontFamily="{StaticResource ConsoleFont}"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Style="{StaticResource SecondaryText}"
+                                                           Margin="0,4,0,0" TextWrapping="Wrap">
+                                                    <Run Text="{Binding Summary, Mode=OneWay}" />
+                                                    <Run Text="-" />
+                                                    <Run Text="{Binding SizeDisplay, Mode=OneWay}" />
+                                                </TextBlock>
+                                                <TextBlock Text="{Binding Window}"
+                                                           Style="{StaticResource SecondaryText}"
+                                                           Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Border Background="{DynamicResource ConsoleBackgroundBrush}"
+                                    BorderBrush="{DynamicResource ConsoleBorderBrush}"
+                                    BorderThickness="1" CornerRadius="4" Margin="0,8,0,0"
+                                    Visibility="{Binding HasRollForwardScript, Converter={StaticResource BoolToVis}}">
+                                <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Auto" Padding="10,8">
+                                    <views:SqlTextBlock Sql="{Binding RollForwardScript}"
+                                                        FontFamily="{StaticResource ConsoleFont}"
+                                                        FontSize="12"
+                                                        TextWrapping="NoWrap"
+                                                        Foreground="{DynamicResource ConsoleTextBrush}" />
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
                     </Border>
 
                     <!-- What state the two servers were left in, in terms of what to do next. -->
