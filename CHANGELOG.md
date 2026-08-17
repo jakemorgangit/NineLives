@@ -8,6 +8,21 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+### Added
+
+- **The Restore screen can ask the source instance what this container is missing** (#451).
+  Logs often go somewhere the fulls do not - a local or cluster disk for throughput, or a share
+  because log shipping already owns them. Pointed at the container, the app built an honest chain
+  out of what it could see, and that chain stopped at the last differential with nothing to say
+  the rest existed. Under the advanced restore options there is now a source instance picker and
+  a check: it reads that instance's own record, sets it against what the container holds, and
+  names what is missing along with the path it went to and how much recovery time the container
+  is behind by. For anything on disk it writes the PowerShell to copy those exact files in -
+  named individually rather than globbed, and carrying no credential, because that script is
+  handed to somebody to run on a production server.
+
 ## [1.6.4] - 2026-08-14
 
 ### Fixed
