@@ -2126,6 +2126,25 @@ public partial class RestoreViewModel : ViewModelBase
             Inventory.AllSets));
 
     /// <summary>
+    /// Re-reads the container, then asks the same question again (#451).
+    ///
+    /// The other end of the copy script. It is run over on the source machine, and the person who
+    /// ran it comes back here wanting one thing: did it work. Answering that needs the container
+    /// listing to be re-read first - the check compares msdb against what THIS app last saw, so
+    /// re-checking without re-listing compares against a stale picture and reports everything as
+    /// still missing.
+    ///
+    /// Both steps in one press, because doing them separately is how somebody concludes the copy
+    /// failed when it was the listing that was out of date.
+    /// </summary>
+    [RelayCommand]
+    private async Task RescanAndCheckAsync()
+    {
+        await LoadBackupsAsync();
+        await CheckForMissingBackupsAsync();
+    }
+
+    /// <summary>
     /// Writes the copy script for one location. On demand: most checks find one location, and
     /// building every script up front is work nobody reads.
     /// </summary>

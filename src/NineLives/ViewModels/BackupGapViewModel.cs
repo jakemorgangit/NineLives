@@ -61,7 +61,9 @@ public partial class BackupGapViewModel : ViewModelBase
         CheckCommand.NotifyCanExecuteChanged();
 
         // A previous answer described a different server. Leaving it on screen under a new
-        // selection is the stale-result problem, and this panel's whole job is to be believed.
+        // selection is the stale-result problem, and this panel's whole job is to be believed -
+        // including the comparison, which would otherwise measure one instance against another.
+        _previouslyMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Clear();
     }
 
@@ -103,6 +105,26 @@ public partial class BackupGapViewModel : ViewModelBase
     public bool CanCheck => SourceServer != null && !IsChecking;
 
     /// <summary>
+    /// Every file the previous check reported missing, so this one can say what ARRIVED (#451).
+    ///
+    /// Re-running the check and drawing a new panel answers "what is missing now", which is not
+    /// the question somebody has after running a copy script. Theirs is "did it work" - and a
+    /// still-red panel listing five files looks identical whether eighteen arrived or none did.
+    ///
+    /// By file rather than by count, because a retention job trimming an old log while a copy runs
+    /// would otherwise look like a file that arrived.
+    /// </summary>
+    private HashSet<string> _previouslyMissing = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>What changed since the last check, or empty when there is nothing to compare.</summary>
+    [ObservableProperty]
+    private string _arrivalReport = string.Empty;
+
+    public bool HasArrivalReport => ArrivalReport.Length > 0;
+
+    partial void OnArrivalReportChanged(string value) => OnPropertyChanged(nameof(HasArrivalReport));
+
+    /// <summary>
     /// Reads the source instance's own record and sets it against the container's contents.
     ///
     /// The container and the database name come from the screen at the moment of the press rather
@@ -138,6 +160,15 @@ public partial class BackupGapViewModel : ViewModelBase
 
             var locations = BackupGapAnalyser.Compare(history, held, database);
             foreach (var location in locations) Locations.Add(new MissingLocationRow(location));
+
+            // What arrived since last time, before this check's own answer replaces it.
+            var stillMissing = locations
+                .SelectMany(l => l.Backups)
+                .SelectMany(b => b.Files)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            ArrivalReport = DescribeArrivals(_previouslyMissing, stillMissing);
+            _previouslyMissing = stillMissing;
 
             var behind = BackupGapAnalyser.RecoveryTimeNotInContainer(history, held, database);
             BehindBy = behind is { } gap ? Humanise(gap) : string.Empty;
@@ -224,6 +255,41 @@ public partial class BackupGapViewModel : ViewModelBase
     private void Cancel() => _cancellation.Cancel();
 
     /// <summary>
+    /// What happened between two checks, in the terms somebody who has just run a copy script
+    /// cares about (#451).
+    ///
+    /// Nothing at all on the first check: there is no previous answer, and inventing a comparison
+    /// against zero would report every missing file as a fresh loss.
+    ///
+    /// Files that were missing and are missing still are not mentioned as a number on their own -
+    /// the panel below already lists them, and repeating the count in two places invites the two
+    /// to disagree.
+    /// </summary>
+    internal static string DescribeArrivals(
+        IReadOnlySet<string> before, IReadOnlySet<string> after)
+    {
+        if (before.Count == 0) return string.Empty;
+
+        var arrived = before.Count(f => !after.Contains(f));
+        var stillGone = before.Count - arrived;
+
+        // Something the copy did not account for: files missing now that were not missing before.
+        // A backup taken since the last check is the ordinary cause, and it is worth separating
+        // from "the copy failed" because the answer is different.
+        var newlyMissing = after.Count(f => !before.Contains(f));
+
+        var report =
+            arrived == 0 ? $"None of the {before.Count} arrived."
+            : stillGone == 0 ? $"All {arrived} arrived - the container now holds them."
+            : $"{arrived} of {before.Count} arrived. {stillGone} still to come.";
+
+        if (newlyMissing > 0)
+            report += $" {newlyMissing} more have been taken since, and are not in the container either.";
+
+        return report;
+    }
+
+    /// <summary>
     /// Builds the copy script for one location, on demand rather than for every location up front.
     /// Most checks find one location and nobody reads the others.
     /// </summary>
@@ -233,6 +299,7 @@ public partial class BackupGapViewModel : ViewModelBase
     private void Clear()
     {
         Locations.Clear();
+        ArrivalReport = string.Empty;
         BehindBy = string.Empty;
         ComparedWhat = string.Empty;
         HasChecked = false;
