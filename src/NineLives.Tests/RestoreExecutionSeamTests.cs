@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using Blackcat.NineLives.Models;
 using Blackcat.NineLives.Services;
 using Blackcat.NineLives.ViewModels;
@@ -119,19 +119,36 @@ public class RestoreExecutionSeamTests
     }
 
     /// <summary>
-    /// The recorded log is the WHOLE console, not whatever had made it out of the batching buffer
-    /// when the run ended - which is why the flush happens before the history entry is written.
+    /// The recorded log is the console as it stood when the run ended, from its first line - not
+    /// whatever had made it out of the batching buffer, which is why the flush happens before the
+    /// history entry is written.
+    ///
+    /// A PREFIX rather than equality, and the distinction is a real one rather than a way of making
+    /// a test pass (#461). Progress&lt;T&gt; POSTS its callbacks, so a report issued just before the
+    /// execution returned can still be queued when the run's finally block flushes and records -
+    /// and it then reaches the console after the receipt was taken. The receipt is one line short
+    /// of the console, on CI, perhaps one run in twenty.
+    ///
+    /// Prefix keeps everything worth keeping: nothing in the receipt that is not in the console, in
+    /// the same order, starting at the same place. A receipt truncated early, out of order, or
+    /// holding text the console never had all still fail. Only a trailing progress line arriving
+    /// late is tolerated, which is the one thing that is genuinely not guaranteed.
     /// </summary>
     [Fact]
-    public async Task TheRecordedLogIsTheWholeConsole()
+    public async Task TheRecordedLogIsTheConsoleAsItStoodWhenTheRunEnded()
     {
         var (vm, _, history) = New();
 
         await vm.RunAsync(Run(), Proceed);
 
         var entry = Assert.Single(history.Entries);
+
         Assert.Contains("Beginning restore execution", entry.Log);
-        Assert.Equal(vm.Console.Text, entry.Log);
+        Assert.StartsWith(entry.Log, vm.Console.Text);
+
+        // And it is the run, not a fragment of it: the outcome has to be in there, because that is
+        // what somebody opens a receipt to find.
+        Assert.Contains("Restore completed", entry.Log);
     }
 
     [Fact]

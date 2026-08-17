@@ -8,6 +8,55 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [1.7.1] - 2026-08-17
+
+### Added
+
+- **Copy a database for a cutover, not just a refresh** (#451). A copy brought the target online,
+  which is right for refreshing a test environment and wrong for a migration: online means no
+  more logs can be applied, so the copy is frozen at the moment it was taken. Tick "Leave the
+  target ready for more log backups" and it stays in RESTORING - the full is restored in advance,
+  and the switch-over costs only the logs that accumulated since. The screen then asks the source
+  which logs it has taken since that full, says where they live, and writes the statements to
+  apply them, oldest first, recovering only at the end. Offered only when the target has been left
+  restorable, because against a database already online those statements fail with 3101. It is not
+  the Restore screen's check ported across: this screen reads no container chain at all - it
+  writes its own full - so "what is this container missing" means nothing here, and the question
+  that does mean something is which of the source's logs would carry the copy forward.
+
+
+- **Both service accounts are proven against the shared folder before anything is backed up**
+  (#452). The Copy screen has always said the source writes there as its own service account and
+  the target reads there as its own - two different accounts, routinely not the same one - but the
+  check ran on a *file*, so it could not run until a file was there. Which meant after a full
+  backup had been written. A share the target could not read cost you the whole backup first, and
+  the source's write was never checked ahead of time at all. Generating the scripts now asks each
+  instance about the folder as itself: can the source create in it, can the target see it. Two
+  verdicts kept apart, because the fix is a permission grant to a specific account and one
+  combined answer loses which. It stays honest about what it proves - the folder is reachable, not
+  that a backup inside it will open - so the file-level check after the backup remains the
+  authoritative one. An instance that never answers does not block the copy: not knowing is not
+  the same as refusing.
+
+### Fixed
+
+- **A completed restore can no longer surface as a crash** (#471). Reading the console to file a
+  run's receipt was not thread-safe: the line collection could be enumerated while another thread
+  was still appending to it, handing back a null and throwing. That happened inside the run's own
+  finally block, unguarded, so it came out of the restore itself - the database restored, the
+  target online, and an exception on screen. The console now snapshots before reading and tolerates
+  a torn one, and filing a receipt can no longer fail the thing it is filing: it says so on the
+  console instead. Found as a red build rather than by looking for it.
+- **The gap check can be found** (#466). It shipped in 1.7.0 inside the restore options, which
+  meant behind a step you only reach after *confirming* a restore point - and which starts
+  collapsed. A feature whose whole purpose is telling you the chain is shorter than you think
+  cannot require you to already suspect it; that is the same fault as the bug it fixes, and the
+  first person to look for it could not find it. It now sits in step 1 beside the audit panel,
+  reachable as soon as a database is picked, with no target and no confirmed restore point needed.
+  It was also gated on a mode check that returns true for every mode, which did nothing except
+  imply it was a Pro-only tool. A test now asserts it is on screen with only a container chosen,
+  in every mode, because two placements have compiled and hidden it.
+
 ## [1.7.0] - 2026-08-17
 
 ### Added

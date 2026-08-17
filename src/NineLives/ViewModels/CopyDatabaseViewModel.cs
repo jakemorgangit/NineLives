@@ -48,6 +48,7 @@ public partial class CopyDatabaseViewModel : ViewModelBase
         _sql = sql;
         _log = log ?? App.Log;
         _history = history ?? new OperationHistoryStore();
+        Gap = new BackupGapViewModel(sql);
 
         Refresh();
     }
@@ -144,12 +145,62 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             if (previousSource != null) SourceServer = Servers.FirstOrDefault(s => s.Id == previousSource);
             if (previousTarget != null) TargetServer = Servers.FirstOrDefault(s => s.Id == previousTarget);
             if (previousContainer != null) Container = Containers.FirstOrDefault(c => c.Id == previousContainer);
+
+            // The log check offers the same saved list.
+            Gap.Servers.Clear();
+            foreach (var server in config.Servers) Gap.Servers.Add(server);
         }
         catch
         {
             Servers = [];
             Containers = [];
         }
+    }
+
+    /// <summary>
+    /// Asks the source what logs it has taken since this copy's full, and where they went (#451).
+    ///
+    /// Not the Restore screen's question. That one asks what a container is MISSING; this screen
+    /// reads no container chain at all - it writes its own full - so the useful question is which
+    /// of the source's logs would carry that full forward to now.
+    ///
+    /// Only worth asking once the scripts exist, because "since when" is the copy's own timestamp.
+    /// </summary>
+    [RelayCommand]
+    private async Task CheckSourceLogsAsync()
+    {
+        if (SourceServer == null || string.IsNullOrWhiteSpace(SourceDatabase)) return;
+        if (_copyTakenAt is not { } takenAt)
+        {
+            SetStatus("Generate the scripts first - the logs to apply are the ones taken since.");
+            return;
+        }
+
+        Gap.SourceServer = SourceServer;
+        await Gap.CheckLogsAfterAsync(SourceDatabase!, takenAt);
+    }
+
+    /// <summary>
+    /// Writes the statements that apply those logs to the copy.
+    ///
+    /// Brought online at the end, because somebody pressing this is doing the cutover. Applying
+    /// logs repeatedly up to the switch is the other shape, and the script says how.
+    /// </summary>
+    [RelayCommand]
+    private void BuildRollForward()
+    {
+        var logs = Gap.Locations
+            .SelectMany(l => l.Location.Backups.Select(b => b.Entry))
+            .ToList();
+
+        RollForwardScript = LogRollForwardScript.Build(TargetDatabaseName, logs);
+    }
+
+    [RelayCommand]
+    private void CopyRollForward()
+    {
+        if (!HasRollForwardScript) return;
+        TryCopyToClipboard(RollForwardScript, "Roll-forward script copied to clipboard.");
     }
 
     /// <summary>The list is not fetchable mid-run: it can wait; the copy cannot re-run (#281).</summary>
@@ -277,6 +328,11 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             if (SourceServer == null || TargetServer == null) return string.Empty;
             if (string.IsNullOrWhiteSpace(SourceDatabase)) return string.Empty;
             if (string.IsNullOrWhiteSpace(TargetDatabaseName)) return string.Empty;
+
+            // A folder one side cannot use (#452). Before the version and encryption verdicts,
+            // because there is no point discussing what the target can restore when the backup
+            // cannot be written in the first place.
+            if (SharedFolderRefusal.Length > 0) return SharedFolderRefusal;
 
             // Onto itself, under its own name. That is not a copy - it is a backup of a database
             // immediately restored over the top of the database it was taken from, which at best
@@ -479,10 +535,17 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             {
                 TargetDatabaseName = TargetDatabaseName,
                 WithReplace = WithReplace,
-                RecoveryMode = RecoveryMode.Recovery
+                // Left restoring for a cutover, online for a refresh (#451).
+                RecoveryMode = LeaveRestoringForMoreLogs
+                    ? RecoveryMode.NoRecovery
+                    : RecoveryMode.Recovery
             });
 
-        SetStatus("Scripts generated.");
+        _copyTakenAt = takenAt;
+
+        SetStatus(LeaveRestoringForMoreLogs
+            ? "Scripts generated. The target will be left in RESTORING, ready for more logs."
+            : "Scripts generated.");
 
         // The checks depend on the SERVERS and the SOURCE database - not on the target
         // name or any other keystroke-speed field. Re-asking two production instances six
@@ -506,7 +569,84 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// <summary>The in-flight sweep, so the run can refuse to start before the verdicts are in.</summary>
     private Task _checksTask = Task.CompletedTask;
 
+    /// <summary>
+    /// Awaits the in-flight check sweep. For tests, so they turn on the sweep having finished
+    /// rather than on a sleep long enough to hope it has - a timing guess is how a test passes
+    /// locally and fails on a loaded runner.
+    /// </summary>
+    internal Task WaitForChecksForTests() => _checksTask;
+
     private readonly OperationCancellation _checksCancellation = new();
+
+    /// <summary>
+    /// What the SOURCE said about writing to the shared folder, and the TARGET about reading it
+    /// (#452).
+    ///
+    /// Two accounts, two answers, kept apart. The screen's own text has always said the source
+    /// writes as its service account and the target reads as its own - routinely not the same one -
+    /// and reporting them as one verdict loses the only thing that makes the message actionable,
+    /// which is WHICH permission grant is needed and to whom.
+    /// </summary>
+    [ObservableProperty]
+    private string _sourceCanWriteHere = string.Empty;
+
+    [ObservableProperty]
+    private string _targetCanReadHere = string.Empty;
+
+    [ObservableProperty]
+    private bool _sharedFolderProven;
+
+    /// <summary>
+    /// The folder problem, or empty. Feeds the refusal, because a copy through a folder one side
+    /// cannot use will not work and generating a script for it wastes the wait.
+    ///
+    /// A check that could not be COMPLETED is not a check that failed - an instance that refuses to
+    /// answer must not block a copy that would have worked, the same rule the space check follows.
+    /// So only a definite no counts.
+    /// </summary>
+    [ObservableProperty]
+    private string _sharedFolderRefusal = string.Empty;
+
+    partial void OnSharedFolderRefusalChanged(string value) => Invalidate();
+
+    /// <summary>
+    /// Leave the target in RESTORING so more log backups can be applied to it (#451).
+    ///
+    /// The cutover. A copy normally brings the target online, which is right for a test refresh and
+    /// wrong for a migration: online means no more logs can be applied, so the copy is frozen at
+    /// the moment it was taken. Left restoring, the long part - the full - happens in advance, and
+    /// the switch-over costs only the logs that accumulated since.
+    ///
+    /// Off by default, because a database left in RESTORING is not usable and somebody refreshing a
+    /// test environment wants the opposite. The screen says which it will be.
+    /// </summary>
+    [ObservableProperty]
+    private bool _leaveRestoringForMoreLogs;
+
+    partial void OnLeaveRestoringForMoreLogsChanged(bool value)
+    {
+        Invalidate();
+        RollForwardScript = string.Empty;
+        if (HasScripts) Generate();
+    }
+
+    /// <summary>The logs on the source that would roll this copy forward, and where they live.</summary>
+    public BackupGapViewModel Gap { get; }
+
+    /// <summary>
+    /// The statements that apply those logs, or empty. Built on demand: most copies are refreshes
+    /// and nobody wants this.
+    /// </summary>
+    [ObservableProperty]
+    private string _rollForwardScript = string.Empty;
+
+    public bool HasRollForwardScript => RollForwardScript.Length > 0;
+
+    partial void OnRollForwardScriptChanged(string value)
+        => OnPropertyChanged(nameof(HasRollForwardScript));
+
+    /// <summary>When the copy's own full was taken - what the logs have to come after.</summary>
+    private DateTime? _copyTakenAt;
 
     /// <summary>
     /// The three generation-time checks as one serialised sweep (#285): warnings cleared once
@@ -523,6 +663,12 @@ public partial class CopyDatabaseViewModel : ViewModelBase
             SpaceWarning = string.Empty;
             VolumeSpace = [];
 
+            SourceCanWriteHere = string.Empty;
+            TargetCanReadHere = string.Empty;
+            SharedFolderRefusal = string.Empty;
+            SharedFolderProven = false;
+
+            await CheckSharedFolderAsync(ct);
             await CheckVersionAsync(ct);
             await CheckEncryptionAsync(ct);
             await CheckSpaceAsync(ct);
@@ -558,6 +704,51 @@ public partial class CopyDatabaseViewModel : ViewModelBase
     /// STRONGEST terms, because unlike disk space nothing can change between generating and
     /// running that makes this legal.
     /// </summary>
+    /// <summary>
+    /// Asks both instances about the shared folder before anything is backed up (#452).
+    ///
+    /// The readability check that already exists runs on a FILE, so it cannot run until a file is
+    /// there - which on this screen is after a full backup has been written. A share the target
+    /// cannot read therefore cost the whole backup first. This costs two round trips.
+    ///
+    /// What it proves is narrower than what the file check proves, and the wording says so: that
+    /// the folder is visible to the target's account, not that a backup inside it will be
+    /// readable - a share can be traversable and still refuse the read. It catches the common
+    /// failure, which is an account with no access to the share at all, in a second.
+    /// </summary>
+    private async Task CheckSharedFolderAsync(CancellationToken ct)
+    {
+        if (MediumIsBlob) return;
+        if (string.IsNullOrWhiteSpace(SharedPathRoot)) return;
+        if (SourceServer == null || TargetServer == null) return;
+
+        try
+        {
+            // The source has to CREATE here; the target only has to see it.
+            var write = await _sql.CheckFolderAccessAsync(SourceServer, SharedPathRoot, true, ct);
+            SourceCanWriteHere = write.Explain(SourceServer.ServerName, wasWriteCheck: true);
+
+            var read = await _sql.CheckFolderAccessAsync(TargetServer, SharedPathRoot, false, ct);
+            TargetCanReadHere = read.Explain(TargetServer.ServerName, wasWriteCheck: false);
+
+            SharedFolderProven = write.IsOk && read.IsOk;
+
+            SharedFolderRefusal =
+                !write.IsOk && write.Access != FolderAccess.Unreachable ? SourceCanWriteHere
+                : !read.IsOk && read.Access != FolderAccess.Unreachable ? TargetCanReadHere
+                : string.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Never the reason a copy cannot be set up. Not knowing is not the same as refusing.
+            _log.Info($"[share] could not check {SharedPathRoot}: {ex.Message}");
+        }
+    }
+
     private async Task CheckVersionAsync(CancellationToken ct)
     {
         if (SourceServer == null || TargetServer == null) return;
