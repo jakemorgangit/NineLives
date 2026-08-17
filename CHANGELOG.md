@@ -10,6 +10,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Copy screen says why it will not generate, and stops losing the database you chose**
+  (#457). Reported from the app: every field filled in, the overwrite banner naming the target,
+  and both buttons dead with nothing saying why. Two faults. The source database had been cleared
+  out from under the form - the screen re-reads its server list on every visit and re-assigns the
+  source server to a fresh object, which clears the database and reloads the list, while the
+  target server, container, name and overwrite tick all survive. So the form looked complete and
+  was not. Your own choice is now put back when the same server arrives again, though never when
+  you switch servers, because inventing a source database is the one thing this screen must not
+  do. And six things have to be true before Generate is live; the screen named none of them, and
+  now names the first one missing along with the step to go back to.
+
 ### Added
 
 - **The Restore screen can ask the source instance what this container is missing** (#451).
