@@ -75,8 +75,43 @@ public partial class ConsoleBuffer : ObservableObject
     [ObservableProperty]
     private bool _hasOutput;
 
-    /// <summary>The console as plain text, for copying into a bug report.</summary>
-    public string Text => string.Join(Environment.NewLine, Lines.Select(l => l.Text));
+    /// <summary>
+    /// The console as plain text, for copying into a bug report or filing in a receipt.
+    ///
+    /// Defensive about what it enumerates, because it is read from a thread that does not own this
+    /// collection. Writes are marshalled to the dispatcher - which makes the app itself safe, since
+    /// the receipt is written there too - but the run's finally is not guaranteed to be on it once
+    /// anything in the chain has awaited, and a test has no dispatcher at all. ObservableCollection
+    /// is not thread-safe: enumerating one mid-write can hand back a null slot from the array it is
+    /// growing, and this threw a NullReferenceException on CI doing exactly that.
+    ///
+    /// Snapshotted first so the join cannot fail halfway with the collection changing underneath
+    /// it, and null-tolerant because a torn read is the thing being defended against - dropping a
+    /// line that has not landed yet is the right answer, and throwing is not.
+    /// </summary>
+    public string Text
+    {
+        get
+        {
+            ConsoleLine[] snapshot;
+            try
+            {
+                snapshot = Lines.ToArray();
+            }
+            catch (ArgumentException)
+            {
+                // "Destination array was not long enough" - the collection grew during the copy.
+                // One retry, then give back what is stable rather than failing a caller whose real
+                // job is finishing a restore.
+                try { snapshot = Lines.ToArray(); }
+                catch (ArgumentException) { return string.Empty; }
+            }
+
+            return string.Join(
+                Environment.NewLine,
+                snapshot.Where(l => l != null).Select(l => l.Text));
+        }
+    }
 
     /// <summary>
     /// Adds a message, splitting it into lines and collapsing runs of blanks.
