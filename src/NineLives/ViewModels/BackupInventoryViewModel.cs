@@ -483,6 +483,52 @@ public partial class BackupInventoryViewModel : ViewModelBase
     /// thousands of points on a real container, none of them meaningful, because a restore chain
     /// only exists within one database.
     /// </summary>
+    /// <summary>
+    /// Whether the working set holds anything that is not in the container (#451).
+    ///
+    /// Worth surfacing, because from here on the chain being offered restores from two places at
+    /// once - and a script naming a local path is a surprise to anybody who thought they were
+    /// restoring from blob.
+    /// </summary>
+    public bool HasSetsFromInstanceHistory { get; private set; }
+
+    /// <summary>
+    /// Folds backups the container does not hold into the working set, so the timeline and the
+    /// chain builder see them (#451).
+    ///
+    /// This is the whole of "restore them from where they are". The script generator already picks
+    /// DISK or URL per FILE, from the device string rather than from an option, so a chain holding
+    /// a blob full and disk-resident logs generates correct T-SQL with no further work - it has
+    /// simply never been possible to build one, because discovery only ever looked at one medium.
+    ///
+    /// Added to the whole-container list rather than the filtered one, so the same database and
+    /// server filters apply to these as to everything else: a log from another instance must not
+    /// arrive by a side door that the ordinary path would have refused.
+    ///
+    /// A reload drops them, deliberately. Reloading means "read the truth again", and if the files
+    /// were copied in they will be in the container by then anyway.
+    /// </summary>
+    public void IncludeFromInstanceHistory(IReadOnlyList<BackupSet> sets)
+    {
+        if (sets.Count == 0) return;
+
+        var known = _allSets.Select(Identity).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var added = sets.Where(s => known.Add(Identity(s))).ToList();
+        if (added.Count == 0) return;
+
+        _allSets.AddRange(added);
+        HasSetsFromInstanceHistory = true;
+        OnPropertyChanged(nameof(HasSetsFromInstanceHistory));
+
+        RebuildWorkingSet();
+    }
+
+    /// <summary>
+    /// What makes two sets the same one for the purpose of not adding it twice. The set id carries
+    /// the timestamp, and the type separates a full from the log that started in the same second.
+    /// </summary>
+    private static string Identity(BackupSet set) => $"{set.Type}|{set.DatabaseName}|{set.SetId}";
+
     private void RebuildWorkingSet()
     {
         if (string.IsNullOrEmpty(SelectedDatabaseName) || _allSets.Count == 0)
