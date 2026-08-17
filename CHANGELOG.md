@@ -10,6 +10,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [1.7.0] - 2026-08-17
 
+### Fixed
+
+- **The gap check can be found** (#466). It shipped in 1.7.0 inside the restore options, which
+  meant behind a step you only reach after *confirming* a restore point - and which starts
+  collapsed. A feature whose whole purpose is telling you the chain is shorter than you think
+  cannot require you to already suspect it; that is the same fault as the bug it fixes, and the
+  first person to look for it could not find it. It now sits in step 1 beside the audit panel,
+  reachable as soon as a database is picked, with no target and no confirmed restore point needed.
+  It was also gated on a mode check that returns true for every mode, which did nothing except
+  imply it was a Pro-only tool. A test now asserts it is on screen with only a container chosen,
+  in every mode, because two placements have compiled and hidden it.
+
 ### Added
 
 - **The script that carries a login across from the source instance** (#459). When a restored
