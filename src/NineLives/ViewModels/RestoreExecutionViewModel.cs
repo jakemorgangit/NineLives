@@ -565,9 +565,20 @@ public partial class RestoreExecutionViewModel : ViewModelBase
 
             foreach (var orphan in orphans)
             {
-                actions.Add(orphan.HasSameNamedLogin
-                    ? PostRestoreAdvice.FixOrphan(targetDatabase, orphan)
-                    : PostRestoreAdvice.ExplainUnmappableOrphan(targetDatabase, orphan));
+                if (orphan.HasSameNamedLogin)
+                {
+                    actions.Add(PostRestoreAdvice.FixOrphan(targetDatabase, orphan));
+                    continue;
+                }
+
+                // Nothing here to re-attach to. Saying "create the login first, with a password
+                // somebody else owns" is honest and still leaves a database whose users cannot log
+                // in - so the other way out is offered beside it (#459): go and fetch the real
+                // login from the instance the backup came from, hash and SID intact. With the SID
+                // carried across the user is not orphaned at all, and there is no ALTER USER to
+                // run afterwards.
+                actions.Add(PostRestoreAdvice.ExplainUnmappableOrphan(targetDatabase, orphan));
+                actions.Add(PostRestoreAdvice.CaptureLoginFromSource(orphan.Name));
             }
         }
         catch (Exception ex)

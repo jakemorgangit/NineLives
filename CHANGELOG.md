@@ -12,6 +12,18 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Added
 
+- **The script that carries a login across from the source instance** (#459). When a restored
+  database holds a user with no matching login here, the app said to create the login first with
+  a password set by whoever owns the account - honest, and it still left a database whose users
+  could not log in. There is a third option beyond inventing a password or asking for one: go and
+  fetch the real one. Run the new script on the instance the backup came from and it prints the
+  `CREATE LOGIN` to run here, carrying the original password hash and the original SID. The hash
+  means applications keep the password they already have; the SID means the user is not orphaned
+  at all, so there is no `ALTER USER` to run afterwards. SQL logins only - a Windows login carries
+  no password and takes its SID from Active Directory, which the script says rather than quietly
+  finding nothing.
+
+
 - **The Restore screen can ask the source instance what this container is missing** (#451).
   Logs often go somewhere the fulls do not - a local or cluster disk for throughput, or a share
   because log shipping already owns them. Pointed at the container, the app built an honest chain
