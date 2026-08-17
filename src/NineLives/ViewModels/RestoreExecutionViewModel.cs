@@ -383,9 +383,18 @@ public partial class RestoreExecutionViewModel : ViewModelBase
             Console.Flush();   // nothing buffered may outlive the run
             RaiseCancelStateChanged();
 
-            // After the flush, so the recorded log is the whole console rather than whatever had
-            // made it out of the batching buffer. Recorded for every outcome including cancelled -
-            // "I stopped it" is exactly the kind of thing a change ticket needs to say.
+            // After the flush, so the recorded log is the console as it stands rather than
+            // whatever had made it out of the batching buffer. Recorded for every outcome
+            // including cancelled - "I stopped it" is exactly the kind of thing a change ticket
+            // needs to say.
+            //
+            // Not quite the WHOLE console, and the gap is worth knowing about (#461): Progress<T>
+            // posts its callbacks, so a report issued just before the execution returned can still
+            // be queued here and reach the console after this receipt is taken. The receipt can be
+            // one trailing progress line short. Draining that would mean pumping the dispatcher
+            // mid-finally, which is a worse trade than a receipt missing "100 percent processed" -
+            // every line that carries meaning is already in it, because those are appended
+            // directly rather than through the progress channel.
             if (attempted) await RecordHistory(run, startedAt, outcome, failure);
         }
     }
