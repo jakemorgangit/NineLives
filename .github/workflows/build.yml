@@ -97,13 +97,37 @@ jobs:
           }
           exit 0
 
+      # --blame-hang, because this step hangs intermittently and has done for a while (#495).
+      #
+      # The suite takes about thirteen seconds locally and a minute or two here. When it hangs it
+      # hangs indefinitely, so the job ran to its own 30-minute timeout and was recorded as
+      # cancelled - a red mark on the repo carrying no information about what stopped, and half an
+      # hour gone. The same sha then passes on a re-run, which is what made it easy to shrug at.
+      #
+      # A hung run now aborts at five minutes with a dump naming the test that never returned,
+      # uploaded below. Five is far above any healthy run and far below the job timeout, so this
+      # costs nothing when things are well and produces the one thing thirty minutes of hanging
+      # never did: evidence.
       - name: Run tests
-        run: dotnet test src/NineLives.Tests/NineLives.Tests.csproj -c Release --no-build --verbosity normal
+        run: dotnet test src/NineLives.Tests/NineLives.Tests.csproj -c Release --no-build --verbosity normal --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type mini
 
       # Separate step so a blob-emulator failure is distinguishable at a glance from a logic
       # failure - they have completely different causes and completely different fixes.
       - name: Run integration tests (Azurite)
-        run: dotnet test src/NineLives.IntegrationTests/NineLives.IntegrationTests.csproj -c Release --no-build --verbosity normal
+        run: dotnet test src/NineLives.IntegrationTests/NineLives.IntegrationTests.csproj -c Release --no-build --verbosity normal --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type mini
+
+      # Only when something actually hung or failed - the sequence file names the test that was
+      # running when the clock ran out, which is the whole point of the exercise.
+      - name: Collect hang evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hang-dump-${{ github.run_id }}
+          path: |
+            src/NineLives.Tests/TestResults/**
+            src/NineLives.IntegrationTests/TestResults/**
+          if-no-files-found: ignore
+          retention-days: 7
 
       # The shipping shape is a self-contained single-file exe — prove on every PR that it
       # still publishes, not just that the solution compiles. (~2 min.)
