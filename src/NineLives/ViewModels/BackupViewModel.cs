@@ -236,9 +236,18 @@ public partial class BackupViewModel : ViewModelBase
     /// </summary>
     private int _listGeneration;
 
+    /// <summary>
+    /// The in-flight listing, so a test can wait for the one the change handler started rather
+    /// than sleeping and hoping. A timing guess is how a test passes here and fails on a loaded
+    /// runner.
+    /// </summary>
+    private Task _listTask = Task.CompletedTask;
+
+    internal Task WaitForDatabaseListForTests() => _listTask;
+
     /// <summary>Asks the chosen instance what it has, rather than making somebody type a name.</summary>
     [RelayCommand(CanExecute = nameof(CanLoadDatabases))]
-    private async Task LoadDatabasesAsync()
+    private async Task LoadDatabasesAsync(IReadOnlySet<string>? carryTicks = null)
     {
         if (Server == null)
         {
@@ -265,7 +274,12 @@ public partial class BackupViewModel : ViewModelBase
 
             Databases = new ObservableCollection<string>(names);
             DatabasePicks = new ObservableCollection<DatabasePick>(
-                names.Select(n => new DatabasePick(n, Invalidate)));
+                names.Select(n => new DatabasePick(n, Invalidate)
+                {
+                    // Only for databases the instance STILL has (#476). A tick restored against a
+                    // name that has gone would arm the run for something it cannot back up.
+                    IsPicked = carryTicks?.Contains(n) == true
+                }));
 
             // The certificates ride along with the database list - same instance, same moment.
             // Best effort: an instance that will not list them still backs up unencrypted.
@@ -314,8 +328,23 @@ public partial class BackupViewModel : ViewModelBase
         }
     }
 
-    partial void OnServerChanged(ServerConnection? value)
+    partial void OnServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
     {
+        // The SAME server arriving again is not somebody choosing a different one (#476). Refresh
+        // runs on every visit to this screen and re-assigns Server to whichever config entry
+        // matches by id - a different OBJECT every time, because the real store deserializes on
+        // each read - so this fired on arrival and silently emptied the ticks. On the screen for
+        // backing up forty databases before a patch window, where twelve of them are ticked.
+        //
+        // Carried across rather than skipped wholesale: the list still gets re-read, because a
+        // database created since the last visit should appear. Only the ticks survive, and only
+        // for databases that are still there.
+        var carryTicks = oldValue?.Id == newValue?.Id
+            ? DatabasePicks.Where(p => p.IsPicked).Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        var value = newValue;
+
         // The database list belonged to the previous instance. Leaving it up invites somebody to
         // back up a name that exists on both and mean the other one - and the multi-select
         // ticks and certificate list are the same hazard with the same fix (#278): stale ticks
@@ -336,7 +365,7 @@ public partial class BackupViewModel : ViewModelBase
         // new selection has just made irrelevant. It stays out of the way mid-run, where the list
         // is deliberately unfetchable (#281) and the backup must not be disturbed.
         if (value != null && CanLoadDatabases)
-            _ = LoadDatabasesAsync();
+            _listTask = LoadDatabasesAsync(carryTicks);
     }
 
     partial void OnSelectedDatabaseChanged(string? value) => Invalidate();
