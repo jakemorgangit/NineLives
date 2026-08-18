@@ -12,6 +12,26 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The Execute confirmation banner names the instance the restore will actually run against**
+  (#479). The red panel above Execute is the last thing read before an irreversible write, and its
+  own comment explains that two hostnames can differ by a single character. It reads
+  ConnectedServerName; the restore, like every server call on that screen, uses ConnectedServer -
+  and the two could diverge, because the name was only written after a connection probe, and
+  picking a different target skips the probe when something is already connected. Connect to SRV01
+  on the SQL Servers screen, change the target to SRV02 on the Restore screen, arm: the banner said
+  SRV01 and the restore ran against SRV02. The name now follows the server wherever it is set, and
+  disconnecting clears it rather than leaving the last one named.
+
+- **The Restore screen stops throwing your work away every time you visit it** (#478). The third
+  screen with the fault behind #457 and #476, and the one where it costs most. Navigation re-reads
+  containers and servers on every visit and re-points four selections at fresh objects, which the
+  screen read as four separate changes of mind: the loaded backups and the timeline were emptied,
+  Execute was disarmed, the missing-backup answer and its arrival comparison were discarded, and
+  the target instance was connected to again. Reading a container of 98 headers takes minutes, and
+  glancing at Browse Backups to check a file name emptied it silently. Worst on the gap panel,
+  where going away to run the copy script and coming back to press rescan is the whole workflow.
+  A genuine change of container, source or target still clears everything.
+
 - **The Back Up screen stops clearing your database ticks every time you visit it** (#476). The
   same fault as #457 on the Copy screen, on the screen where it costs more. Navigation re-reads the
   server list on every visit and re-assigns the chosen server to a fresh object, which the screen
