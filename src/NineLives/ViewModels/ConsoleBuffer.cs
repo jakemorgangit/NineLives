@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Blackcat.NineLives.Models;
@@ -55,9 +56,35 @@ public partial class ConsoleBuffer : ObservableObject
     /// Called with every message as it arrives, so the log file cannot drift from what was shown.
     /// </param>
     public ConsoleBuffer(Action<string>? alsoLog = null)
-        : this(alsoLog, Dispatcher.FromThread(Thread.CurrentThread))
+        : this(alsoLog, PumpingDispatcher())
     {
     }
+
+    /// <summary>
+    /// The dispatcher to marshal onto: the application's, which by definition has a message loop
+    /// running - and NOT merely whichever one the constructing thread happens to be carrying
+    /// (#497).
+    ///
+    /// Flush and Clear marshal with a BLOCKING Invoke, deliberately: callers flush in order to
+    /// read, and an async hop would hand them the text from before the flush. A blocking Invoke
+    /// onto a dispatcher whose thread is not pumping never returns.
+    ///
+    /// Dispatcher.FromThread(Thread.CurrentThread) could hand back exactly that. It does not
+    /// create one, but a plain pool thread acquires a dispatcher the moment anything constructs a
+    /// DispatcherObject on it, and thread pool threads are reused. So a console built on such a
+    /// thread captured a dispatcher with no loop behind it, and the first Flush that ran on a
+    /// DIFFERENT thread - which is every continuation after an await, since there is no
+    /// synchronization context to come back to - blocked for ever.
+    ///
+    /// That is what hung the CI test step for months (#495): intermittent, because it needed both
+    /// a thread carrying a stray dispatcher and a continuation landing elsewhere, and invisible
+    /// locally because more cores means less pool-thread reuse.
+    ///
+    /// In the app this changes nothing: these are built on the UI thread, where the application's
+    /// dispatcher IS the current thread's. It only stops the buffer adopting a dispatcher that
+    /// was never going to answer.
+    /// </summary>
+    private static Dispatcher? PumpingDispatcher() => Application.Current?.Dispatcher;
 
     /// <summary>
     /// Lets a test say outright whether there is a dispatcher, instead of depending on what its
@@ -199,6 +226,12 @@ public partial class ConsoleBuffer : ObservableObject
 
     /// <summary>Whether there is anything to batch on. Only the tests care.</summary>
     internal bool HasDispatcher => _dispatcher != null;
+
+    /// <summary>
+    /// Which dispatcher was adopted, so a test can say it is not the constructing thread's own
+    /// (#497) rather than only that flushing happened to return.
+    /// </summary>
+    internal Dispatcher? AdoptedDispatcher => _dispatcher;
 
     /// <summary>
     /// True while lines are waiting. Only the tests care - it is how "batched, not immediate" is

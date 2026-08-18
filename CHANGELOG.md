@@ -10,6 +10,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The execution console no longer waits for ever on a dispatcher nobody is pumping** (#497). It
+  adopted whichever dispatcher its constructing thread happened to be carrying, and flushes
+  marshal onto that with a blocking call - deliberately, because callers flush in order to read.
+  A thread that has acquired a dispatcher without ever running one is therefore a dead end: the
+  first flush from a different thread, which is every continuation after an await, waited on a
+  queue nothing was draining. It now uses the application's own dispatcher, which by definition
+  has a message loop, and in the app that is the same object it was already getting. This was the
+  cause of the intermittent CI hang (#495).
+
 ## [1.7.3] - 2026-08-18
 
 ### Fixed
