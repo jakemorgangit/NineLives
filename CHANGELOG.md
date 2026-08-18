@@ -10,6 +10,8 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-08-18
+
 ### Fixed
 
 - **The Execute confirmation banner names the instance the restore will actually run against**
