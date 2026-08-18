@@ -10,6 +10,8 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-08-18
+
 ### Fixed
 
 - **The copy script puts backups where this app can find them again** (#491). The missing-backups
