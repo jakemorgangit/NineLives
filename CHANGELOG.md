@@ -12,6 +12,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **"This container is N behind" no longer disappears when a set carries only a blob upload time**
+  (#489). The same fault as #487, in the figure above the list rather than in the list, and with a
+  worse outcome: that one could name the wrong backup, this hid the warning altogether. The gap was
+  measured from the newest held set's timestamp without asking where it came from - and a blob
+  reading is the wrong event (an upload finishes after its backup started, so it flatters the
+  container) and possibly the wrong clock (UTC against msdb's local dates, which west of UTC runs
+  hours AHEAD of local time). Both shrink the gap, and a non-positive result meant no banner at
+  all, so a container genuinely hours behind could report nothing. Only filename and backup-header
+  times measure it now; with neither available it quotes no figure rather than a wrong one, which
+  is the shape the panel already had.
+
 - **A backup is no longer reported as present because an unrelated blob finished uploading near
   it** (#487). The missing-backups comparison matches by LSN where both sides have one and falls
   back to type plus timestamp within five seconds - and that fallback is the ordinary path,
