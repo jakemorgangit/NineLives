@@ -12,6 +12,17 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **The copy script puts backups where this app can find them again** (#491). The missing-backups
+  feature is a loop - name what the container has not got, hand over a script to copy it in, rescan
+  and say whether it worked - and the script broke the loop. It uploaded each file under its bare
+  name, which puts it at the root of the container. Nothing about the upload fails, but the listing
+  reads a blob's database and server back out of its PATH, so a file at the root belongs to no
+  database, every per-database question steps over it, and the rescan reported "None of the N
+  arrived" after a copy in which every byte transferred. The destination is now worked out from the
+  container's own pattern and what msdb recorded about the backup, and written into the script per
+  file rather than left to Split-Path on the source machine. The file keeps its name; only where it
+  lands changes.
+
 - **"This container is N behind" no longer disappears when a set carries only a blob upload time**
   (#489). The same fault as #487, in the figure above the list rather than in the list, and with a
   worse outcome: that one could name the wrong backup, this hid the warning altogether. The gap was
