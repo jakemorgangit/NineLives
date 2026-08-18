@@ -819,7 +819,7 @@ public partial class BackupInventoryViewModel : ViewModelBase
     private async Task LoadFromHistoryAsync(BackupLocation location, CancellationToken ct)
     {
         var source = location.SourceServer!;
-        var history = await _sql.ReadBackupHistoryAsync(source, SelectedDatabaseName, ct);
+        var history = await _sql.ReadBackupHistoryAsync(source, SelectedDatabaseName, ct: ct);
 
         // The substitution is applied once, here, so the chain, the file list on screen, the script
         // and the readability check all name the same file. Applying it in some of those places and

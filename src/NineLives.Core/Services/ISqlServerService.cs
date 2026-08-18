@@ -1,4 +1,4 @@
-﻿using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -175,8 +175,14 @@ public interface ISqlServerService
     Task<List<ExposureRow>> GetBackupExposureAsync(
         ServerConnection server, CancellationToken ct = default);
 
+    /// <summary>
+    /// What msdb recorded, newest first, capped at <paramref name="limit"/> backup SETS - not
+    /// rows, and not files (#484). A caller that got exactly the limit back should assume there is
+    /// more and say so, rather than presenting the newest N as the whole history.
+    /// </summary>
     Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
-        ServerConnection server, string? databaseName = null, CancellationToken ct = default);
+        ServerConnection server, string? databaseName = null,
+        int limit = SqlServerService.BackupHistoryLimit, CancellationToken ct = default);
 
     /// <summary>Whether THIS instance can read a backup file, and why not (#149).</summary>
     Task<BackupFileCheck> CheckBackupFileAsync(

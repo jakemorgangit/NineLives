@@ -315,20 +315,24 @@ public class SqlServerService : ISqlServerService
         return rows;
     }
 
-    public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
-        ServerConnection server, string? databaseName = null, CancellationToken ct = default)
-    {
-        await using var conn = CreateConnection(server);
-        await conn.OpenAsync(ct);
-
-        await using var cmd = conn.CreateCommand();
-
-        // backupset holds one row per backup; backupmediafamily one per FILE it was written to, so
-        // a striped backup is several rows and family_sequence_number is the stripe order. Grouping
-        // in the app rather than with STRING_AGG keeps this readable on every supported version.
-        cmd.CommandText = $@"
-            SELECT TOP ({BackupHistoryLimit})
-                   bs.backup_set_id,
+    /// <summary>
+    /// The history read, kept as a named statement so a test can pin the one thing about it that
+    /// is easy to break by accident (#484): the cap belongs to the CTE, which selects backup SETS,
+    /// and NOT to the joined result, where it would count files and could cut a striped set in
+    /// half. Moving the TOP down into the join is a one-line edit that looks harmless.
+    /// </summary>
+    internal const string BackupHistoryQuery = @"
+            WITH recent AS (
+                SELECT TOP (@limit) bs.backup_set_id
+                FROM msdb.dbo.backupset AS bs
+                WHERE (@database IS NULL OR bs.database_name = @database)
+                  AND EXISTS (SELECT 1
+                              FROM msdb.dbo.backupmediafamily AS f
+                              WHERE f.media_set_id = bs.media_set_id
+                                AND f.device_type IN (2, 102))
+                ORDER BY bs.backup_start_date DESC, bs.backup_set_id DESC
+            )
+            SELECT bs.backup_set_id,
                    bs.database_name,
                    bs.type,
                    bs.backup_start_date,
@@ -343,13 +347,42 @@ public class SqlServerService : ISqlServerService
                    bmf.physical_device_name,
                    bmf.family_sequence_number
             FROM msdb.dbo.backupset AS bs
+            JOIN recent AS r
+              ON r.backup_set_id = bs.backup_set_id
             JOIN msdb.dbo.backupmediafamily AS bmf
               ON bmf.media_set_id = bs.media_set_id
-            WHERE (@database IS NULL OR bs.database_name = @database)
-              AND bmf.device_type IN (2, 102)   -- disk, including logical disk devices
+            WHERE bmf.device_type IN (2, 102)   -- disk, including logical disk devices
             ORDER BY bs.backup_start_date DESC, bs.backup_set_id DESC, bmf.family_sequence_number";
 
+    public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
+        ServerConnection server, string? databaseName = null,
+        int limit = BackupHistoryLimit, CancellationToken ct = default)
+    {
+        await using var conn = CreateConnection(server);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+
+        // backupset holds one row per backup; backupmediafamily one per FILE it was written to, so
+        // a striped backup is several rows and family_sequence_number is the stripe order. Grouping
+        // in the app rather than with STRING_AGG keeps this readable on every supported version.
+        //
+        // The cap picks the SETS first, in its own pass, and the families are joined afterwards
+        // (#484). It used to sit on the joined result, where it counted FILES - two things wrong
+        // with that, and the striping above is exactly what made both of them possible:
+        //
+        //   The unit was not the documented one. A four-way striped backup is four rows, so a cap
+        //   described and reasoned about as 500 backups returned 125 of them.
+        //
+        //   Worse, the cut could land INSIDE a set, and the oldest entry then came back holding
+        //   some of its stripes. That entry is indistinguishable from a genuine one-file backup:
+        //   a RESTORE built from it names two of four devices and fails, and the gap check reports
+        //   the stripes beyond the cut as files the container is missing when they are neither
+        //   missing nor beyond it.
+        cmd.CommandText = BackupHistoryQuery;
+
         cmd.Parameters.AddWithValue("@database", (object?)databaseName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@limit", limit);
 
         // One row per FILE, gathered back into one entry per backup set.
         var files = new Dictionary<int, List<(int Sequence, string Path)>>();
@@ -396,12 +429,30 @@ public class SqlServerService : ISqlServerService
     }
 
     /// <summary>
-    /// How far back to read. msdb on a busy instance holds years of history, and a restore is
-    /// almost always from the recent end of it - but the number is stated here rather than left
+    /// How many backup SETS to read. msdb on a busy instance holds years of history, and a restore
+    /// is almost always from the recent end of it - but the number is stated here rather than left
     /// implicit, because silently returning "the newest 500" while looking like "everything" is
     /// how somebody concludes a backup is missing when it is simply older than the cap.
     /// </summary>
     public const int BackupHistoryLimit = 500;
+
+    /// <summary>
+    /// What the missing-backups check asks for instead (#484).
+    ///
+    /// That check exists to answer "what has this container not got", and a cap makes it answer a
+    /// narrower question - what the container has not got, out of the newest N. Under-reporting is
+    /// the dangerous direction for it: it is read as an all-clear.
+    ///
+    /// 500 is nowhere near enough. A database on a one-minute log schedule takes 1,440 backups a
+    /// day, so 500 covers about eight hours - and this check was reported against a container more
+    /// than sixteen hours behind, where every log older than the cap was invisible to the very
+    /// feature whose job was to name it.
+    ///
+    /// Deliberately not unbounded. It is one round trip against a system table whose rows are
+    /// small, but msdb on an instance nobody prunes really does hold years, and the panel says
+    /// when it hit this so a truncated answer is never read as a complete one.
+    /// </summary>
+    public const int GapCheckHistoryLimit = 20_000;
 
     private static BackupHistoryEntry CloneWithFiles(BackupHistoryEntry entry, List<string> files) => new()
     {
