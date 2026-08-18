@@ -199,9 +199,23 @@ public partial class BackupGapViewModel : ViewModelBase
             var behind = BackupGapAnalyser.RecoveryTimeNotInContainer(history, held, database);
             BehindBy = behind is { } gap ? Humanise(gap) : string.Empty;
 
+            // Named, because otherwise this reads as a container that has lost everything (#487).
+            // A set whose only timestamp is the blob's upload time cannot confirm any backup, so
+            // every backup it might have accounted for is listed as missing - correctly, but the
+            // reason is invisible and the remedy is not obvious.
+            var unidentifiable = held.Count(h =>
+                string.Equals(h.DatabaseName, database, StringComparison.OrdinalIgnoreCase)
+                && h.IsTimestampApproximate);
+
             ComparedWhat =
                 $"{database} on {server.ServerName}: {history.Count} backup(s) in its history, " +
-                $"{held.Count} set(s) in {container?.Name ?? "this container"}.";
+                $"{held.Count} set(s) in {container?.Name ?? "this container"}." +
+                (unidentifiable > 0
+                    ? $" {unidentifiable} of those cannot be identified: the only time known for " +
+                      "them is when the blob was uploaded, not when the backup was taken, so they " +
+                      "vouch for nothing. Auditing this container reads each backup's own header " +
+                      "and settles it."
+                    : string.Empty);
 
             HasChecked = true;
 

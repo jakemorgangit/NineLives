@@ -12,6 +12,20 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
+- **A backup is no longer reported as present because an unrelated blob finished uploading near
+  it** (#487). The missing-backups comparison matches by LSN where both sides have one and falls
+  back to type plus timestamp within five seconds - and that fallback is the ordinary path,
+  because a container set only carries an LSN once it has been audited. The tolerance assumed the
+  timestamp came from the file name, where it is the backup's own start time. When it could not be
+  parsed the set falls back to the blob's upload time, which is a different event on a clock that
+  can be hours out of position, and the comparison never checked which it had. Failing to match
+  costs an unnecessary copy; matching the WRONG backup reported a log as present, left it out of
+  the copy script, and had the rescan confirm it arrived while the chain stayed broken - and at a
+  one-minute log cadence an arbitrary upload time lands within five seconds of some log's start
+  about one time in six. An approximate timestamp now vouches for nothing. Auditing a container
+  still settles it exactly, and the panel says how many sets could not be identified rather than
+  leaving a container that appears to have lost everything.
+
 - **The instance's backup history is read whole - no cap, anywhere** (#484, #486). Reported
   against a container more than sixteen hours behind, where the panel listed exactly 500 log
   backups covering about eight: a cap, presented as an answer. It reached further than that one
