@@ -662,6 +662,18 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- What changed since the last check (#451). The answer somebody has after
+                         running a copy script is "did it work", and a still-red panel listing five
+                         files looks the same whether eighteen arrived or none did. -->
+                    <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,8"
+                            Background="{DynamicResource SuccessPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource SuccessPanelBorderBrush}"
+                            BorderThickness="1"
+                            Visibility="{Binding Gap.HasArrivalReport, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding Gap.ArrivalReport}"
+                                   Style="{StaticResource BodyText}" TextWrapping="Wrap" />
+                    </Border>
+
                     <ItemsControl ItemsSource="{Binding Gap.Locations}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -738,6 +750,14 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+
+                    <Button Content="I have copied them - rescan and check again"
+                            Command="{Binding RescanAndCheckCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            HorizontalAlignment="Left"
+                            Padding="12,6" Margin="0,4,0,8"
+                            Visibility="{Binding Gap.HasGap, Converter={StaticResource BoolToVis}}"
+                            ToolTip="Re-reads the container, then asks the source the same question again. Both, because re-checking without re-reading compares against what this app last saw and reports everything as still missing." />
 
                     <TextBlock Text="{Binding Gap.ComparedWhat}"
                                Style="{StaticResource SecondaryText}"

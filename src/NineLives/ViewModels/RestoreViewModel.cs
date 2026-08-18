@@ -275,11 +275,20 @@ public partial class RestoreViewModel : ViewModelBase
     partial void OnTargetServersChanged(ObservableCollection<ServerConnection> value) =>
         OnPropertyChanged(nameof(HasNoTargetServers));
 
-    partial void OnSelectedTargetServerChanged(ServerConnection? value)
+    partial void OnSelectedTargetServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
     {
+        var value = newValue;
+
         Steps.Target.Report(value != null, value?.Name ?? string.Empty);
         if (value != null && !ReferenceEquals(_connectedServer, value))
             ConnectedServer = value;
+
+        // The SAME target arriving again is navigation, not a choice (#478). RefreshContainers
+        // runs on every visit to this screen and re-points this at an entry from a freshly loaded
+        // config - a different object each time, so the assignment always counts as a change - and
+        // reconnecting opened a connection to a production instance on every visit, with nothing
+        // on screen to say it was happening.
+        if (oldValue != null && oldValue.Id == newValue?.Id) return;
 
         // Picking a target here PROVES it, rather than only naming it (#420).
         //
@@ -290,8 +299,16 @@ public partial class RestoreViewModel : ViewModelBase
         // got every step ticked, a generated script, and "Connect to a SQL Server instance (SQL
         // Servers tab)" telling them to go elsewhere and do it again.
         if (value != null && !IsConnectedToServer)
-            _ = ConnectToTargetAsync(value);
+            _targetConnectTask = ConnectToTargetAsync(value);
     }
+
+    /// <summary>
+    /// The connection this handler started, so a test waits for it rather than guessing a delay.
+    /// A fixed delay is how a test passes here and fails on a loaded runner.
+    /// </summary>
+    private Task _targetConnectTask = Task.CompletedTask;
+
+    internal Task WaitForTargetConnectionForTests() => _targetConnectTask;
 
     /// <summary>
     /// What the target connection is doing, or why it did not happen (#420).
@@ -378,6 +395,19 @@ public partial class RestoreViewModel : ViewModelBase
         set
         {
             _connectedServer = value;
+
+            // The confirmation banner follows the server, not the last successful connection
+            // (#479). It binds ConnectedServerName, every server call on this screen - the restore
+            // included - uses ConnectedServer, and the two diverged: the name was written only
+            // after a connection probe, and picking a different target here skips the probe when
+            // the Servers screen has already connected, which is how most people arrive.
+            //
+            // Connect to SRV01 elsewhere, change the target here to SRV02, arm: the banner said
+            // SRV01 and the restore ran against SRV02. That is precisely the confusion the panel
+            // exists to prevent - its own comment gives blackcatsvr01 and blackcatsvr02 as the
+            // example - so naming the wrong instance there is worse than not naming one at all.
+            ConnectedServerName = value?.ServerName ?? string.Empty;
+
             Credential.Server = value;
             _ = Credential.RefreshAsync();
 
@@ -536,15 +566,27 @@ public partial class RestoreViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowMultipleContainers));
     }
 
-    partial void OnSelectedContainerChanged(BlobContainerConfig? value)
+    partial void OnSelectedContainerChanged(BlobContainerConfig? oldValue, BlobContainerConfig? newValue)
     {
+        var value = newValue;
+
         RefreshAdditionalContainers();
 
         // Everything on screen below this point came from the PREVIOUS container. Leaving it there
         // meant the credential panel and Create credential targeted the new container while the
         // script still restored from the old one's URLs - so Execute stayed armed and enabled, and
         // failed with Msg 3201 after WITH REPLACE had already dropped the target.
-        ClearLoadedBackups();
+        //
+        // But the SAME container arriving again is not that (#478). RefreshContainers runs on
+        // every visit to this screen and re-points this at an entry from a freshly loaded config,
+        // which is a different object each time, so the assignment always counted as a change.
+        // Reading a container of 98 headers takes minutes; glancing at Browse Backups to check a
+        // file name emptied the listing and the timeline and disarmed Execute, silently, leaving
+        // "Load Backups" as the only thing on screen.
+        //
+        // By id, not by name: the id is what survives the config's JSON round-trip, and two
+        // entries that differ by id are two containers however they are labelled.
+        if (oldValue?.Id != newValue?.Id) ClearLoadedBackups();
 
         _ = Credential.PointAtAsync(value);
     }
@@ -752,7 +794,15 @@ public partial class RestoreViewModel : ViewModelBase
     [ObservableProperty]
     private ServerConnection? _sourceServer;
 
-    partial void OnSourceServerChanged(ServerConnection? value) => ClearLoadedBackups();
+    /// <summary>
+    /// Same as the container above, and for the same reason (#478): navigation re-points this at
+    /// a fresh object from the config on every visit, and clearing on that emptied a shared-path
+    /// listing somebody had just waited for.
+    /// </summary>
+    partial void OnSourceServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
+    {
+        if (oldValue?.Id != newValue?.Id) ClearLoadedBackups();
+    }
 
     /// <summary>The path as the source wrote it, when the target reaches it by another name.</summary>
     [ObservableProperty]
@@ -2124,6 +2174,25 @@ public partial class RestoreViewModel : ViewModelBase
             Inventory.SelectedDatabaseName ?? string.Empty,
             SelectedContainer,
             Inventory.AllSets));
+
+    /// <summary>
+    /// Re-reads the container, then asks the same question again (#451).
+    ///
+    /// The other end of the copy script. It is run over on the source machine, and the person who
+    /// ran it comes back here wanting one thing: did it work. Answering that needs the container
+    /// listing to be re-read first - the check compares msdb against what THIS app last saw, so
+    /// re-checking without re-listing compares against a stale picture and reports everything as
+    /// still missing.
+    ///
+    /// Both steps in one press, because doing them separately is how somebody concludes the copy
+    /// failed when it was the listing that was out of date.
+    /// </summary>
+    [RelayCommand]
+    private async Task RescanAndCheckAsync()
+    {
+        await LoadBackupsAsync();
+        await CheckForMissingBackupsAsync();
+    }
 
     /// <summary>
     /// Writes the copy script for one location. On demand: most checks find one location, and

@@ -8,6 +8,55 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release notes on the [Releases page](https://github.com/jakemorgangit/NineLives/releases) go into
 more detail on the user-facing changes; this file is the short history.
 
+## [Unreleased]
+
+## [1.7.2] - 2026-08-18
+
+### Fixed
+
+- **The Execute confirmation banner names the instance the restore will actually run against**
+  (#479). The red panel above Execute is the last thing read before an irreversible write, and its
+  own comment explains that two hostnames can differ by a single character. It reads
+  ConnectedServerName; the restore, like every server call on that screen, uses ConnectedServer -
+  and the two could diverge, because the name was only written after a connection probe, and
+  picking a different target skips the probe when something is already connected. Connect to SRV01
+  on the SQL Servers screen, change the target to SRV02 on the Restore screen, arm: the banner said
+  SRV01 and the restore ran against SRV02. The name now follows the server wherever it is set, and
+  disconnecting clears it rather than leaving the last one named.
+
+- **The Restore screen stops throwing your work away every time you visit it** (#478). The third
+  screen with the fault behind #457 and #476, and the one where it costs most. Navigation re-reads
+  containers and servers on every visit and re-points four selections at fresh objects, which the
+  screen read as four separate changes of mind: the loaded backups and the timeline were emptied,
+  Execute was disarmed, the missing-backup answer and its arrival comparison were discarded, and
+  the target instance was connected to again. Reading a container of 98 headers takes minutes, and
+  glancing at Browse Backups to check a file name emptied it silently. Worst on the gap panel,
+  where going away to run the copy script and coming back to press rescan is the whole workflow.
+  A genuine change of container, source or target still clears everything.
+
+- **The Back Up screen stops clearing your database ticks every time you visit it** (#476). The
+  same fault as #457 on the Copy screen, on the screen where it costs more. Navigation re-reads the
+  server list on every visit and re-assigns the chosen server to a fresh object, which the screen
+  read as somebody picking a different one - so it emptied the multi-select ticks, the database
+  list and the certificate list, and opened a connection to the instance to re-read them. Ticking
+  twelve of forty databases before a patch window and glancing at another screen silently emptied
+  the lot. The list is still re-read, because a database created since the last visit should
+  appear; only the ticks survive, and only for databases the instance still has. Switching to a
+  genuinely different server still clears everything, which is correct and is why the clearing was
+  there.
+
+### Added
+
+- **After copying the missing backups in, one press confirms it worked** (#451). The copy script
+  is taken away and run on the machine that holds the files, and whoever ran it comes back with
+  one question: did it work. Re-running the check answered a different one - what is missing now -
+  and a still-red panel listing five files looks identical whether eighteen arrived or none did.
+  There is now a single button that re-reads the container and asks the source again, both in one
+  press because doing them separately is how somebody concludes the copy failed when it was the
+  listing that was stale. It reports what changed: all of them arrived, or three of five with two
+  still to come, or none. Backups the instance has taken *since* are counted separately, because
+  more work appearing is not the same as the copy having failed.
+
 ## [1.7.1] - 2026-08-17
 
 ### Added
