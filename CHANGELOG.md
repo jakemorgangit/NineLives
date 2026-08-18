@@ -10,6 +10,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Back Up screen stops clearing your database ticks every time you visit it** (#476). The
+  same fault as #457 on the Copy screen, on the screen where it costs more. Navigation re-reads the
+  server list on every visit and re-assigns the chosen server to a fresh object, which the screen
+  read as somebody picking a different one - so it emptied the multi-select ticks, the database
+  list and the certificate list, and opened a connection to the instance to re-read them. Ticking
+  twelve of forty databases before a patch window and glancing at another screen silently emptied
+  the lot. The list is still re-read, because a database created since the last visit should
+  appear; only the ticks survive, and only for databases the instance still has. Switching to a
+  genuinely different server still clears everything, which is correct and is why the clearing was
+  there.
+
 ### Added
 
 - **After copying the missing backups in, one press confirms it worked** (#451). The copy script
