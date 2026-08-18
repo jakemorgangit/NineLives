@@ -56,9 +56,17 @@ public partial class BackupGapViewModel : ViewModelBase
     [ObservableProperty]
     private ServerConnection? _sourceServer;
 
-    partial void OnSourceServerChanged(ServerConnection? value)
+    partial void OnSourceServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
     {
         CheckCommand.NotifyCanExecuteChanged();
+
+        // The SAME server arriving again is navigation re-reading the config, not a new selection
+        // (#478) - and going away is this panel's own workflow. It names the logs that never
+        // reached the container and hands over a script to copy them; somebody runs that on the
+        // source machine and comes back to press "rescan and check again". Coming back was what
+        // threw away the answer the second check compares against, so it reported everything as
+        // still missing however much had arrived.
+        if (oldValue?.Id == newValue?.Id) return;
 
         // A previous answer described a different server. Leaving it on screen under a new
         // selection is the stale-result problem, and this panel's whole job is to be believed -
