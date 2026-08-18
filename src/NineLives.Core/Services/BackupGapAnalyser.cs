@@ -219,8 +219,21 @@ public static class BackupGapAnalyser
             .DefaultIfEmpty(null)
             .Max();
 
+        // Only sets whose timestamp is a real backup time can measure this (#489), for the same
+        // reason they cannot vouch for a backup in IsHeld - and here the consequence is worse.
+        //
+        // A blob reading is the wrong EVENT: an upload finishes after its backup started, so it
+        // always makes the container look more current than it is. A raw one is also on the wrong
+        // CLOCK - UTC, against msdb's local dates - and west of UTC that reading runs AHEAD of
+        // local time by hours.
+        //
+        // Both shrink the gap, and this returns null when the difference is not positive. So one
+        // blob-stamped set landing after the newest recorded backup took the maximum, made the
+        // subtraction negative, and the banner did not appear at all - on a container genuinely
+        // hours behind. Nothing else on the panel says how far behind it is.
         var newestHeld = inContainer
             .Where(s => string.Equals(s.DatabaseName, database, StringComparison.OrdinalIgnoreCase))
+            .Where(s => !s.IsTimestampApproximate)
             .Select(s => (DateTime?)s.Timestamp)
             .DefaultIfEmpty(null)
             .Max();
