@@ -129,6 +129,24 @@ public static class BackupGapAnalyser
                 continue;
             }
 
+            // An approximate timestamp is not a backup time (#487). It is when the BLOB finished
+            // uploading, read off a clock that may not even be this server's - BackupSet's own
+            // comment says it "can sort it hours out of position" - so comparing it to msdb's
+            // start time with a five-second tolerance is comparing two different kinds of thing.
+            //
+            // Worse than merely failing to match: at a one-minute log cadence an upload time
+            // lands within five seconds of SOME log's start about one time in six, and a
+            // container holds hundreds. Whichever log it happened to land near was then reported
+            // as present, left out of the copy script, and confirmed as arrived by the rescan,
+            // while the chain stayed broken.
+            //
+            // So it does not vouch for anything. The backup is reported missing instead, which
+            // costs an unnecessary copy of a file that may already be there - and that is the
+            // bias this file states outright, because the other direction leaves somebody
+            // restoring to an hour earlier than they could have. Auditing the container settles
+            // it properly by giving the set an LSN.
+            if (set.IsTimestampApproximate) continue;
+
             if (Math.Abs((set.Timestamp - entry.StartedAt).TotalSeconds)
                 <= SameBackupWindow.TotalSeconds)
                 return true;
@@ -201,8 +219,21 @@ public static class BackupGapAnalyser
             .DefaultIfEmpty(null)
             .Max();
 
+        // Only sets whose timestamp is a real backup time can measure this (#489), for the same
+        // reason they cannot vouch for a backup in IsHeld - and here the consequence is worse.
+        //
+        // A blob reading is the wrong EVENT: an upload finishes after its backup started, so it
+        // always makes the container look more current than it is. A raw one is also on the wrong
+        // CLOCK - UTC, against msdb's local dates - and west of UTC that reading runs AHEAD of
+        // local time by hours.
+        //
+        // Both shrink the gap, and this returns null when the difference is not positive. So one
+        // blob-stamped set landing after the newest recorded backup took the maximum, made the
+        // subtraction negative, and the banner did not appear at all - on a container genuinely
+        // hours behind. Nothing else on the panel says how far behind it is.
         var newestHeld = inContainer
             .Where(s => string.Equals(s.DatabaseName, database, StringComparison.OrdinalIgnoreCase))
+            .Where(s => !s.IsTimestampApproximate)
             .Select(s => (DateTime?)s.Timestamp)
             .DefaultIfEmpty(null)
             .Max();

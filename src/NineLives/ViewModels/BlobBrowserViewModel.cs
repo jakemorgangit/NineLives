@@ -365,7 +365,7 @@ public partial class BlobBrowserViewModel : ViewModelBase
     private async Task LoadFromHistoryAsync(CancellationToken ct)
     {
         var source = SourceServer!;
-        var history = await _sqlService.ReadBackupHistoryAsync(source, null, ct);
+        var history = await _sqlService.ReadBackupHistoryAsync(source, null, ct: ct);
         ct.ThrowIfCancellationRequested();
         var sets = BackupHistoryInventory.ToSets(history, BackupPathMapping.None);
 

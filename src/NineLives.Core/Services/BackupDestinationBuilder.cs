@@ -65,6 +65,39 @@ public static class BackupDestinationBuilder
     }
 
     /// <summary>
+    /// Where a file belongs INSIDE the container, by the container's own pattern (#491).
+    ///
+    /// Split out of <see cref="ForContainer"/> because writing a new backup is not the only thing
+    /// that has to land in the right place. A backup that was taken to a local disk and is being
+    /// copied in afterwards keeps the name it already has - but it still has to arrive where the
+    /// listing looks, or the app cannot see it at all.
+    ///
+    /// The listing reads the database and server back OUT of this path: the pattern's tokens are
+    /// how a blob is attributed. A file dropped at the container root has no path to read, so it
+    /// belongs to no database, and every question asked per database steps straight over it.
+    /// </summary>
+    public static string PathFor(
+        BlobContainerConfig container,
+        string serverName,
+        string databaseName,
+        BackupType type,
+        string fileName)
+    {
+        var (host, instance) = ServerIdentity.Split(serverName);
+
+        var path = container.PathPattern
+            .Replace("{BackupType}", FolderFor(type), StringComparison.OrdinalIgnoreCase)
+            .Replace("{ServerName}", Sanitise(host), StringComparison.OrdinalIgnoreCase)
+            .Replace("{InstanceName}", Sanitise(instance), StringComparison.OrdinalIgnoreCase)
+            .Replace("{DatabaseName}", Sanitise(databaseName), StringComparison.OrdinalIgnoreCase)
+            .Replace("{FileName}", fileName, StringComparison.OrdinalIgnoreCase);
+
+        // A pattern with a token this app cannot fill leaves an empty segment behind, which would
+        // put the backup one folder shallower than the listing expects to find it.
+        return string.Join("/", path.Split('/', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    /// <summary>
     /// The blob URLs to write, in stripe order, laid out by the container's own pattern.
     /// </summary>
     public static List<string> ForContainer(
@@ -84,18 +117,7 @@ public static class BackupDestinationBuilder
             {
                 var name = FileName(databaseName, type, takenAt, stripes > 1 ? i : null, copyOnly);
 
-                var path = container.PathPattern
-                    .Replace("{BackupType}", FolderFor(type), StringComparison.OrdinalIgnoreCase)
-                    .Replace("{ServerName}", Sanitise(host), StringComparison.OrdinalIgnoreCase)
-                    .Replace("{InstanceName}", Sanitise(instance), StringComparison.OrdinalIgnoreCase)
-                    .Replace("{DatabaseName}", Sanitise(databaseName), StringComparison.OrdinalIgnoreCase)
-                    .Replace("{FileName}", name, StringComparison.OrdinalIgnoreCase);
-
-                // A pattern with a token this app cannot fill leaves an empty segment behind, which
-                // would put the backup one folder shallower than the listing expects to find it.
-                path = string.Join("/", path.Split('/', StringSplitOptions.RemoveEmptyEntries));
-
-                return $"{root}/{path}";
+                return $"{root}/{PathFor(container, serverName, databaseName, type, name)}";
             })
             .ToList();
     }

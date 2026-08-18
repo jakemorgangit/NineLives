@@ -10,6 +10,66 @@ more detail on the user-facing changes; this file is the short history.
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-08-18
+
+### Fixed
+
+- **The copy script puts backups where this app can find them again** (#491). The missing-backups
+  feature is a loop - name what the container has not got, hand over a script to copy it in, rescan
+  and say whether it worked - and the script broke the loop. It uploaded each file under its bare
+  name, which puts it at the root of the container. Nothing about the upload fails, but the listing
+  reads a blob's database and server back out of its PATH, so a file at the root belongs to no
+  database, every per-database question steps over it, and the rescan reported "None of the N
+  arrived" after a copy in which every byte transferred. The destination is now worked out from the
+  container's own pattern and what msdb recorded about the backup, and written into the script per
+  file rather than left to Split-Path on the source machine. The file keeps its name; only where it
+  lands changes.
+
+- **"This container is N behind" no longer disappears when a set carries only a blob upload time**
+  (#489). The same fault as #487, in the figure above the list rather than in the list, and with a
+  worse outcome: that one could name the wrong backup, this hid the warning altogether. The gap was
+  measured from the newest held set's timestamp without asking where it came from - and a blob
+  reading is the wrong event (an upload finishes after its backup started, so it flatters the
+  container) and possibly the wrong clock (UTC against msdb's local dates, which west of UTC runs
+  hours AHEAD of local time). Both shrink the gap, and a non-positive result meant no banner at
+  all, so a container genuinely hours behind could report nothing. Only filename and backup-header
+  times measure it now; with neither available it quotes no figure rather than a wrong one, which
+  is the shape the panel already had.
+
+- **A backup is no longer reported as present because an unrelated blob finished uploading near
+  it** (#487). The missing-backups comparison matches by LSN where both sides have one and falls
+  back to type plus timestamp within five seconds - and that fallback is the ordinary path,
+  because a container set only carries an LSN once it has been audited. The tolerance assumed the
+  timestamp came from the file name, where it is the backup's own start time. When it could not be
+  parsed the set falls back to the blob's upload time, which is a different event on a clock that
+  can be hours out of position, and the comparison never checked which it had. Failing to match
+  costs an unnecessary copy; matching the WRONG backup reported a log as present, left it out of
+  the copy script, and had the rescan confirm it arrived while the chain stayed broken - and at a
+  one-minute log cadence an arbitrary upload time lands within five seconds of some log's start
+  about one time in six. An approximate timestamp now vouches for nothing. Auditing a container
+  still settles it exactly, and the panel says how many sets could not be identified rather than
+  leaving a container that appears to have lost everything.
+
+- **The instance's backup history is read whole - no cap, anywhere** (#484, #486). Reported
+  against a container more than sixteen hours behind, where the panel listed exactly 500 log
+  backups covering about eight: a cap, presented as an answer. It reached further than that one
+  screen. Every caller was on the same default, including the restore inventory and the CLI's,
+  where 500 backup sets is about eight hours of a one-minute log schedule and a chain rolling
+  forward from yesterday's full would silently stop short. Two faults in how it capped, as well as
+  that it did: the limit sat on the joined result, where it counted backup FILES rather than
+  backups, so a striped setup got a quarter of what the number promised - and the cut could land
+  inside a backup set, leaving an entry holding only some of its stripes, which a RESTORE cannot
+  use and which the missing-backups check reported as files the container lacked. The read is now
+  uncapped; a caller can still ask for a limit, and none does. When one is asked for it selects
+  backup sets in their own pass with the files joined afterwards, so a striped backup always
+  arrives whole.
+
+- **"Check its history" is live as soon as an instance is chosen** (#483). The button read a
+  computed property that was never raised, so it kept the answer it was given while the dropdown
+  was still empty and stayed disabled beside a chosen instance - the only way to wake it was to
+  leave the Restore screen and come back, which rebuilds every binding from scratch. It also now
+  greys out while a check is running, so a second press cannot land on one already in flight.
+
 ## [1.7.2] - 2026-08-18
 
 ### Fixed

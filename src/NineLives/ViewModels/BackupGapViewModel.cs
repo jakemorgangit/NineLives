@@ -53,7 +53,12 @@ public partial class BackupGapViewModel : ViewModelBase
     /// <summary>The servers offered as the source. Filled by the screen that owns this.</summary>
     public ObservableCollection<ServerConnection> Servers { get; } = [];
 
+    /// <summary>
+    /// The instance to ask. Notifies CanCheck, because the button reads that rather than the
+    /// command (#483) - see the property itself.
+    /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCheck))]
     private ServerConnection? _sourceServer;
 
     partial void OnSourceServerChanged(ServerConnection? oldValue, ServerConnection? newValue)
@@ -81,6 +86,7 @@ public partial class BackupGapViewModel : ViewModelBase
     private bool _hasChecked;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCheck))]
     private bool _isChecking;
 
     /// <summary>How far behind the container is, in words, or empty when it is not behind.</summary>
@@ -110,6 +116,18 @@ public partial class BackupGapViewModel : ViewModelBase
     [ObservableProperty]
     private string _comparedWhat = string.Empty;
 
+    /// <summary>
+    /// Whether the check can run - and a property the BUTTON reads, not just the command (#483).
+    ///
+    /// The button binds IsEnabled to this as well as binding Command, and an explicit IsEnabled
+    /// wins over the command's own answer. So NotifyCanExecuteChanged, which this used to be the
+    /// only subject of, updated something nothing was looking at: choosing a source instance left
+    /// the button dead, and the only way to wake it was to leave the screen and come back, which
+    /// rebuilds the visual tree and re-reads every binding from scratch.
+    ///
+    /// Same lesson as #130. Asking the property in a test always gives the right answer; a control
+    /// caches what it was last told, so only a test watching PropertyChanged can see this.
+    /// </summary>
     public bool CanCheck => SourceServer != null && !IsChecking;
 
     /// <summary>
@@ -164,7 +182,7 @@ public partial class BackupGapViewModel : ViewModelBase
 
         try
         {
-            var history = await _sql.ReadBackupHistoryAsync(server, database, ct);
+            var history = await _sql.ReadBackupHistoryAsync(server, database, ct: ct);
 
             var locations = BackupGapAnalyser.Compare(history, held, database);
             foreach (var location in locations) Locations.Add(new MissingLocationRow(location));
@@ -181,9 +199,23 @@ public partial class BackupGapViewModel : ViewModelBase
             var behind = BackupGapAnalyser.RecoveryTimeNotInContainer(history, held, database);
             BehindBy = behind is { } gap ? Humanise(gap) : string.Empty;
 
+            // Named, because otherwise this reads as a container that has lost everything (#487).
+            // A set whose only timestamp is the blob's upload time cannot confirm any backup, so
+            // every backup it might have accounted for is listed as missing - correctly, but the
+            // reason is invisible and the remedy is not obvious.
+            var unidentifiable = held.Count(h =>
+                string.Equals(h.DatabaseName, database, StringComparison.OrdinalIgnoreCase)
+                && h.IsTimestampApproximate);
+
             ComparedWhat =
                 $"{database} on {server.ServerName}: {history.Count} backup(s) in its history, " +
-                $"{held.Count} set(s) in {container?.Name ?? "this container"}.";
+                $"{held.Count} set(s) in {container?.Name ?? "this container"}." +
+                (unidentifiable > 0
+                    ? $" {unidentifiable} of those cannot be identified: the only time known for " +
+                      "them is when the blob was uploaded, not when the backup was taken, so they " +
+                      "vouch for nothing. Auditing this container reads each backup's own header " +
+                      "and settles it."
+                    : string.Empty);
 
             HasChecked = true;
 
@@ -227,7 +259,7 @@ public partial class BackupGapViewModel : ViewModelBase
 
         try
         {
-            var history = await _sql.ReadBackupHistoryAsync(server, database, ct);
+            var history = await _sql.ReadBackupHistoryAsync(server, database, ct: ct);
             var locations = BackupGapAnalyser.LogsTakenAfter(history, database, after);
 
             foreach (var location in locations) Locations.Add(new MissingLocationRow(location));
@@ -314,10 +346,12 @@ public partial class BackupGapViewModel : ViewModelBase
         RaiseDerived();
     }
 
+
     private void RaiseDerived()
     {
         OnPropertyChanged(nameof(HasGap));
         OnPropertyChanged(nameof(FoundNothingMissing));
+        OnPropertyChanged(nameof(CanCheck));
         CheckCommand.NotifyCanExecuteChanged();
     }
 

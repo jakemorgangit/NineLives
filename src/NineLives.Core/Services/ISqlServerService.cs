@@ -1,4 +1,4 @@
-﻿using Blackcat.NineLives.Models;
+using Blackcat.NineLives.Models;
 
 namespace Blackcat.NineLives.Services;
 
@@ -175,8 +175,17 @@ public interface ISqlServerService
     Task<List<ExposureRow>> GetBackupExposureAsync(
         ServerConnection server, CancellationToken ct = default);
 
+    /// <summary>
+    /// What msdb recorded for a database, newest first, and by default ALL of it (#486).
+    ///
+    /// A cap is applied only when <paramref name="limit"/> is given, and then it counts backup
+    /// SETS - not rows, and not files, which are one per stripe. Nothing in the app passes one:
+    /// every caller feeds something a short answer quietly breaks, and a caller that did cap
+    /// should say so rather than presenting the newest N as the whole history.
+    /// </summary>
     Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
-        ServerConnection server, string? databaseName = null, CancellationToken ct = default);
+        ServerConnection server, string? databaseName = null,
+        int? limit = null, CancellationToken ct = default);
 
     /// <summary>Whether THIS instance can read a backup file, and why not (#149).</summary>
     Task<BackupFileCheck> CheckBackupFileAsync(

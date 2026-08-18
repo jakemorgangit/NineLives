@@ -90,15 +90,6 @@ public class BackupHistoryTests
         Assert.NotEqual(full.CheckpointLsn, strayDiff.DatabaseBackupLsn);
     }
 
-    /// <summary>
-    /// The cap is a number somebody can read, not a silent truncation. Returning "the newest 500"
-    /// while looking like "everything" is how a backup gets concluded missing when it is simply
-    /// older than the limit.
-    /// </summary>
-    [Fact]
-    public void TheHistoryLimitIsStatedRatherThanImplied()
-        => Assert.True(SqlServerService.BackupHistoryLimit > 0);
-
     // ── against a real instance ─────────────────────────────────────────────────
 
     /// <summary>
