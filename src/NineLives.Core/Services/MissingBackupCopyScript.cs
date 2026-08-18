@@ -66,34 +66,34 @@ public static class MissingBackupCopyScript
         sb.AppendLine("$azcopy = Get-Command azcopy -ErrorAction SilentlyContinue");
         sb.AppendLine();
 
-        AppendFileList(sb, location);
+        AppendFileList(sb, location, container);
 
         sb.AppendLine("$failed = @()");
         sb.AppendLine();
         sb.AppendLine("foreach ($file in $files) {");
-        sb.AppendLine("    if (-not (Test-Path -LiteralPath $file)) {");
-        sb.AppendLine("        Write-Warning \"Not on disk any more: $file\"");
-        sb.AppendLine("        $failed += $file");
+        sb.AppendLine("    if (-not (Test-Path -LiteralPath $file.Source)) {");
+        sb.AppendLine("        Write-Warning \"Not on disk any more: $($file.Source)\"");
+        sb.AppendLine("        $failed += $file.Source");
         sb.AppendLine("        continue");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    $name = Split-Path -Leaf $file");
+        sb.AppendLine("    $name = $file.Destination");
         sb.AppendLine("    Write-Host \"Copying $name...\"");
         sb.AppendLine();
         sb.AppendLine("    try {");
         sb.AppendLine("        if ($azcopy) {");
-        sb.AppendLine("            & azcopy copy $file \"$container/$name$Sas\" --overwrite=ifSourceNewer | Out-Null");
+        sb.AppendLine("            & azcopy copy $file.Source \"$container/$name$Sas\" --overwrite=ifSourceNewer | Out-Null");
         sb.AppendLine("            if ($LASTEXITCODE -ne 0) { throw \"azcopy exited $LASTEXITCODE\" }");
         sb.AppendLine("        }");
         sb.AppendLine("        else {");
         sb.AppendLine("            $ctx = New-AzStorageContext -BlobEndpoint ($container -replace '/[^/]+$', '') -SasToken $Sas");
         sb.AppendLine("            $containerName = Split-Path -Leaf $container");
-        sb.AppendLine("            Set-AzStorageBlobContent -File $file -Container $containerName -Blob $name -Context $ctx -Force | Out-Null");
+        sb.AppendLine("            Set-AzStorageBlobContent -File $file.Source -Container $containerName -Blob $name -Context $ctx -Force | Out-Null");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine("    catch {");
         sb.AppendLine("        Write-Warning \"Failed: $name - $_\"");
-        sb.AppendLine("        $failed += $file");
+        sb.AppendLine("        $failed += $file.Source");
         sb.AppendLine("    }");
         sb.AppendLine("}");
         sb.AppendLine();
@@ -129,24 +129,24 @@ public static class MissingBackupCopyScript
         sb.AppendLine($"$endpoint = 'https://{endpoint}'");
         sb.AppendLine();
 
-        AppendFileList(sb, location);
+        AppendFileList(sb, location, container);
 
         sb.AppendLine("$failed = @()");
         sb.AppendLine();
         sb.AppendLine("foreach ($file in $files) {");
-        sb.AppendLine("    if (-not (Test-Path -LiteralPath $file)) {");
-        sb.AppendLine("        Write-Warning \"Not on disk any more: $file\"");
-        sb.AppendLine("        $failed += $file");
+        sb.AppendLine("    if (-not (Test-Path -LiteralPath $file.Source)) {");
+        sb.AppendLine("        Write-Warning \"Not on disk any more: $($file.Source)\"");
+        sb.AppendLine("        $failed += $file.Source");
         sb.AppendLine("        continue");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    $name = Split-Path -Leaf $file");
+        sb.AppendLine("    $name = $file.Destination");
         sb.AppendLine("    Write-Host \"Copying $name...\"");
         sb.AppendLine();
-        sb.AppendLine("    & aws s3 cp $file \"s3://$bucket/$prefix$name\" --endpoint-url $endpoint");
+        sb.AppendLine("    & aws s3 cp $file.Source \"s3://$bucket/$prefix$name\" --endpoint-url $endpoint");
         sb.AppendLine("    if ($LASTEXITCODE -ne 0) {");
         sb.AppendLine("        Write-Warning \"Failed: $name\"");
-        sb.AppendLine("        $failed += $file");
+        sb.AppendLine("        $failed += $file.Source");
         sb.AppendLine("    }");
         sb.AppendLine("}");
         sb.AppendLine();
@@ -162,21 +162,54 @@ public static class MissingBackupCopyScript
     /// specific question (what is this chain missing), and copying anything else is both a
     /// surprise and, on a metered egress link, a bill.
     /// </summary>
-    private static void AppendFileList(StringBuilder sb, MissingLocation location)
+    private static void AppendFileList(
+        StringBuilder sb, MissingLocation location, BlobContainerConfig container)
     {
         sb.AppendLine("# Named individually, not a wildcard: only what this chain is actually missing.");
+        sb.AppendLine("#");
+        sb.AppendLine("# Each carries where it goes INSIDE the container, laid out by this container's");
+        sb.AppendLine("# own pattern. The listing reads the database and the server back out of that");
+        sb.AppendLine("# path, so a file dropped at the root belongs to no database and this app");
+        sb.AppendLine("# cannot see it - however successfully it uploaded.");
         sb.AppendLine("$files = @(");
 
-        var paths = location.Backups.SelectMany(b => b.Files).ToList();
-        for (int i = 0; i < paths.Count; i++)
+        var pairs = location.Backups
+            .SelectMany(b => b.Files.Select(f => (Source: f, Backup: b)))
+            .ToList();
+
+        for (int i = 0; i < pairs.Count; i++)
         {
-            var comma = i < paths.Count - 1 ? "," : "";
-            sb.AppendLine($"    '{paths[i].Replace("'", "''")}'{comma}");
+            var (source, backup) = pairs[i];
+            var entry = backup.Entry;
+
+            var destination = BackupDestinationBuilder.PathFor(
+                container,
+                entry.ServerName ?? string.Empty,
+                entry.DatabaseName,
+                entry.Type,
+                LeafOf(source));
+
+            var comma = i < pairs.Count - 1 ? "," : "";
+            sb.AppendLine(
+                $"    @{{ Source = '{Escape(source)}'; Destination = '{Escape(destination)}' }}{comma}");
         }
 
         sb.AppendLine(")");
         sb.AppendLine();
     }
+
+    /// <summary>
+    /// The file's own name, from a path the SOURCE machine wrote - so both separators, and never
+    /// Path.GetFileName, which answers for the filesystem this app happens to be running on.
+    /// </summary>
+    private static string LeafOf(string path)
+    {
+        var cut = path.LastIndexOfAny(['\\', '/']);
+        return cut < 0 ? path : path[(cut + 1)..];
+    }
+
+    /// <summary>A PowerShell single-quoted literal doubles its own quote and escapes nothing else.</summary>
+    private static string Escape(string value) => value.Replace("'", "''");
 
     private static void AppendEnding(StringBuilder sb)
     {
