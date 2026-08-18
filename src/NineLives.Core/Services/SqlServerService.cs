@@ -254,9 +254,9 @@ public class SqlServerService : ISqlServerService
     /// but the instance that took the backups knows exactly what it took, when, to which files and
     /// at which LSNs.
     ///
-    /// Ordered newest first, and capped, because msdb on a busy instance holds years of history and
-    /// a restore is almost always from the recent end of it. A cap is honest about what it returns -
-    /// see BackupHistoryLimit.
+    /// Ordered newest first, and no longer capped (#486). "The newest N" is indistinguishable on
+    /// screen from "all there is", and every caller turns this into something a short answer
+    /// quietly breaks - a restore chain, or the check that names what a container is missing.
     ///
     /// It reports what msdb SAYS. Whether those files still exist is a different question, asked
     /// separately and on the target, because msdb keeps history for backups whose files were
@@ -316,21 +316,31 @@ public class SqlServerService : ISqlServerService
     }
 
     /// <summary>
-    /// The history read, kept as a named statement so a test can pin the one thing about it that
-    /// is easy to break by accident (#484): the cap belongs to the CTE, which selects backup SETS,
-    /// and NOT to the joined result, where it would count files and could cut a striped set in
-    /// half. Moving the TOP down into the join is a one-line edit that looks harmless.
+    /// The history read. Uncapped unless a caller asks for a cap (#486).
+    ///
+    /// It used to take the newest N always, and every caller here feeds something that a short
+    /// answer quietly breaks - the restore chain, the CLI's inventory, and the check whose whole
+    /// job is naming backups that are missing. "The newest N" is not a safe default for any of
+    /// them: it is indistinguishable from "all there is", and the direction it is wrong in is the
+    /// one that reads as an all-clear.
+    ///
+    /// Two things about the shape are worth a test rather than a comment, because both are easy
+    /// to undo by accident. The cap - when there is one - belongs to the CTE, which selects backup
+    /// SETS. Moved down into the join it would count backupmediafamily rows, which are one per
+    /// FILE, so a four-way striped backup is four of them; that is where this started, with a
+    /// limit documented as 500 backups returning 125 of them and a cut that could land inside a
+    /// set, leaving an entry holding some of its stripes.
     /// </summary>
-    internal const string BackupHistoryQuery = @"
-            WITH recent AS (
-                SELECT TOP (@limit) bs.backup_set_id
+    internal static string BuildBackupHistoryQuery(bool capped) => $@"
+            WITH candidates AS (
+                SELECT {(capped ? "TOP (@limit)" : string.Empty)} bs.backup_set_id
                 FROM msdb.dbo.backupset AS bs
                 WHERE (@database IS NULL OR bs.database_name = @database)
                   AND EXISTS (SELECT 1
                               FROM msdb.dbo.backupmediafamily AS f
                               WHERE f.media_set_id = bs.media_set_id
                                 AND f.device_type IN (2, 102))
-                ORDER BY bs.backup_start_date DESC, bs.backup_set_id DESC
+                {(capped ? "ORDER BY bs.backup_start_date DESC, bs.backup_set_id DESC" : string.Empty)}
             )
             SELECT bs.backup_set_id,
                    bs.database_name,
@@ -347,8 +357,8 @@ public class SqlServerService : ISqlServerService
                    bmf.physical_device_name,
                    bmf.family_sequence_number
             FROM msdb.dbo.backupset AS bs
-            JOIN recent AS r
-              ON r.backup_set_id = bs.backup_set_id
+            JOIN candidates AS c
+              ON c.backup_set_id = bs.backup_set_id
             JOIN msdb.dbo.backupmediafamily AS bmf
               ON bmf.media_set_id = bs.media_set_id
             WHERE bmf.device_type IN (2, 102)   -- disk, including logical disk devices
@@ -356,7 +366,7 @@ public class SqlServerService : ISqlServerService
 
     public async Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null,
-        int limit = BackupHistoryLimit, CancellationToken ct = default)
+        int? limit = null, CancellationToken ct = default)
     {
         await using var conn = CreateConnection(server);
         await conn.OpenAsync(ct);
@@ -379,10 +389,10 @@ public class SqlServerService : ISqlServerService
         //   a RESTORE built from it names two of four devices and fails, and the gap check reports
         //   the stripes beyond the cut as files the container is missing when they are neither
         //   missing nor beyond it.
-        cmd.CommandText = BackupHistoryQuery;
+        cmd.CommandText = BuildBackupHistoryQuery(limit.HasValue);
 
         cmd.Parameters.AddWithValue("@database", (object?)databaseName ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@limit", limit);
+        if (limit.HasValue) cmd.Parameters.AddWithValue("@limit", limit.Value);
 
         // One row per FILE, gathered back into one entry per backup set.
         var files = new Dictionary<int, List<(int Sequence, string Path)>>();
@@ -427,32 +437,6 @@ public class SqlServerService : ISqlServerService
                 files[id].OrderBy(f => f.Sequence).Select(f => f.Path).ToList()))
             .ToList();
     }
-
-    /// <summary>
-    /// How many backup SETS to read. msdb on a busy instance holds years of history, and a restore
-    /// is almost always from the recent end of it - but the number is stated here rather than left
-    /// implicit, because silently returning "the newest 500" while looking like "everything" is
-    /// how somebody concludes a backup is missing when it is simply older than the cap.
-    /// </summary>
-    public const int BackupHistoryLimit = 500;
-
-    /// <summary>
-    /// What the missing-backups check asks for instead (#484).
-    ///
-    /// That check exists to answer "what has this container not got", and a cap makes it answer a
-    /// narrower question - what the container has not got, out of the newest N. Under-reporting is
-    /// the dangerous direction for it: it is read as an all-clear.
-    ///
-    /// 500 is nowhere near enough. A database on a one-minute log schedule takes 1,440 backups a
-    /// day, so 500 covers about eight hours - and this check was reported against a container more
-    /// than sixteen hours behind, where every log older than the cap was invisible to the very
-    /// feature whose job was to name it.
-    ///
-    /// Deliberately not unbounded. It is one round trip against a system table whose rows are
-    /// small, but msdb on an instance nobody prunes really does hold years, and the panel says
-    /// when it hit this so a truncated answer is never read as a complete one.
-    /// </summary>
-    public const int GapCheckHistoryLimit = 20_000;
 
     private static BackupHistoryEntry CloneWithFiles(BackupHistoryEntry entry, List<string> files) => new()
     {

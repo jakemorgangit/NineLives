@@ -182,8 +182,7 @@ public partial class BackupGapViewModel : ViewModelBase
 
         try
         {
-            var history = await _sql.ReadBackupHistoryAsync(
-                server, database, SqlServerService.GapCheckHistoryLimit, ct);
+            var history = await _sql.ReadBackupHistoryAsync(server, database, ct: ct);
 
             var locations = BackupGapAnalyser.Compare(history, held, database);
             foreach (var location in locations) Locations.Add(new MissingLocationRow(location));
@@ -203,8 +202,6 @@ public partial class BackupGapViewModel : ViewModelBase
             ComparedWhat =
                 $"{database} on {server.ServerName}: {history.Count} backup(s) in its history, " +
                 $"{held.Count} set(s) in {container?.Name ?? "this container"}.";
-
-            HistoryCapNote = CapNoteFor(history, SqlServerService.GapCheckHistoryLimit);
 
             HasChecked = true;
 
@@ -248,8 +245,7 @@ public partial class BackupGapViewModel : ViewModelBase
 
         try
         {
-            var history = await _sql.ReadBackupHistoryAsync(
-                server, database, SqlServerService.GapCheckHistoryLimit, ct);
+            var history = await _sql.ReadBackupHistoryAsync(server, database, ct: ct);
             var locations = BackupGapAnalyser.LogsTakenAfter(history, database, after);
 
             foreach (var location in locations) Locations.Add(new MissingLocationRow(location));
@@ -257,8 +253,6 @@ public partial class BackupGapViewModel : ViewModelBase
             ComparedWhat =
                 $"{database} on {server.ServerName}: log backups taken after " +
                 $"{after:yyyy-MM-dd HH:mm}.";
-
-            HistoryCapNote = CapNoteFor(history, SqlServerService.GapCheckHistoryLimit);
 
             HasChecked = true;
 
@@ -334,40 +328,10 @@ public partial class BackupGapViewModel : ViewModelBase
         ArrivalReport = string.Empty;
         BehindBy = string.Empty;
         ComparedWhat = string.Empty;
-        HistoryCapNote = string.Empty;
         HasChecked = false;
         RaiseDerived();
     }
 
-    /// <summary>
-    /// Said out loud when the instance had more history than was asked for (#484).
-    ///
-    /// This panel is read as "here is what the container is missing". If the read was capped, what
-    /// it actually shows is what the container is missing out of the newest N - and everything
-    /// older is absent from the list for a reason that has nothing to do with the container. An
-    /// under-report here is taken as an all-clear, which is the worst direction for it to be wrong
-    /// in, so the cap is stated rather than left to be inferred from a round number.
-    /// </summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasHistoryCapNote))]
-    private string _historyCapNote = string.Empty;
-
-    public bool HasHistoryCapNote => HistoryCapNote.Length > 0;
-
-    /// <summary>
-    /// Whether the read came back full, which means the instance has at least this much and
-    /// probably more. Exact rather than approximate: a history of exactly the cap is indeed
-    /// complete, and saying "there may be more" then is a small lie in the safe direction.
-    /// </summary>
-    private static string CapNoteFor(IReadOnlyList<BackupHistoryEntry> history, int limit)
-    {
-        if (history.Count < limit) return string.Empty;
-
-        var oldest = history.Min(h => h.StartedAt);
-        return $"Only the newest {limit:N0} backups this instance recorded were read, back to " +
-               $"{oldest:yyyy-MM-dd HH:mm}. It has more, and anything older than that was not " +
-               "compared - so this list may be short.";
-    }
 
     private void RaiseDerived()
     {

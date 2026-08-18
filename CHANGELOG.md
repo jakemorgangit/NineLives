@@ -12,16 +12,19 @@ more detail on the user-facing changes; this file is the short history.
 
 ### Fixed
 
-- **The missing-backups check reads far more history, and says when it still was not all of it**
-  (#484). Reported against a container more than sixteen hours behind, where the panel listed
-  exactly 500 log backups covering about eight - a cap, presented as an answer. Three faults: the
-  cap sat on the joined result, where it counted backup FILES rather than backups, so a striped
-  setup got a quarter of the history the number promised; the cut could land inside a backup set,
-  leaving an entry holding only some of its stripes, which a RESTORE cannot use and which this
-  check reported as missing files; and nothing said the read had been capped at all, in the one
-  feature where a short list is read as an all-clear. The cap now selects backup sets in their own
-  pass with the files joined afterwards, the check asks for a depth that suits its own question,
-  and a full read is called out with the date it reached back to.
+- **The instance's backup history is read whole - no cap, anywhere** (#484, #486). Reported
+  against a container more than sixteen hours behind, where the panel listed exactly 500 log
+  backups covering about eight: a cap, presented as an answer. It reached further than that one
+  screen. Every caller was on the same default, including the restore inventory and the CLI's,
+  where 500 backup sets is about eight hours of a one-minute log schedule and a chain rolling
+  forward from yesterday's full would silently stop short. Two faults in how it capped, as well as
+  that it did: the limit sat on the joined result, where it counted backup FILES rather than
+  backups, so a striped setup got a quarter of what the number promised - and the cut could land
+  inside a backup set, leaving an entry holding only some of its stripes, which a RESTORE cannot
+  use and which the missing-backups check reported as files the container lacked. The read is now
+  uncapped; a caller can still ask for a limit, and none does. When one is asked for it selects
+  backup sets in their own pass with the files joined afterwards, so a striped backup always
+  arrives whole.
 
 - **"Check its history" is live as soon as an instance is chosen** (#483). The button read a
   computed property that was never raised, so it kept the answer it was given while the dropdown

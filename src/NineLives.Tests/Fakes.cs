@@ -811,14 +811,20 @@ public sealed class FakeSqlServerService : ISqlServerService
     /// rights on msdb, which is the ordinary reason a source refuses this (#451).</summary>
     public Exception? BackupHistoryThrows { get; set; }
 
-    /// <summary>The limit the last caller asked for, so a test can prove which one it was (#484).</summary>
+    /// <summary>
+    /// The limit the last caller asked for - null when it asked for everything, which is what
+    /// every caller in the app does (#486). A test can prove it rather than assuming.
+    /// </summary>
     public int? LastHistoryLimit { get; private set; }
+
+    public bool LastHistoryReadWasCapped { get; private set; }
 
     public Task<List<BackupHistoryEntry>> ReadBackupHistoryAsync(
         ServerConnection server, string? databaseName = null,
-        int limit = SqlServerService.BackupHistoryLimit, CancellationToken ct = default)
+        int? limit = null, CancellationToken ct = default)
     {
         LastHistoryLimit = limit;
+        LastHistoryReadWasCapped = limit.HasValue;
 
         if (BackupHistoryThrows != null)
             return Task.FromException<List<BackupHistoryEntry>>(BackupHistoryThrows);
@@ -829,10 +835,11 @@ public sealed class FakeSqlServerService : ISqlServerService
 
         // Newest first and capped, as the real one is - so a test can play an instance holding
         // more history than the caller asked for, which is the case the cap exists for.
-        return Task.FromResult(matching
-            .OrderByDescending(h => h.StartedAt)
-            .Take(limit)
-            .ToList());
+        var newestFirst = matching.OrderByDescending(h => h.StartedAt);
+
+        return Task.FromResult(limit.HasValue
+            ? newestFirst.Take(limit.Value).ToList()
+            : newestFirst.ToList());
     }
 
     /// <summary>Set to make the target unreachable rather than merely unhelpful.</summary>

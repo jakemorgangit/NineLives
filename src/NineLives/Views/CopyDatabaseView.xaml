@@ -471,18 +471,6 @@
                                        TextWrapping="Wrap" Margin="0,0,0,8"
                                        Visibility="{Binding Gap.StatusMessage, Converter={StaticResource NullToVis}}" />
 
-                            <!-- The cap, said out loud (#484). Same reason as on the Restore
-                                 screen: a capped read makes this list shorter for a reason that
-                                 has nothing to do with what the source actually took. -->
-                            <Border CornerRadius="4" Padding="10,8" Margin="0,0,0,8"
-                                    Background="{DynamicResource WarningPanelBackgroundBrush}"
-                                    BorderBrush="{DynamicResource WarningPanelBorderBrush}"
-                                    BorderThickness="1"
-                                    Visibility="{Binding Gap.HasHistoryCapNote, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding Gap.HistoryCapNote}"
-                                           Style="{StaticResource BodyText}" TextWrapping="Wrap" />
-                            </Border>
-
                             <ItemsControl ItemsSource="{Binding Gap.Locations}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
