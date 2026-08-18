@@ -60,7 +60,7 @@ public class ConsoleNeverWaitsOnADeadDispatcherTests
     /// on a queue nothing is draining. Without the fix this never comes back.
     /// </summary>
     [Fact]
-    public void AFlushFromAnotherThreadDoesNotWaitForEver()
+    public async Task AFlushFromAnotherThreadDoesNotWaitForEver()
     {
         ConsoleBuffer? buffer = null;
 
@@ -81,7 +81,11 @@ public class ConsoleNeverWaitsOnADeadDispatcherTests
             return buffer.Text;
         });
 
-        Assert.True(flushed.Wait(TimeSpan.FromSeconds(10)), "Flush never returned");
-        Assert.Contains("something happened", flushed.Result);
+        // Raced against a clock rather than waited on, because a test that BLOCKS on the thing it
+        // is proving does not block would hang exactly as the product did.
+        var finished = await Task.WhenAny(flushed, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.Same(flushed, finished);
+        Assert.Contains("something happened", await flushed);
     }
 }
