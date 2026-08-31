@@ -24,7 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.2" />
     <!-- ObservableObject on a handful of models. The MVVM toolkit has no UI-framework
          dependency of its own, so it does not compromise the no-WPF rule above. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
