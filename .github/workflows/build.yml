@@ -120,7 +120,7 @@ jobs:
       # running when the clock ran out, which is the whole point of the exercise.
       - name: Collect hang evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hang-dump-${{ github.run_id }}
           path: |
@@ -151,7 +151,7 @@ jobs:
       # smoke publish above already proved the shape, and fork PRs shouldn't mint artifacts.
       - name: Upload build artifact
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: NineLives-main-${{ github.sha }}
           path: publish/NineLives.exe
